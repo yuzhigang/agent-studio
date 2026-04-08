@@ -1,0 +1,283 @@
+{
+    "metadata": {
+        "version": "1.0",
+        "name": "ladle",
+        "title": "钢包智能体",
+        "tags": [
+            "logistics",
+            "steelmaking"
+        ],
+        "group": "logistics",
+        "description": "钢包智能体，负责盛放和运输钢水"
+    },
+    "attributes": {
+        "type": "object",
+        "properties": {
+            "capacity": {
+                "type": "number",
+                "title": "容量",
+                "description": "ton",
+                "x-unit": "ton",
+                "default": 200.0,
+                "minimum": 0,
+                "maximum": 500
+            },
+            "max_temperature": {
+                "type": "number",
+                "title": "最高温度",
+                "description": "℃",
+                "x-unit": "℃",
+                "default": 1800.0,
+                "minimum": 0,
+                "maximum": 2000
+            },
+            "insulation_duration": {
+                "type": "number",
+                "title": "保温时间",
+                "description": "min",
+                "x-unit": "min",
+                "default": 120.0,
+                "minimum": 0,
+                "maximum": 300
+            }
+        }
+    },
+    "variables": {
+        "type": "object",
+        "properties": {
+            "steel_amount": {
+                "type": "number",
+                "title": "钢水量",
+                "description": "ton",
+                "x-unit": "ton",
+                "default": 0.0,
+                "minimum": 0,
+                "maximum": 300
+            },
+            "temperature": {
+                "type": "number",
+                "title": "钢水温度",
+                "description": "℃",
+                "x-unit": "℃",
+                "default": 25.0,
+                "minimum": -50,
+                "maximum": 2000
+            },
+            "carbon_content": {
+                "type": "number",
+                "title": "碳含量",
+                "description": "%",
+                "x-unit": "%",
+                "default": 0.0,
+                "minimum": 0,
+                "maximum": 2.0
+            },
+            "steel_grade": {
+                "type": "string",
+                "title": "钢种",
+                "default": ""
+            },
+            "current_location": {
+                "type": "string",
+                "title": "当前位置",
+                "default": "station"
+            },
+            "status": {
+                "type": "string",
+                "title": "状态",
+                "default": "idle"
+            }
+        }
+    },
+    "functions": {
+        "calculate_load": {
+            "name": "calculate_load",
+            "type": "script",
+            "script_engine": "python",
+            "script": "requested = min(args.weight, this.attributes.capacity - this.variables.steel_amount)\nactual = requested  # 假设请求的量都能装载\nthis.variables.steel_amount += actual\ncapacity_remaining = this.attributes.capacity - this.variables.steel_amount\nprint(f'计算装载量: 请求 {requested} 吨, 实际装载 {actual} 吨, 剩余容量 {capacity_remaining} 吨')\nreturn {'requested': requested, 'actual': actual, 'capacity_remaining': capacity_remaining}",
+            "description": "计算装载量2",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "weight": {
+                        "type": "number"
+                    }
+                },
+                "required": [
+                    "weight"
+                ]
+            },
+            "returns": {
+                "type": "object",
+                "properties": {
+                    "requested": {
+                        "type": "number"
+                    },
+                    "actual": {
+                        "type": "number"
+                    },
+                    "capacity_remaining": {
+                        "type": "number"
+                    }
+                }
+            }
+        }
+    },
+    "services": {
+        "pour": {
+            "name": "pour",
+            "description": "倾倒钢水",
+            "type": "script",
+            "script_engine": "python",
+            "script": "if this.variables.steel_amount > 0:\n    print(f'钢包 {this.id} 倾倒了 {this.variables.steel_amount} 吨钢水')\n    this.variables.steel_amount = 0\n    return {'success': True, 'message': '倾倒成功', 'location': this.variables.current_location}\nelse:\n    print(f'钢包 {this.id} 没有钢水可供倾倒')\n    return {'success': False, 'message': '没有钢水可供倾倒', 'location': this.variables.current_location}",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            },
+            "returns": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "message": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    },
+    "states": {
+        "empty": {
+            "name": "empty",
+            "title": "空罐",
+            "group": "load_state",
+            "initialState": true,
+            "actions": {
+                "before_enter": [
+                    {
+                        "type": "run_script",
+                        "delay": 0,
+                        "script_engine": "python",
+                        "script": "this.variables.hot_metal_amount = 0\nthis.variables.temperature = 25\nthis.variables.status = 'empty'\nprint(f'铁水包 {this.id} 进入空罐状态')"
+                    }
+                ],
+                "before_exit": [
+                    {
+                        "type": "trigger_event",
+                        "name": "ladle_status_changed",
+                        "payload": {
+                            "ladle_id": "this.id",
+                            "status": "empty",
+                            "amount": "this.variables.hot_metal_amount"
+                        }
+                    }
+                ]
+            }
+        }
+    },
+    "transitions": {
+        "empty_to_receiving": {
+            "from": "empty",
+            "to": "receiving",
+            "trigger": {
+                "type": "event",
+                "name": "begin_load"
+            },
+            "action": {
+                "type": "run_script",
+                "script_engine": "python",
+                "script": "print(f'钢包 {this.id} 收到开始装载的指令，来源: {payload.source}')"
+            }
+        },
+        "receiving_to_full": {
+            "from": "receiving",
+            "to": "full",
+            "trigger": {
+                "type": "condition",
+                "condition": "this.variables.hot_metal_amount >= this.attributes.capacity"
+            },
+            "action": {
+                "type": "trigger_event",
+                "name": "ladle_loaded",
+                "payload": {
+                    "ladleId": "this.id",
+                    "amount": "this.variables.hot_metal_amount"
+                }
+            }
+        },
+        "full_to_pouring": {
+            "from": "full;receiving",
+            "to": "pouring",
+            "priority": 1,
+            "trigger": {
+                "type": "event",
+                "name": "begin_pour"
+            }
+        },
+        "pouring_to_empty": {
+            "from": "*",
+            "to": "empty",
+            "priority": 1,
+            "trigger": {
+                "type": "condition",
+                "condition": "this.variables.hot_metal_amount <= 0"
+            }
+        }
+    },
+    "subscriptions": {
+        "go_to_converter": {
+            "condition": "payload.converterId != null",
+            "action": {
+                "type": "run_script",
+                "script_engine": "python",
+                "script": "print(f'钢包 {this.id} 收到去转炉的指令，目标转炉ID: {payload.converterId}')"
+            }
+        }
+    },
+    "events": {
+        "ladle_ready_to_cast": {
+            "description": "钢包准备就绪",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "ladleId": {
+                        "type": "string"
+                    },
+                    "steelAmount": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
+        "ladle_moved": {
+            "description": "钢包位置变化",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "ladleId": {
+                        "type": "string"
+                    },
+                    "from": {
+                        "type": "string"
+                    },
+                    "to": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    },
+    "schedules": {
+        "check_temperature": {
+            "name": "check_temperature",
+            "description": "定期检查钢水温度",
+            "cron": "*/5 * * * *",
+            "action": {
+                "type": "run_script",
+                "script_engine": "python",
+                "script": "print(f'钢包 {this.id} 定期检查温度，目前温度: {this.variables.temperature} ℃')"
+            }
+        }
+    }
+}
