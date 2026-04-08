@@ -1,0 +1,237 @@
+{
+    "$schema": "https://agent-studio.io/schema/v1",
+    "id": "ladle_001",
+    "metadata": {
+        "name": "ladle",
+        "title": "1号钢包"
+    },
+    "attributes": {
+        "capacity": 200,
+        "maxTemperature": 1800,
+        "insulationDuration": 120,
+        "refractoryLife": 100
+    },
+    "variables": {
+        "steelAmount": {
+            "value": 150,
+            "bind": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Weight",
+                "selector": "$.value",
+                "transform": "value * 0.001"
+            }
+        },
+        "temperature": {
+            "value": 1650,
+            "bind": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Temp",
+                "selector": "$.temperature",
+                "transform": "Math.round(value)"
+            }
+        },
+        "carbonContent": {
+            "value": 0.15,
+            "bind": {
+                "source": "mes_system",
+                "path": "/ladles/001/analysis",
+                "selector": "$.chemical.carbon.percent",
+                "transform": "parseFloat(value.toFixed(3))"
+            }
+        },
+        "steelGrade": {
+            "value": "Q235B",
+            "bind": {
+                "source": "mes_system",
+                "path": "/ladles/001/grade",
+                "selector": "$.grade.name",
+                "transform": "value.toUpperCase()"
+            }
+        },
+        "currentLocation": {
+            "value": "converter_1",
+            "bind": {
+                "source": "factory_mqtt",
+                "topic": "position/ladle/001",
+                "selector": "$.position.zone",
+                "transform": "value.toLowerCase().replace(/\\s/g, '_')"
+            }
+        },
+        "locationX": {
+            "value": 1250.5,
+            "bind": {
+                "source": "factory_mqtt",
+                "topic": "position/ladle/001",
+                "selector": "$.position.x",
+                "transform": "value / 1000"
+            }
+        },
+        "locationY": {
+            "value": 3680.0,
+            "bind": {
+                "source": "factory_mqtt",
+                "topic": "position/ladle/001",
+                "selector": "$.position.y",
+                "transform": "value / 1000"
+            }
+        },
+        "status": {
+            "value": "full",
+            "bind": {
+                "source": "factory_mqtt",
+                "topic": "status/ladle/001",
+                "selector": "$.state.current",
+                "transform": "value"
+            }
+        },
+        "usageCount": {
+            "value": 45,
+            "bind": {
+                "source": "mes_system",
+                "path": "/ladles/001/maintenance",
+                "selector": "$.cycles.completed",
+                "transform": "parseInt(value)"
+            }
+        },
+        "lastMaintenanceTime": {
+            "value": "2025-03-15T08:30:00Z",
+            "bind": {
+                "source": "mes_system",
+                "path": "/ladles/001/maintenance",
+                "selector": "$.lastMaintenance.timestamp",
+                "transform": "new Date(value).toISOString()"
+            }
+        },
+        "tiltAngle": {
+            "value": 0,
+            "bind": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Tilt.Angle",
+                "selector": "$.angle.degrees",
+                "transform": "Math.max(-90, Math.min(90, value))"
+            }
+        },
+        "isLidClosed": {
+            "value": true,
+            "bind": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Lid.Status",
+                "selector": "$.sensors.lidSwitch",
+                "transform": "value === 1 || value === true"
+            }
+        }
+    },
+    "extensions": {
+        "refractoryThickness": {
+            "label": "钢包衬里厚度",
+            "unit": "mm",
+            "description": "钢包衬里的当前厚度，单位为毫米",
+            "value": 180,
+            "bind": {
+                "source": "production_db",
+                "sql": "SELECT thickness_mm FROM maintenance_measurements WHERE ladle_id = '001' AND measurement_type = 'refractory' ORDER BY measured_at DESC LIMIT 1",
+                "selector": "$.thickness_mm",
+                "transform": "parseFloat(value)"
+            }
+        },
+        "vibrationLevel": {
+            "label": "振动等级",
+            "unit": "mm/s",
+            "description": "钢包外壳振动监测值",
+            "value": 2.5,
+            "bind": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Vibration",
+                "selector": "$.value"
+            }
+        },
+        "coolingWaterFlow": {
+            "label": "冷却水流量",
+            "unit": "L/min",
+            "description": "钢包冷却系统水流量",
+            "value": 120,
+            "bind": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Cooling.Flow",
+                "selector": "$.flowRate"
+            }
+        },
+        "manufacturer": {
+            "label": "制造商",
+            "description": "钢包设备制造商",
+            "value": "宝钢"
+        },
+        "purchaseDate": {
+            "label": "采购日期",
+            "description": "设备采购入库日期",
+            "value": "2020-03-15"
+        },
+        "warrantyYears": {
+            "label": "质保年限",
+            "unit": "年",
+            "description": "设备质保期限",
+            "value": 10
+        },
+        "responsiblePerson": {
+            "label": "负责人",
+            "description": "设备责任人",
+            "value": "王工"
+        },
+        "maintenanceVendor": {
+            "label": "维护厂商",
+            "description": "耐材维护服务商",
+            "value": "某某耐材公司"
+        },
+        "shiftId": {
+            "label": "当前班次",
+            "description": "当前生产班次编号",
+            "value": "A-20250409-1",
+            "bind": {
+                "source": "production_db",
+                "sql": "SELECT shift_id FROM shift_records WHERE ladle_id = '001' AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+                "selector": "$.shift_id",
+                "polling": 60000
+            }
+        },
+        "operatorName": {
+            "label": "操作员",
+            "description": "当前班次操作员姓名",
+            "value": "张三",
+            "bind": {
+                "source": "production_db",
+                "sql": "SELECT u.name as operator_name FROM shift_records sr JOIN users u ON sr.operator_id = u.id WHERE sr.ladle_id = '001' AND sr.status = 'active' ORDER BY sr.created_at DESC LIMIT 1",
+                "selector": "$.operator_name",
+                "polling": 60000
+            }
+        },
+        "plannedCastingTime": {
+            "label": "计划浇铸时间",
+            "description": "计划开始浇铸的时间",
+            "value": "2025-04-09T14:00:00Z",
+            "bind": {
+                "source": "production_db",
+                "sql": "SELECT planned_start_time FROM casting_schedule WHERE ladle_id = '001' AND status = 'scheduled' ORDER BY planned_start_time ASC LIMIT 1",
+                "selector": "$.planned_start_time",
+                "transform": "new Date(value).toISOString()"
+            }
+        },
+        "lastInspectionScore": {
+            "label": "上次检验评分",
+            "description": "最近一次设备检验的综合评分",
+            "value": 95
+        },
+        "nextInspectionDate": {
+            "label": "下次检验日期",
+            "description": "计划下次检验的日期",
+            "value": "2025-06-01"
+        },
+        "specialNotes": {
+            "label": "特殊备注",
+            "description": "设备特殊注意事项",
+            "value": "上次维护发现轻微裂纹，需重点关注"
+        }
+    },
+    "state": {
+        "current": "full"
+    }
+}

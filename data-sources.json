@@ -1,0 +1,54 @@
+{
+    "$schema": "https://agent-studio.io/schema/data-sources/v1",
+    "version": "1.0",
+    "sources": {
+        "plc_line_a": {
+            "type": "opcua",
+            "endpoint": "opc.tcp://192.168.1.100:4840",
+            "namespace": "urn:siemens:plc:line_a",
+            "auth": {
+                "type": "certificate",
+                "certPath": "/certs/plc_line_a.pem"
+            }
+        },
+        "factory_mqtt": {
+            "type": "mqtt",
+            "broker": "mqtt://iot.steelplant.com:1883",
+            "clientId": "agent_studio_bridge",
+            "auth": {
+                "type": "username",
+                "username": "agent",
+                "passwordRef": "env.MQTT_PASSWORD"
+            }
+        },
+        "mes_system": {
+            "type": "http",
+            "baseUrl": "https://mes.steelplant.com/api/v1",
+            "auth": {
+                "type": "bearer",
+                "tokenRef": "vault.mes.token"
+            }
+        },
+        "production_db": {
+            "type": "postgresql",
+            "host": "pg.steelplant.com",
+            "port": 5432,
+            "database": "production",
+            "schema": "public",
+            "auth": {
+                "type": "password",
+                "username": "agent_reader",
+                "passwordRef": "env.PG_AGENT_PASSWORD"
+            },
+            "pool": {
+                "min": 2,
+                "max": 10,
+                "idleTimeout": 30000
+            },
+            "ssl": {
+                "enabled": true,
+                "caPath": "/certs/pg-ca.pem"
+            }
+        }
+    }
+}
