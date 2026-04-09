@@ -31,8 +31,18 @@ https://api.agent-studio.io/v1
 | DELETE | `/models/{modelId}` | Delete model |
 
 **Schemas**
-- `Model` maps `model.json#metadata` + `filePath`, `groupName`, `isActive`.
-- `ModelInput` omits system fields (`createdAt`, `updatedAt`).
+- `Model` maps `model.json#metadata` + `filePath`, `groupName`, `isActive`, **并内嵌 `schema` 字段**（完整的模型定义 JSON）。
+- `ModelInput` 结构为 `{ "id", "schema" }`。`schema` 就是完整的 `model.json` 对象。
+
+**校验规则（服务端执行）**
+1. `schema` 必须是合法 JSON，且包含 `$schema` 字段，值为 `https://agent-studio.io/schema/v1`。
+2. 必填项校验：`metadata.name`（同时作为 `modelId`）、`metadata.title`、`attributes`、`states`、`transitions`。
+3. `metadata.name` 必须与 URL/表里的 `id` 一致（创建/更新时）。
+4. 校验失败返回 `400` + `INVALID_MODEL_SCHEMA`，`details` 中列出具体字段错误。
+
+**说明**
+- 前端通过 JSON 编辑器直接编辑并提交 `schema` 对象。
+- 后端校验通过后，将 `schema` 持久化为文件（如 `/models/{id}.json`），并提取元数据写入 `models` 表。
 
 ### 2. Instances
 | Method | Path | Description |
