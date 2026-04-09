@@ -1,19 +1,43 @@
 {
     "$schema": "https://agent-studio.io/schema/v1",
     "id": "ladle_001",
+    "state": "empty",
     "metadata": {
         "name": "ladle",
-        "title": "1号钢包"
+        "title": "1号钢包",
+        "description": "这是一个钢包的数字孪生，包含了钢包的基本属性、实时变量、派生属性等信息，可以用于监控和分析钢包的状态和性能。",
+        "tags": [
+            "steelmaking",
+            "ladle"
+        ],
+        "creator": "张三",
+        "createdAt": "2024-06-01T10:00:00Z",
+        "updatedAt": "2024-06-01T10:00:00Z",
+        "kind": "ladle",
+        "version": "1.0.0"
     },
     "attributes": {
-        "capacity": 200,
-        "maxTemperature": 1800,
-        "insulationDuration": 120,
-        "refractoryLife": 100
+        "capacity": {
+            "title": "冷却水流量",
+            "unit": "L/min",
+            "description": "钢包冷却系统水流量",
+            "value": 150,
+            "isCustom": true
+        },
+        "maxTemperature": {
+            "title": "冷却水流量",
+            "unit": "L/min",
+            "description": "钢包冷却系统水流量",
+            "value": 150
+        }
     },
     "variables": {
         "steelAmount": {
+            "title": "冷却水流量",
+            "unit": "L/min",
+            "description": "钢包冷却系统水流量",
             "value": 150,
+            "isCustom": false,
             "bind": {
                 "source": "plc_line_a",
                 "path": "ns=2;s=Ladle01.Weight",
@@ -121,117 +145,23 @@
             }
         }
     },
-    "extensions": {
-        "refractoryThickness": {
-            "label": "钢包衬里厚度",
-            "unit": "mm",
-            "description": "钢包衬里的当前厚度，单位为毫米",
-            "value": 180,
-            "bind": {
-                "source": "production_db",
-                "sql": "SELECT thickness_mm FROM maintenance_measurements WHERE ladle_id = '001' AND measurement_type = 'refractory' ORDER BY measured_at DESC LIMIT 1",
-                "selector": "$.thickness_mm",
-                "transform": "parseFloat(value)"
-            }
-        },
-        "vibrationLevel": {
-            "label": "振动等级",
-            "unit": "mm/s",
-            "description": "钢包外壳振动监测值",
-            "value": 2.5,
-            "bind": {
-                "source": "plc_line_a",
-                "path": "ns=2;s=Ladle01.Vibration",
-                "selector": "$.value"
-            }
-        },
-        "coolingWaterFlow": {
-            "label": "冷却水流量",
+    "derivedProperties": {
+        "steelAmount1": {
+            "title": "冷却水流量",
             "unit": "L/min",
             "description": "钢包冷却系统水流量",
-            "value": 120,
-            "bind": {
-                "source": "plc_line_a",
-                "path": "ns=2;s=Ladle01.Cooling.Flow",
-                "selector": "$.flowRate"
-            }
-        },
-        "manufacturer": {
-            "label": "制造商",
-            "description": "钢包设备制造商",
-            "value": "宝钢"
-        },
-        "purchaseDate": {
-            "label": "采购日期",
-            "description": "设备采购入库日期",
-            "value": "2020-03-15"
-        },
-        "warrantyYears": {
-            "label": "质保年限",
-            "unit": "年",
-            "description": "设备质保期限",
-            "value": 10
-        },
-        "responsiblePerson": {
-            "label": "负责人",
-            "description": "设备责任人",
-            "value": "王工"
-        },
-        "maintenanceVendor": {
-            "label": "维护厂商",
-            "description": "耐材维护服务商",
-            "value": "某某耐材公司"
-        },
-        "shiftId": {
-            "label": "当前班次",
-            "description": "当前生产班次编号",
-            "value": "A-20250409-1",
-            "bind": {
-                "source": "production_db",
-                "sql": "SELECT shift_id FROM shift_records WHERE ladle_id = '001' AND status = 'active' ORDER BY created_at DESC LIMIT 1",
-                "selector": "$.shift_id",
-                "polling": 60000
-            }
-        },
-        "operatorName": {
-            "label": "操作员",
-            "description": "当前班次操作员姓名",
-            "value": "张三",
-            "bind": {
-                "source": "production_db",
-                "sql": "SELECT u.name as operator_name FROM shift_records sr JOIN users u ON sr.operator_id = u.id WHERE sr.ladle_id = '001' AND sr.status = 'active' ORDER BY sr.created_at DESC LIMIT 1",
-                "selector": "$.operator_name",
-                "polling": 60000
-            }
-        },
-        "plannedCastingTime": {
-            "label": "计划浇铸时间",
-            "description": "计划开始浇铸的时间",
-            "value": "2025-04-09T14:00:00Z",
-            "bind": {
-                "source": "production_db",
-                "sql": "SELECT planned_start_time FROM casting_schedule WHERE ladle_id = '001' AND status = 'scheduled' ORDER BY planned_start_time ASC LIMIT 1",
-                "selector": "$.planned_start_time",
-                "transform": "new Date(value).toISOString()"
-            }
-        },
-        "lastInspectionScore": {
-            "label": "上次检验评分",
-            "description": "最近一次设备检验的综合评分",
-            "value": 95
-        },
-        "nextInspectionDate": {
-            "label": "下次检验日期",
-            "description": "计划下次检验的日期",
-            "value": "2025-06-01"
-        },
-        "specialNotes": {
-            "label": "特殊备注",
-            "description": "设备特殊注意事项",
-            "value": "上次维护发现轻微裂纹，需重点关注"
+            "value": 150,
+            "isCustom": false
         }
     },
-    "state": {
-        "current": "full"
+    "extensions": {
+        "attributes": {},
+        "variables": {},
+        "derivedProperties": {},
+        "functions": {},
+        "services": {},
+        "alarms": {},
+        "behaviors": {},
+        "schedules": {}
     }
 }
