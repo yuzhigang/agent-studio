@@ -1,0 +1,1230 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Agent Studio API - Models",
+    "version": "1.0.0",
+    "description": "Agent Studio RESTful API"
+  },
+  "servers": [
+    {
+      "url": "https://api.agent-studio.io/v1",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Models",
+      "description": "Agent model metadata and schema definitions"
+    }
+  ],
+  "paths": {
+    "/models": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "List models",
+        "operationId": "listModels",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "isActive",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Model"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Create model",
+        "operationId": "createModel",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Model"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/{modelId}": {
+      "get": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Get model",
+        "operationId": "getModel",
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Model"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Update model",
+        "operationId": "updateModel",
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Model"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Models"
+        ],
+        "summary": "Delete model",
+        "operationId": "deleteModel",
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "total": {
+            "type": "integer",
+            "example": 100
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "total"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "CAPACITY_EXCEEDED"
+              },
+              "message": {
+                "type": "string",
+                "example": "Current steel amount exceeds capacity limit."
+              },
+              "details": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Model": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "ladle"
+          },
+          "name": {
+            "type": "string",
+            "example": "ladle"
+          },
+          "title": {
+            "type": "string",
+            "example": "钢包智能体"
+          },
+          "filePath": {
+            "type": "string",
+            "example": "/models/ladle.json"
+          },
+          "groupName": {
+            "type": "string",
+            "example": "logistics"
+          },
+          "creator": {
+            "type": "string",
+            "example": "张三"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-06-01T10:00:00Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-06-01T10:00:00Z"
+          },
+          "version": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "isActive": {
+            "type": "boolean",
+            "example": true
+          },
+          "schema": {
+            "$ref": "#/components/schemas/ModelSchema"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "title",
+          "filePath",
+          "version",
+          "isActive",
+          "schema"
+        ]
+      },
+      "ModelInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "ladle"
+          },
+          "name": {
+            "type": "string",
+            "example": "ladle"
+          },
+          "title": {
+            "type": "string",
+            "example": "钢包智能体"
+          },
+          "groupName": {
+            "type": "string",
+            "example": "logistics"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/ModelSchema"
+          }
+        },
+        "required": [
+          "id",
+          "schema"
+        ]
+      },
+      "ModelSchema": {
+        "type": "object",
+        "description": "Complete model.json object. Must contain $schema=https://agent-studio.io/schema/v1",
+        "example": {
+          "$schema": "https://agent-studio.io/schema/v1",
+          "metadata": {
+            "version": "1.0",
+            "name": "ladle",
+            "title": "钢包智能体",
+            "tags": [
+              "logistics",
+              "steelmaking"
+            ],
+            "group": "logistics",
+            "creator": "张三",
+            "createdAt": "2024-06-01T10:00:00Z",
+            "updatedAt": "2024-06-01T10:00:00Z",
+            "description": "钢包智能体，负责盛放和运输钢水"
+          },
+          "attributes": {
+            "capacity": {
+              "type": "number",
+              "title": "容量",
+              "description": "钢包最大容量",
+              "x-unit": "ton",
+              "default": 200.0,
+              "minimum": 0,
+              "maximum": 500
+            },
+            "maxTemperature": {
+              "type": "number",
+              "title": "最高耐温",
+              "description": "钢包能承受的最高温度",
+              "x-unit": "℃",
+              "default": 1800.0,
+              "minimum": 0,
+              "maximum": 2000
+            },
+            "insulationDuration": {
+              "type": "number",
+              "title": "保温时间",
+              "description": "钢水最大保温时长",
+              "x-unit": "min",
+              "nullable": true,
+              "default": 120.0,
+              "minimum": 0,
+              "maximum": 300
+            }
+          },
+          "variables": {
+            "steelAmount": {
+              "type": "number",
+              "title": "钢水量",
+              "description": "当前钢包内钢水重量",
+              "x-unit": "ton",
+              "nullable": true,
+              "default": 0.0,
+              "minimum": 0,
+              "maximum": 500,
+              "x-rules": {
+                "pre": [
+                  {
+                    "rule": "capacityLimit"
+                  }
+                ]
+              }
+            },
+            "temperature": {
+              "type": "number",
+              "title": "钢水温度",
+              "description": "当前钢水温度",
+              "x-unit": "℃",
+              "default": 25.0,
+              "minimum": -50,
+              "maximum": 2000,
+              "x-rules": {
+                "pre": [
+                  {
+                    "rule": "temperatureSafetyRange"
+                  }
+                ],
+                "post": [
+                  {
+                    "rule": "temperatureNotRisingNaturally"
+                  }
+                ]
+              }
+            },
+            "carbonContent": {
+              "type": "number",
+              "title": "碳含量",
+              "description": "钢水中碳元素百分比",
+              "x-unit": "%",
+              "default": 0.0,
+              "minimum": 0,
+              "maximum": 2.0
+            },
+            "steelGrade": {
+              "type": "string",
+              "title": "钢种",
+              "nullable": false,
+              "description": "当前钢水的钢种牌号",
+              "default": ""
+            },
+            "currentLocation": {
+              "type": "string",
+              "title": "当前位置",
+              "nullable": true,
+              "description": "钢包当前所在位置",
+              "default": "standby_area"
+            }
+          },
+          "derivedProperties": {
+            "fillRate": {
+              "type": "number",
+              "title": "填充率",
+              "description": "钢包填充百分比",
+              "x-unit": "%",
+              "x-formula": "this.variables.steelAmount / this.attributes.capacity * 100",
+              "x-dependOn": [
+                "steelAmount"
+              ]
+            },
+            "remainingCapacity": {
+              "type": "number",
+              "title": "剩余容量",
+              "description": "还可装载的钢水量",
+              "x-unit": "ton",
+              "x-formula": "this.attributes.capacity - this.variables.steelAmount",
+              "x-dependOn": [
+                "steelAmount"
+              ]
+            }
+          },
+          "rules": {
+            "capacityLimit": {
+              "name": "capacityLimit",
+              "title": "容量上限检查",
+              "condition": "this.variables.steelAmount <= this.attributes.capacity",
+              "parameters": {
+                "limit": {
+                  "type": "number",
+                  "default": "this.attributes.capacity",
+                  "description": "容量上限值"
+                }
+              },
+              "onViolation": {
+                "action": "reject",
+                "error": {
+                  "code": "CAPACITY_EXCEEDED",
+                  "message": "当前钢水量 {steelAmount} 吨超过容量上限 {capacity} 吨"
+                }
+              }
+            },
+            "temperatureSafetyRange": {
+              "title": "温度安全范围检查",
+              "condition": "this.variables.temperature >= $minTemp && this.variables.temperature <= $maxTemp",
+              "parameters": {
+                "minTemp": {
+                  "type": "number",
+                  "default": -50
+                },
+                "maxTemp": {
+                  "type": "number",
+                  "default": "this.attributes.maxTemperature"
+                }
+              },
+              "onViolation": {
+                "action": "reject",
+                "error": {
+                  "code": "TEMPERATURE_OUT_OF_RANGE",
+                  "message": "温度 {temperature}℃ 超出安全范围 [{$minTemp}, {$maxTemp}]"
+                }
+              }
+            },
+            "minPourTemperature": {
+              "title": "最低倾倒温度检查",
+              "condition": "this.variables.temperature >= $threshold",
+              "parameters": {
+                "threshold": {
+                  "type": "number",
+                  "default": 1500
+                }
+              },
+              "onViolation": {
+                "action": "reject",
+                "error": {
+                  "code": "TEMPERATURE_TOO_LOW",
+                  "message": "当前温度 {temperature}℃ 低于最低倾倒温度 {$threshold}℃",
+                  "suggestion": "等待加热或降低拉坯速度"
+                }
+              }
+            },
+            "refractoryLifeCheck": {
+              "title": "耐材寿命检查",
+              "condition": "this.variables.usageCount < this.attributes.refractoryLife",
+              "onViolation": {
+                "action": "reject",
+                "error": {
+                  "code": "REFRACTORY_LIFE_EXHAUSTED",
+                  "message": "耐材已使用 {usageCount} 次，达到寿命上限 {refractoryLife} 次",
+                  "suggestion": "请先执行维护，重置使用次数"
+                }
+              }
+            },
+            "highLoadMoveWarning": {
+              "title": "高负载移动预警",
+              "condition": "this.derivedProperties.fillRate < $threshold || args.emergency == true",
+              "parameters": {
+                "threshold": {
+                  "type": "number",
+                  "default": 95
+                }
+              },
+              "onViolation": {
+                "action": "warn",
+                "warning": {
+                  "code": "HIGH_LOAD_MOVE",
+                  "message": "钢包填充率 {fillRate}% 较高，移动时请谨慎操作"
+                }
+              }
+            },
+            "hasSteelBeforePour": {
+              "title": "倾倒前必须有钢水",
+              "condition": "this.variables.steelAmount > 0",
+              "onViolation": {
+                "action": "reject",
+                "error": {
+                  "code": "NO_STEEL_TO_POUR",
+                  "message": "钢包内没有钢水，无法倾倒"
+                }
+              }
+            }
+          },
+          "functions": {
+            "calculateLoad": {
+              "title": "计算可装载量",
+              "type": "script",
+              "scriptEngine": "python",
+              "script": "capacityRemaining = this.attributes.capacity - this.variables.steelAmount\nrequested = args.weight\nactual = min(requested, capacityRemaining)\nprint(f'[calculateLoad] 请求装载: {requested} 吨, 可装载: {actual} 吨, 剩余容量: {capacityRemaining} 吨')\nreturn {'requested': requested, 'actual': actual, 'capacityRemaining': capacityRemaining}",
+              "description": "计算可装载量（纯计算，不修改状态）",
+              "parameters": {
+                "weight": {
+                  "type": "number",
+                  "nullable": false,
+                  "description": "请求装载的钢水重量"
+                }
+              },
+              "returns": {
+                "requested": {
+                  "type": "number",
+                  "description": "请求装载量"
+                },
+                "actual": {
+                  "type": "number",
+                  "description": "实际可装载量"
+                },
+                "capacityRemaining": {
+                  "type": "number",
+                  "description": "装载后剩余容量"
+                }
+              }
+            },
+            "calculateTemperatureDrop": {
+              "title": "计算温度下降",
+              "type": "script",
+              "scriptEngine": "python",
+              "script": "import time\ncurrentTime = time.time()\nif not this.variables.get('lastTempCheckTime'):\n    this.variables['lastTempCheckTime'] = currentTime\n    return {'temperatureDrop': 0, 'currentTemp': this.variables.temperature}\nelapsedMinutes = (currentTime - this.variables['lastTempCheckTime']) / 60\ntempDropRate = 1.5  # 每分钟温降约 1.5℃\ntempDrop = elapsedMinutes * tempDropRate\ncurrentTemp = this.variables.temperature - tempDrop\nreturn {'temperatureDrop': tempDrop, 'currentTemp': currentTemp, 'elapsedMinutes': elapsedMinutes}",
+              "description": "计算自上次测温以来的温降",
+              "parameters": {},
+              "returns": {
+                "temperatureDrop": {
+                  "type": "number",
+                  "description": "温降度数"
+                },
+                "currentTemp": {
+                  "type": "number",
+                  "description": "推算的当前温度"
+                },
+                "elapsedMinutes": {
+                  "type": "number",
+                  "description": "经过的分钟数"
+                }
+              }
+            }
+          },
+          "services": {
+            "loadSteel": {
+              "title": "向钢包装载钢水",
+              "type": "script",
+              "scriptEngine": "python",
+              "rules": {
+                "pre": [
+                  {
+                    "rule": "refractoryLifeCheck"
+                  },
+                  {
+                    "rule": "capacityLimit"
+                  }
+                ],
+                "post": []
+              },
+              "script": "capacityRemaining = this.attributes.capacity - this.variables.steelAmount\nif capacityRemaining <= 0:\n    print(f'[loadSteel] 钢包 {this.id} 已满，无法装载')\n    return {'success': False, 'message': '钢包已满', 'loadedAmount': 0}\nloadedAmount = min(args.weight, capacityRemaining)\nthis.variables.steelAmount += loadedAmount\nthis.variables.temperature = args.temperature\nthis.variables.steelGrade = args.steelGrade\nthis.variables.carbonContent = args.get('carbonContent', 0)\nprint(f'[loadSteel] 钢包 {this.id} 装载 {loadedAmount} 吨钢水，温度 {args.temperature}℃，钢种 {args.steelGrade}')\nreturn {'success': True, 'message': '装载成功', 'loadedAmount': loadedAmount, 'totalAmount': this.variables.steelAmount}",
+              "parameters": {
+                "weight": {
+                  "type": "number",
+                  "description": "装载钢水重量"
+                },
+                "temperature": {
+                  "type": "number",
+                  "description": "钢水温度"
+                },
+                "steelGrade": {
+                  "type": "string",
+                  "description": "钢种牌号"
+                },
+                "carbonContent": {
+                  "type": "number",
+                  "description": "碳含量百分比"
+                }
+              },
+              "returns": {
+                "success": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "loadedAmount": {
+                  "type": "number"
+                },
+                "totalAmount": {
+                  "type": "number"
+                }
+              },
+              "permissions": {
+                "roles": [
+                  "converter_operator",
+                  "system"
+                ],
+                "description": "转炉操作员或系统可执行装载操作"
+              }
+            },
+            "pour": {
+              "title": "倾倒钢水",
+              "type": "script",
+              "scriptEngine": "python",
+              "rules": {
+                "pre": [
+                  {
+                    "rule": "hasSteelBeforePour"
+                  },
+                  {
+                    "rule": "minPourTemperature"
+                  }
+                ],
+                "post": []
+              },
+              "script": "if this.variables.steelAmount <= 0:\n    print(f'[pour] 钢包 {this.id} 没有钢水可供倾倒')\n    return {'success': False, 'message': '没有钢水可供倾倒', 'pouredAmount': 0}\npouredAmount = this.variables.steelAmount\nthis.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade = ''\nthis.variables.carbonContent = 0\nthis.variables.usageCount += 1\nprint(f'[pour] 钢包 {this.id} 倾倒 {pouredAmount} 吨钢水，累计使用次数: {this.variables.usageCount}')\nreturn {'success': True, 'message': '倾倒成功', 'pouredAmount': pouredAmount, 'location': this.variables.currentLocation}",
+              "parameters": {},
+              "returns": {
+                "success": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "pouredAmount": {
+                  "type": "number"
+                },
+                "location": {
+                  "type": "string"
+                }
+              },
+              "permissions": {
+                "roles": [
+                  "caster_operator",
+                  "system"
+                ],
+                "description": "连铸操作员或系统可执行倾倒操作"
+              }
+            },
+            "moveTo": {
+              "title": "移动钢包到指定位置",
+              "type": "script",
+              "scriptEngine": "python",
+              "rules": {
+                "pre": [
+                  {
+                    "rule": "highLoadMoveWarning",
+                    "parameters": {
+                      "threshold": 90
+                    }
+                  }
+                ],
+                "post": []
+              },
+              "script": "fromLocation = this.variables.currentLocation\ntoLocation = args.targetLocation\nthis.variables.currentLocation = toLocation\nthis.variables.targetLocation = ''\nprint(f'[moveTo] 钢包 {this.id} 从 {fromLocation} 移动到 {toLocation}')\nreturn {'success': True, 'from': fromLocation, 'to': toLocation}",
+              "parameters": {
+                "targetLocation": {
+                  "type": "string",
+                  "description": "目标位置"
+                }
+              },
+              "returns": {
+                "success": {
+                  "type": "boolean"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "permissions": {
+                "roles": [
+                  "logistics_operator",
+                  "crane_driver",
+                  "system"
+                ],
+                "description": "物流操作员、天车司机或系统可执行移动操作"
+              }
+            }
+          },
+          "states": {
+            "empty": {
+              "title": "空包",
+              "description": "钢包为空，等待接钢",
+              "group": "loadState",
+              "initialState": true,
+              "actions": {
+                "beforeEnter": [
+                  {
+                    "type": "runScript",
+                    "delay": 0,
+                    "scriptEngine": "python",
+                    "script": "this.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade = ''\nthis.variables.carbonContent = 0\nthis.variables.status = 'empty'\nprint(f'[State:empty] 钢包 {this.id} 进入空包状态')"
+                  }
+                ],
+                "afterEnter": [
+                  {
+                    "type": "triggerEvent",
+                    "name": "ladleStatusChanged",
+                    "payload": {
+                      "ladleId": "this.id",
+                      "status": "empty",
+                      "timestamp": "datetime.now().isoformat()"
+                    }
+                  }
+                ]
+              }
+            },
+            "receiving": {
+              "title": "接钢中",
+              "description": "正在接收钢水",
+              "group": "loadState",
+              "actions": {
+                "beforeEnter": [
+                  {
+                    "type": "runScript",
+                    "delay": 0,
+                    "scriptEngine": "python",
+                    "script": "this.variables.status = 'receiving'\nprint(f'[State:receiving] 钢包 {this.id} 开始接钢')"
+                  }
+                ],
+                "afterEnter": [
+                  {
+                    "type": "triggerEvent",
+                    "name": "ladleStatusChanged",
+                    "payload": {
+                      "ladleId": "this.id",
+                      "status": "receiving"
+                    }
+                  }
+                ]
+              }
+            },
+            "full": {
+              "title": "满包",
+              "description": "钢包已满，等待运输",
+              "group": "loadState",
+              "actions": {
+                "beforeEnter": [
+                  {
+                    "type": "runScript",
+                    "delay": 0,
+                    "scriptEngine": "python",
+                    "script": "this.variables.status = 'full'\nprint(f'[State:full] 钢包 {this.id} 已满，钢水量: {this.variables.steelAmount} 吨')"
+                  }
+                ],
+                "afterEnter": [
+                  {
+                    "type": "triggerEvent",
+                    "name": "ladleLoaded",
+                    "payload": {
+                      "ladleId": "this.id",
+                      "steelAmount": "this.variables.steelAmount",
+                      "steelGrade": "this.variables.steelGrade",
+                      "temperature": "this.variables.temperature"
+                    }
+                  }
+                ]
+              }
+            },
+            "pouring": {
+              "title": "倾倒中",
+              "description": "正在倾倒钢水",
+              "group": "processState",
+              "actions": {
+                "beforeEnter": [
+                  {
+                    "type": "runScript",
+                    "delay": 0,
+                    "scriptEngine": "python",
+                    "script": "this.variables.status = 'pouring'\nprint(f'[State:pouring] 钢包 {this.id} 开始倾倒钢水')"
+                  }
+                ],
+                "afterExit": [
+                  {
+                    "type": "triggerEvent",
+                    "name": "ladleEmptied",
+                    "payload": {
+                      "ladleId": "this.id",
+                      "usageCount": "this.variables.usageCount"
+                    }
+                  }
+                ]
+              }
+            },
+            "maintenance": {
+              "title": "维护中",
+              "description": "钢包正在维护或更换耐材",
+              "group": "maintenanceState",
+              "actions": {
+                "beforeEnter": [
+                  {
+                    "type": "runScript",
+                    "delay": 0,
+                    "scriptEngine": "python",
+                    "script": "this.variables.status = 'maintenance'\nimport datetime\nthis.variables.lastMaintenanceTime = datetime.datetime.now().isoformat()\nprint(f'[State:maintenance] 钢包 {this.id} 进入维护状态')"
+                  }
+                ],
+                "beforeExit": [
+                  {
+                    "type": "runScript",
+                    "delay": 0,
+                    "scriptEngine": "python",
+                    "script": "this.variables.usageCount = 0\nprint(f'[State:maintenance] 钢包 {this.id} 维护完成，使用次数清零')"
+                  }
+                ]
+              }
+            }
+          },
+          "transitions": {
+            "emptyToReceiving": {
+              "title": "空包转接钢",
+              "from": "empty",
+              "to": "receiving",
+              "trigger": {
+                "type": "event",
+                "name": "beginLoad"
+              },
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "print(f'[Transition] 钢包 {this.id} 收到开始接钢指令，来源: {payload.source}')"
+                }
+              ]
+            },
+            "receivingToFull": {
+              "title": "接钢转满包",
+              "from": "receiving",
+              "to": "full",
+              "trigger": {
+                "type": "timeout",
+                "delay": 3000
+              },
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "print(f'[Transition] 钢包 {this.id} 接钢完成，钢水量: {this.variables.steelAmount} 吨')"
+                }
+              ]
+            },
+            "fullToPouring": {
+              "title": "满包转倾倒",
+              "from": "full",
+              "to": "pouring",
+              "priority": 1,
+              "trigger": {
+                "type": "event",
+                "name": "beginPour"
+              }
+            },
+            "receivingToPouring": {
+              "title": "接钢中直接倾倒",
+              "from": "receiving",
+              "to": "pouring",
+              "priority": 2,
+              "trigger": {
+                "type": "event",
+                "when": "payload.steelAmount > 0",
+                "name": "beginPour"
+              }
+            },
+            "pouringToEmpty": {
+              "title": "倾倒转空包",
+              "from": "pouring",
+              "to": "empty",
+              "trigger": {
+                "type": "condition",
+                "window": {
+                  "type": "time-sliding",
+                  "duration": 300
+                },
+                "condition": "this.variables.steelAmount <= 0"
+              }
+            },
+            "emptyToMaintenance": {
+              "title": "空包转维护",
+              "from": "empty",
+              "to": "maintenance",
+              "trigger": {
+                "type": "condition",
+                "window": {
+                  "type": "time-sliding",
+                  "duration": 86400
+                },
+                "condition": "this.variables.usageCount >= this.attributes.refractoryLife"
+              },
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "print(f'[Transition] 钢包 {this.id} 使用次数达到上限 {this.attributes.refractoryLife}，进入维护')"
+                }
+              ]
+            },
+            "maintenanceToEmpty": {
+              "title": "维护转空包",
+              "from": "maintenance",
+              "to": "empty",
+              "trigger": {
+                "type": "event",
+                "name": "maintenanceComplete"
+              }
+            }
+          },
+          "behaviors": {
+            "goToConverter": {
+              "title": "",
+              "trigger": {
+                "type": "event",
+                "when": "payload.converterId != null",
+                "name": "ladleStatusChanged"
+              },
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "this.variables.targetLocation = f'converter_{payload.converterId}'\nprint(f'[Subscription] 钢包 {this.id} 收到去转炉指令，目标: converter_{payload.converterId}')"
+                }
+              ]
+            },
+            "goToCaster": {
+              "title": "",
+              "trigger": {
+                "type": "condition",
+                "window": {
+                  "type": "time-sliding",
+                  "duration": 86400
+                },
+                "condition": "this.variables.usageCount >= this.attributes.refractoryLife"
+              },
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "this.variables.targetLocation = f'caster_{payload.casterId}'\nprint(f'[Subscription] 钢包 {this.id} 收到去连铸机指令，目标: caster_{payload.casterId}')"
+                }
+              ]
+            }
+          },
+          "events": {
+            "ladleStatusChanged": {
+              "title": "钢包状态发生变化",
+              "payload": {
+                "ladleId": {
+                  "type": "string",
+                  "description": "钢包ID"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "新状态"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "description": "ISO 8601 时间戳"
+                }
+              }
+            },
+            "ladleLoaded": {
+              "title": "钢包接钢完成",
+              "payload": {
+                "ladleId": {
+                  "type": "string",
+                  "description": "钢包ID"
+                },
+                "steelAmount": {
+                  "type": "number",
+                  "description": "钢水量"
+                },
+                "steelGrade": {
+                  "type": "string",
+                  "description": "钢种"
+                },
+                "temperature": {
+                  "type": "number",
+                  "description": "钢水温度"
+                }
+              }
+            },
+            "ladleEmptied": {
+              "title": "钢包倾倒完成",
+              "payload": {
+                "ladleId": {
+                  "type": "string",
+                  "description": "钢包ID"
+                },
+                "usageCount": {
+                  "type": "number",
+                  "description": "当前使用次数"
+                }
+              }
+            }
+          },
+          "alarms": {
+            "temperatureExceeded.warning": {
+              "title": "钢包状态发生变化",
+              "trigger": {
+                "type": "condition",
+                "window": {
+                  "type": "time-sliding",
+                  "duration": 300
+                },
+                "condition": "this.variables.steelAmount >= this.attributes.capacity * 0.95"
+              },
+              "recovery": {
+                "type": "condition",
+                "window": {
+                  "type": "time-sliding",
+                  "duration": 300
+                },
+                "condition": "this.variables.steelAmount < this.attributes.capacity * 0.95"
+              },
+              "severity": "warning",
+              "level": 1,
+              "message": "温度超过阈值{this.variables.temperature}℃，请检查加热系统",
+              "recoveryMessage": "温度已恢复正常，当前温度{this.variables.temperature}℃，告警已消除",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ladleId": {
+                    "type": "string",
+                    "description": "钢包ID"
+                  },
+                  "status": {
+                    "type": "string",
+                    "description": "新状态"
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "description": "ISO 8601 时间戳"
+                  }
+                },
+                "required": [
+                  "ladleId",
+                  "status"
+                ]
+              }
+            }
+          },
+          "schedules": {
+            "checkTemperature": {
+              "name": "checkTemperature",
+              "title": "定期检查钢水温度",
+              "cron": "*/5 * * * *",
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "if this.variables.steelAmount > 0:\n    print(f'[Schedule] 钢包 {this.id} 温度检查: {this.variables.temperature}℃')\n    if this.variables.temperature < 1500:\n        print(f'[Schedule:Warning] 钢包 {this.id} 温度过低!')"
+                }
+              ]
+            },
+            "checkRefractoryLife": {
+              "name": "checkRefractoryLife",
+              "title": "检查耐材寿命",
+              "cron": "0 */1 * * *",
+              "actions": [
+                {
+                  "type": "runScript",
+                  "scriptEngine": "python",
+                  "script": "remainingLife = this.attributes.refractoryLife - this.variables.usageCount\nif remainingLife <= 10:\n    print(f'[Schedule:Warning] 钢包 {this.id} 耐材剩余寿命: {remainingLife} 次')"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

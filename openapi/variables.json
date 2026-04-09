@@ -1,0 +1,291 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Agent Studio API - Variables",
+    "version": "1.0.0",
+    "description": "Agent Studio RESTful API"
+  },
+  "servers": [
+    {
+      "url": "https://api.agent-studio.io/v1",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Variables",
+      "description": "Instance variable values"
+    }
+  ],
+  "paths": {
+    "/instances/{instanceId}/variables": {
+      "get": {
+        "tags": [
+          "Variables"
+        ],
+        "summary": "List instance variables",
+        "operationId": "listVariables",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Variables map",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instances/{instanceId}/variables/{name}": {
+      "get": {
+        "tags": [
+          "Variables"
+        ],
+        "summary": "Get variable",
+        "operationId": "getVariable",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Variable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Variable"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Variables"
+        ],
+        "summary": "Set variable",
+        "operationId": "setVariable",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariableInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Variable"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "total": {
+            "type": "integer",
+            "example": 100
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "total"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "CAPACITY_EXCEEDED"
+              },
+              "message": {
+                "type": "string",
+                "example": "Current steel amount exceeds capacity limit."
+              },
+              "details": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Variable": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "steelAmount"
+          },
+          "value": {
+            "example": 150
+          },
+          "valueType": {
+            "type": "string",
+            "enum": [
+              "number",
+              "string",
+              "boolean"
+            ],
+            "example": "number"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-06-01T10:00:00Z"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "valueType",
+          "updatedAt"
+        ]
+      },
+      "VariableInput": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "example": 150
+          },
+          "valueType": {
+            "type": "string",
+            "enum": [
+              "number",
+              "string",
+              "boolean"
+            ],
+            "example": "number"
+          }
+        },
+        "required": [
+          "value",
+          "valueType"
+        ]
+      }
+    }
+  }
+}

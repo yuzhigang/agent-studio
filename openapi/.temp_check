@@ -1,0 +1,22 @@
+import json
+
+with open('model.json') as f:
+    model_example = json.load(f)
+
+with open('ladle_001.json') as f:
+    instance_example = json.load(f)
+
+def make_base(title, tags):
+    return {
+        'openapi': '3.0.3',
+        'info': {'title': title, 'version': '1.0.0', 'description': 'Agent Studio RESTful API'},
+        'servers': [{'url': 'https://api.agent-studio.io/v1', 'description': 'Production'}],
+        'security': [{'bearerAuth': []}],
+        'tags': tags,
+        'components': {
+            'securitySchemes': {
+                'bearerAuth': {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT'}
+            },
+            'schemas': {}
+        }
+    }

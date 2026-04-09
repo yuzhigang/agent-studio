@@ -1,0 +1,243 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Agent Studio API - State Machine",
+    "version": "1.0.0",
+    "description": "Agent Studio RESTful API"
+  },
+  "servers": [
+    {
+      "url": "https://api.agent-studio.io/v1",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "State Machine",
+      "description": "State queries and transitions"
+    }
+  ],
+  "paths": {
+    "/instances/{instanceId}/state": {
+      "get": {
+        "tags": [
+          "State Machine"
+        ],
+        "summary": "Get current state",
+        "operationId": "getState",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/State"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instances/{instanceId}/transitions": {
+      "post": {
+        "tags": [
+          "State Machine"
+        ],
+        "summary": "Trigger transition",
+        "operationId": "triggerTransition",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transition result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransitionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "total": {
+            "type": "integer",
+            "example": 100
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "total"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "CAPACITY_EXCEEDED"
+              },
+              "message": {
+                "type": "string",
+                "example": "Current steel amount exceeds capacity limit."
+              },
+              "details": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "State": {
+        "type": "object",
+        "properties": {
+          "currentState": {
+            "type": "string",
+            "example": "empty"
+          },
+          "availableTransitions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "emptyToReceiving",
+              "emptyToMaintenance"
+            ]
+          }
+        },
+        "required": [
+          "currentState",
+          "availableTransitions"
+        ]
+      },
+      "TransitionRequest": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "example": "beginLoad"
+          },
+          "payload": {
+            "type": "object",
+            "example": {
+              "source": "converter_1"
+            }
+          }
+        },
+        "required": [
+          "event"
+        ]
+      },
+      "TransitionResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "from": {
+            "type": "string",
+            "example": "empty"
+          },
+          "to": {
+            "type": "string",
+            "example": "receiving"
+          }
+        },
+        "required": [
+          "success",
+          "from",
+          "to"
+        ]
+      }
+    }
+  }
+}

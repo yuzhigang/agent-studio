@@ -1,0 +1,451 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Agent Studio API - Instances",
+    "version": "1.0.0",
+    "description": "Agent Studio RESTful API"
+  },
+  "servers": [
+    {
+      "url": "https://api.agent-studio.io/v1",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Instances",
+      "description": "Agent instance lifecycle and data"
+    }
+  ],
+  "paths": {
+    "/instances": {
+      "get": {
+        "tags": [
+          "Instances"
+        ],
+        "summary": "List instances",
+        "operationId": "listInstances",
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of instances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Instance"
+                      }
+                    },
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Instances"
+        ],
+        "summary": "Create instance",
+        "operationId": "createInstance",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instances/{instanceId}": {
+      "get": {
+        "tags": [
+          "Instances"
+        ],
+        "summary": "Get instance",
+        "operationId": "getInstance",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Instance detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Instances"
+        ],
+        "summary": "Update instance",
+        "operationId": "updateInstance",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Instances"
+        ],
+        "summary": "Delete instance",
+        "operationId": "deleteInstance",
+        "parameters": [
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "default": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
+          "total": {
+            "type": "integer",
+            "example": 100
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "total"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "CAPACITY_EXCEEDED"
+              },
+              "message": {
+                "type": "string",
+                "example": "Current steel amount exceeds capacity limit."
+              },
+              "details": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Instance": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "ladle_001"
+          },
+          "modelId": {
+            "type": "string",
+            "example": "ladle"
+          },
+          "state": {
+            "type": "string",
+            "example": "empty"
+          },
+          "metadata": {
+            "type": "object",
+            "example": {
+              "name": "ladle",
+              "title": "1号钢包",
+              "description": "这是一个钢包的数字孪生...",
+              "tags": [
+                "steelmaking",
+                "ladle"
+              ],
+              "creator": "张三",
+              "createdAt": "2024-06-01T10:00:00Z",
+              "updatedAt": "2024-06-01T10:00:00Z",
+              "kind": "ladle",
+              "version": "1.0.0"
+            }
+          },
+          "attributes": {
+            "type": "object",
+            "example": {
+              "capacity": {
+                "title": "冷却水流量",
+                "unit": "L/min",
+                "description": "钢包冷却系统水流量",
+                "value": 150,
+                "isCustom": true
+              },
+              "maxTemperature": {
+                "title": "冷却水流量",
+                "unit": "L/min",
+                "description": "钢包冷却系统水流量",
+                "value": 150
+              }
+            }
+          },
+          "variables": {
+            "type": "object",
+            "example": {
+              "steelAmount": {
+                "title": "冷却水流量",
+                "unit": "L/min",
+                "description": "钢包冷却系统水流量",
+                "value": 150,
+                "isCustom": false,
+                "bind": {
+                  "source": "plc_line_a",
+                  "path": "ns=2;s=Ladle01.Weight",
+                  "selector": "$.value",
+                  "transform": "value * 0.001"
+                }
+              }
+            }
+          },
+          "extensions": {
+            "type": "object",
+            "example": {
+              "attributes": {},
+              "variables": {},
+              "derivedProperties": {},
+              "functions": {},
+              "services": {},
+              "alarms": {},
+              "behaviors": {},
+              "schedules": {}
+            }
+          }
+        },
+        "required": [
+          "id",
+          "modelId",
+          "state"
+        ]
+      },
+      "InstanceInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "ladle_001"
+          },
+          "modelId": {
+            "type": "string",
+            "example": "ladle"
+          },
+          "state": {
+            "type": "string",
+            "example": "empty"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "attributes": {
+            "type": "object"
+          },
+          "variables": {
+            "type": "object"
+          },
+          "extensions": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "modelId"
+        ]
+      }
+    }
+  }
+}
