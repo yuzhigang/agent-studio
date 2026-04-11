@@ -1,39 +1,54 @@
-import { render, screen } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider, useParams } from 'react-router-dom';
+import { render, screen, waitFor } from '@testing-library/react';
+import { createMemoryRouter, RouterProvider, useNavigate, useParams } from 'react-router-dom';
 import { beforeEach, test } from 'vitest';
 import { instanceService } from '@/mocks/services/instanceService';
 import { modelService } from '@/mocks/services/modelService';
+import { CompactInstanceList } from '@/modules/workbench/components/CompactInstanceList';
+import { CompactModelList } from '@/modules/workbench/components/CompactModelList';
+import { WorkbenchPlaceholder } from '@/modules/workbench/components/WorkbenchPlaceholder';
 import { useConfigWorkbench } from '@/modules/workbench/hooks/useConfigWorkbench';
+import type { AgentModel } from '@/types/domain/model';
 
 function WorkbenchHarness() {
   const { modelId = '', instanceId = '' } = useParams();
-  const { models, instances, selectedModel, selectedInstance, loading } = useConfigWorkbench(modelId, instanceId);
+  const navigate = useNavigate();
+  const { models, instances, selectedModel, selectedInstance, loading, createModel } = useConfigWorkbench(modelId, instanceId);
 
   if (loading) {
     return <span>Loading</span>;
   }
 
+  const selectedModelId = selectedModel?.metadata.name ?? null;
+  const selectedInstanceId = selectedInstance?.id ?? null;
+
   return (
     <section>
-      <h1>Models</h1>
-      <div>
-        {models.map((model) => (
-          <button
-            key={model.metadata.name}
-            type="button"
-            aria-pressed={model.metadata.name === selectedModel?.metadata.name}
-          >
-            {model.metadata.title}
-          </button>
-        ))}
-      </div>
-      <div>
-        {instances.map((instance) => (
-          <button key={instance.id} type="button" aria-pressed={instance.id === selectedInstance?.id}>
-            {instance.id}
-          </button>
-        ))}
-      </div>
+      <CompactModelList
+        models={models}
+        selectedModelId={selectedModelId}
+        onSelect={(nextModelId) => {
+          navigate(`/models/${nextModelId}`);
+        }}
+        onCreate={createModel}
+      />
+      <CompactInstanceList
+        instances={instances}
+        selectedInstanceId={selectedInstanceId}
+        onSelect={(nextInstanceId) => {
+          if (!selectedModelId) {
+            return;
+          }
+
+          navigate(`/models/${selectedModelId}/instances/${nextInstanceId}`);
+        }}
+      />
+      {selectedInstance ? (
+        <section aria-label="Instance Detail">
+          <h2>{selectedInstance.metadata.title}</h2>
+        </section>
+      ) : (
+        <WorkbenchPlaceholder title="Instance Detail" description="Select an instance to edit" />
+      )}
     </section>
   );
 }
@@ -55,18 +70,46 @@ beforeEach(async () => {
   await Promise.all([modelService.reset(), instanceService.reset()]);
 });
 
+async function createModel(model: AgentModel) {
+  await modelService.create(model);
+}
+
 test('loads models and derives selected model/instance from route params', async () => {
   renderWorkbench('/models/ladle/instances/ladle_001');
 
-  expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: 'ladle_001' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('button', { name: /ladle_001/i })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('does not preselect an instance when the route only targets a model', async () => {
   renderWorkbench('/models/ladle');
 
-  expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: 'ladle_001' })).toHaveAttribute('aria-pressed', 'false');
+  expect(await screen.findByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('button', { name: /ladle_001/i })).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('switches instance list when the selected model route changes', async () => {
+  await createModel({
+    $schema: 'https://agent-studio.io/schema/v2',
+    metadata: {
+      name: 'crane',
+      title: '天车智能体',
+    },
+    attributes: {},
+    variables: {},
+  });
+
+  renderWorkbench('/models/crane');
+
+  expect(await screen.findByRole('button', { name: '天车智能体' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByText('No instances yet')).toBeInTheDocument();
+});
+
+test('shows detail placeholder before an instance is selected', async () => {
+  renderWorkbench('/models/ladle');
+
+  await waitFor(() => {
+    expect(screen.getByText('Select an instance to edit')).toBeInTheDocument();
+  });
+  expect(screen.queryByRole('heading', { name: '1号钢包' })).not.toBeInTheDocument();
 });
