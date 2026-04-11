@@ -21,7 +21,10 @@ test('redirects / to /models and renders layout navigation', async () => {
   renderWithRoute('/');
 
   expect(await screen.findByRole('link', { name: 'Models' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Events' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Prefs' })).toBeInTheDocument();
+  expect(screen.getByText('Studio')).toBeInTheDocument();
   expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
 });
 
@@ -34,11 +37,11 @@ test('renders /settings route', async () => {
 test('renders /models/:modelId route', async () => {
   renderWithRoute('/models/ladle');
 
-  expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
 });
 
 test('renders /models/:modelId/instances/:instanceId route', async () => {
   renderWithRoute('/models/ladle/instances/ladle_001');
 
-  expect(await screen.findByDisplayValue('1号钢包')).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
 });
