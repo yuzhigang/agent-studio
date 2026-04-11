@@ -1,9 +1,17 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, test } from 'vitest';
 import { instanceService } from '@/mocks/services/instanceService';
 import { modelService } from '@/mocks/services/modelService';
 import { InstanceDetailPage } from './InstanceDetailPage';
+
+function renderInstanceDetail(pathname = '/models/ladle/instances/ladle_001') {
+  const router = createMemoryRouter([{ path: '/models/:modelId/instances/:instanceId', element: <InstanceDetailPage /> }], {
+    initialEntries: [pathname],
+  });
+  render(<RouterProvider router={router} />);
+  return router;
+}
 
 beforeEach(async () => {
   localStorage.clear();
@@ -12,13 +20,7 @@ beforeEach(async () => {
 });
 
 test('edits instance variables and bindings and saves them', async () => {
-  render(
-    <MemoryRouter initialEntries={['/models/ladle/instances/ladle_001']}>
-      <Routes>
-        <Route path="/models/:modelId/instances/:instanceId" element={<InstanceDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderInstanceDetail();
 
   expect(await screen.findByDisplayValue('1号钢包')).toBeInTheDocument();
 
@@ -47,13 +49,7 @@ test('edits instance variables and bindings and saves them', async () => {
 });
 
 test('shows not found when route modelId does not match instance modelId', async () => {
-  render(
-    <MemoryRouter initialEntries={['/models/not-ladle/instances/ladle_001']}>
-      <Routes>
-        <Route path="/models/:modelId/instances/:instanceId" element={<InstanceDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderInstanceDetail('/models/not-ladle/instances/ladle_001');
 
   expect(await screen.findByText('Instance not found')).toBeInTheDocument();
   expect(screen.queryByDisplayValue('1号钢包')).not.toBeInTheDocument();

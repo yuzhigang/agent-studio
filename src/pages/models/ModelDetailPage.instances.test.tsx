@@ -1,9 +1,17 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, test } from 'vitest';
 import { instanceService } from '@/mocks/services/instanceService';
 import { modelService } from '@/mocks/services/modelService';
 import { ModelDetailPage } from './ModelDetailPage';
+
+function renderModelDetail(pathname = '/models/ladle') {
+  const router = createMemoryRouter([{ path: '/models/:modelId', element: <ModelDetailPage /> }], {
+    initialEntries: [pathname],
+  });
+  render(<RouterProvider router={router} />);
+  return router;
+}
 
 beforeEach(async () => {
   localStorage.clear();
@@ -12,13 +20,7 @@ beforeEach(async () => {
 });
 
 test('shows instances for the current model and creates a new instance', async () => {
-  render(
-    <MemoryRouter initialEntries={['/models/ladle']}>
-      <Routes>
-        <Route path="/models/:modelId" element={<ModelDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderModelDetail();
 
   expect(await screen.findByText('1号钢包')).toBeInTheDocument();
 
@@ -32,13 +34,7 @@ test('shows instances for the current model and creates a new instance', async (
 });
 
 test('rejects duplicate instance id at service boundary even when page-level list is stale', async () => {
-  render(
-    <MemoryRouter initialEntries={['/models/ladle']}>
-      <Routes>
-        <Route path="/models/:modelId" element={<ModelDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderModelDetail();
 
   expect(await screen.findByText('1号钢包')).toBeInTheDocument();
 

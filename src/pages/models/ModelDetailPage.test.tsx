@@ -1,9 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, test } from 'vitest';
 import { modelService } from '@/mocks/services/modelService';
 import { ModelDetailPage } from './ModelDetailPage';
+
+function renderModelDetail(pathname = '/models/ladle') {
+  const router = createMemoryRouter([{ path: '/models/:modelId', element: <ModelDetailPage /> }], {
+    initialEntries: [pathname],
+  });
+  render(<RouterProvider router={router} />);
+  return router;
+}
 
 beforeEach(async () => {
   localStorage.clear();
@@ -12,14 +20,7 @@ beforeEach(async () => {
 
 test('edits model metadata and saves the update', async () => {
   const user = userEvent.setup();
-
-  render(
-    <MemoryRouter initialEntries={['/models/ladle']}>
-      <Routes>
-        <Route path="/models/:modelId" element={<ModelDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderModelDetail();
 
   expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
 
@@ -34,13 +35,7 @@ test('edits model metadata and saves the update', async () => {
 });
 
 test('keeps invalid intermediate JSON text and shows error state', async () => {
-  render(
-    <MemoryRouter initialEntries={['/models/ladle']}>
-      <Routes>
-        <Route path="/models/:modelId" element={<ModelDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderModelDetail();
 
   expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: 'Advanced JSON' }));
@@ -53,13 +48,7 @@ test('keeps invalid intermediate JSON text and shows error state', async () => {
 });
 
 test('keeps metadata name immutable on detail page', async () => {
-  render(
-    <MemoryRouter initialEntries={['/models/ladle']}>
-      <Routes>
-        <Route path="/models/:modelId" element={<ModelDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderModelDetail();
 
   expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
   const nameInput = screen.getByLabelText('Name');

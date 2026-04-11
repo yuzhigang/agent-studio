@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { InstanceEditorTabs } from '@/modules/instances/components/InstanceEditorTabs';
 import { useInstanceDetail } from '@/modules/instances/hooks/useInstanceDetail';
 import { SaveActions } from '@/shared/components/SaveActions';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 
 export function InstanceDetailPage() {
   const { modelId = '', instanceId = '' } = useParams();
@@ -20,6 +21,7 @@ export function InstanceDetailPage() {
     updateBindings,
     updateRuntimeBlock,
   } = useInstanceDetail(modelId, instanceId);
+  useUnsavedChangesGuard(dirty);
 
   if (loading) {
     return <Spin />;

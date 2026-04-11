@@ -7,12 +7,14 @@ import { InstanceListByModel } from '@/modules/instances/components/InstanceList
 import { ModelEditorTabs } from '@/modules/models/components/ModelEditorTabs';
 import { useModelDetail } from '@/modules/models/hooks/useModelDetail';
 import { SaveActions } from '@/shared/components/SaveActions';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { AgentInstance } from '@/types/domain/instance';
 
 export function ModelDetailPage() {
   const { modelId = '' } = useParams();
   const { loading, draft, dirty, saving, jsonErrors, jsonDrafts, save, reset, setMetadata, setDefinitions, updateJsonBlock } =
     useModelDetail(modelId);
+  useUnsavedChangesGuard(dirty);
   const [instances, setInstances] = useState<AgentInstance[]>([]);
   const [instancesLoading, setInstancesLoading] = useState(true);
 
