@@ -1,9 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders the application shell', () => {
+test('renders routed app shell with models selected by default', async () => {
   render(<App />);
 
-  expect(screen.getByText('Agent Studio')).toBeInTheDocument();
-  expect(screen.getByText('App shell booting')).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: 'Models' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
 });

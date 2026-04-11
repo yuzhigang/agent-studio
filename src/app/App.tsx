@@ -1,8 +1,8 @@
+import { RouterProvider, createBrowserRouter } from 'react-router-dom';
+import { appRoutes } from './router';
+
+const router = createBrowserRouter(appRoutes);
+
 export default function App() {
-  return (
-    <main>
-      <h1>Agent Studio</h1>
-      <p>App shell booting</p>
-    </main>
-  );
+  return <RouterProvider router={router} />;
 }
