@@ -28,7 +28,8 @@ test('renders detail routes with seed-backed content', async () => {
     initialEntries: ['/models/ladle'],
   });
   render(<RouterProvider router={modelRouter} />);
-  expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('button', { name: /ladle_001/i })).toBeInTheDocument();
 
   const instanceRouter = createMemoryRouter(appRoutes, {
     initialEntries: ['/models/ladle/instances/ladle_001'],
@@ -41,19 +42,19 @@ test('blocks route navigation when there are unsaved changes and user cancels le
   const user = userEvent.setup();
   const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
   const router = createMemoryRouter(appRoutes, {
-    initialEntries: ['/models/ladle'],
+    initialEntries: ['/models/ladle/instances/ladle_001'],
   });
 
   render(<RouterProvider router={router} />);
-  expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
+  expect(await screen.findByDisplayValue('1号钢包')).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Unsaved title' } });
-  await user.click(screen.getByRole('link', { name: 'Settings' }));
+  await user.click(screen.getByRole('link', { name: 'Prefs' }));
 
   await waitFor(() => {
     expect(confirmSpy).toHaveBeenCalledWith('You have unsaved changes. Leave anyway?');
   });
-  expect(router.state.location.pathname).toBe('/models/ladle');
+  expect(router.state.location.pathname).toBe('/models/ladle/instances/ladle_001');
   expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
 
   confirmSpy.mockRestore();
