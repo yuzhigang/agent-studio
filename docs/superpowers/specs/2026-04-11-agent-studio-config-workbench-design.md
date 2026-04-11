@@ -83,7 +83,7 @@ Responsive strategy:
 
 - Keep the domain menu accessible.
 - Show one list pane at a time when space is tight.
-- Open the detail area as the main surface after selection, with list العودة handled by back navigation or drawer behavior.
+- Open the detail area as the main surface after selection, with list return handled by back navigation or drawer behavior.
 
 This avoids unusable compressed columns on smaller screens.
 
