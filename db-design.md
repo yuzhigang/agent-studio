@@ -1,36 +1,98 @@
 # Agent Studio 数据库设计文档
 
+## 设计目标
+
+本版数据库设计服务于 Agent Studio v2 schema。v2 的核心变化是：
+
+- 统一抽象以 agent 为核心
+- `model.json` 保持扁平顶层结构
+- 模型层显式支持 `goals / decisionPolicies / memory / plans`
+- 实例层显式拆分 `variables` 与 `bindings`
+- 实例层增加 `memory / activeGoals / currentPlan`
+
+数据库设计必须同时支持：
+
+- 模型文件的完整持久化
+- 实例运行态的高频读写
+- 变量值查询与索引
+- 低频认知上下文的 JSON 化存储
+- 告警、事件、日志的时序检索
+
 ## 设计原则
 
-1. **模型存储最小化**：Model 数量少（<500），配置复杂，数据库存储元数据，完整配置存文件
-2. **实例数据核心化**：实例数量大，需要数据库支持，配置类字段合并为 JSON
-3. **变量值独立化**：变量值是核心业务数据，单独成表支持查询、排序和索引
-4. **运行时数据分离**：告警、事件、日志单独成表，支持时序查询和生命周期管理
+1. **模型存储最小化**：模型数量少，配置复杂，数据库存元数据，完整模型定义存文件。
+2. **实例运行态分层**：高频变化的变量值单独存储，低频变化的认知上下文优先放 JSON。
+3. **接线方式实例化**：`bindings` 属于实例层，不进入模型元数据表。
+4. **认知上下文轻量化**：`memory / activeGoals / currentPlan` 初期放实例主表 JSON，后续按查询需求再拆。
+5. **时序数据独立化**：告警、事件、日志独立成表，便于生命周期管理和归档。
+
+---
+
+## 文件系统与数据库分工
+
+### 模型文件
+完整模型定义继续存文件，例如：
+
+- `/models/ladle.json`
+- `/models/crane.json`
+- `/models/scheduler.json`
+
+文件内容包含完整的 v2 schema：
+
+- `attributes`
+- `variables`
+- `derivedProperties`
+- `rules`
+- `functions`
+- `services`
+- `states`
+- `transitions`
+- `behaviors`
+- `events`
+- `alarms`
+- `schedules`
+- `goals`
+- `decisionPolicies`
+- `memory`
+- `plans`
+
+### 数据库存储
+数据库只存：
+
+- 模型元数据和文件路径
+- 实例主信息与低频 JSON 上下文
+- 高频变量值
+- 告警、事件、日志
 
 ---
 
 ## 表结构
 
-### 1. models（模型元数据表）
+### 1. `models`（模型元数据表）
 
 存储模型基本信息和文件关联。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
-| id | VARCHAR(64) | PK | 模型标识 (如: ladle) |
+| id | VARCHAR(64) | PK | 模型标识，如 `ladle` |
 | name | VARCHAR(64) | NOT NULL, UNIQUE | 模型名称 |
 | title | VARCHAR(128) | NOT NULL | 显示标题 |
-| file_path | VARCHAR(500) | NOT NULL | model.json 文件路径 |
-| group_name | VARCHAR(64) | INDEX | 分组 (如: logistics) |
+| file_path | VARCHAR(500) | NOT NULL | 模型文件路径 |
+| group_name | VARCHAR(64) | INDEX | 分组 |
 | creator | VARCHAR(64) | - | 创建者 |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 | updated_at | DATETIME | NOT NULL | 更新时间 |
 | version | VARCHAR(16) | NOT NULL | 模型版本号 |
 | is_active | BOOLEAN | DEFAULT TRUE, INDEX | 是否启用 |
 
-**说明**：`file_path` 指向 `/models/ladle.json` 等实际配置文件，包含完整的 attributes、variables、rules、states、transitions、services、alarms、schedules 定义。
+**说明**
 
-**索引**：
+- `file_path` 指向完整的 `model.json`
+- 数据库不拆存 `goals / decisionPolicies / memory / plans`
+- 这些结构仍以文件为准，由应用层读取、缓存和校验
+
+**索引**
+
 - `PRIMARY KEY (id)`
 - `UNIQUE KEY uk_name (name)`
 - `KEY idx_group (group_name)`
@@ -38,53 +100,98 @@
 
 ---
 
-### 2. instances（实例主表）
+### 2. `instances`（实例主表）
 
-存储实例核心信息，配置类数据存 JSON。
+存储实例核心信息、低频配置和认知上下文。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
-| id | VARCHAR(64) | PK | 实例标识 (如: ladle_001) |
-| model_id | VARCHAR(64) | FK, INDEX | 关联 models.id |
-| current_state | VARCHAR(64) | NOT NULL, INDEX | 当前状态 |
+| id | VARCHAR(64) | PK | 实例标识，如 `ladle_001` |
+| model_id | VARCHAR(64) | FK, INDEX | 关联 `models.id` |
+| current_state | VARCHAR(64) | NOT NULL, INDEX | 当前 `reflex` 状态 |
 | name | VARCHAR(128) | NOT NULL | 实例名称 |
 | title | VARCHAR(128) | - | 显示标题 |
 | description | TEXT | - | 描述 |
-| attributes | JSON | - | 属性值 (capacity, maxTemperature 等) |
-| extensions | JSON | - | 扩展数据 (maintenance, lifecycle, ops) |
+| attributes | JSON | - | 实例属性值 |
+| bindings | JSON | - | 实例接线配置 |
+| memory | JSON | - | 结构化运行记忆 |
+| active_goals | JSON | - | 当前激活目标列表 |
+| current_plan | JSON | - | 当前计划摘要 |
+| extensions | JSON | - | 额外运行时扩展 |
 | version | VARCHAR(16) | NOT NULL | 实例数据版本 |
 | creator | VARCHAR(64) | - | 创建者 |
 | created_at | DATETIME | NOT NULL, INDEX | 创建时间 |
 | updated_at | DATETIME | NOT NULL | 更新时间 |
 | is_deleted | BOOLEAN | DEFAULT FALSE, INDEX | 软删除标记 |
 
-**attributes JSON 示例**：
-```json
-{
-  "capacity": 200,
-  "maxTemperature": 1800,
-  "insulationDuration": 120
-}
-```
+**设计说明**
 
-**extensions JSON 示例**：
+- `attributes` 存实例属性最终值
+- `bindings` 存实例数据源接线方式
+- `memory / active_goals / current_plan` 作为低频上下文存 JSON
+- 高频 `variables` 不直接放在 `instances` 表，而是进入 `instance_variables`
+
+**`bindings` JSON 示例**
+
 ```json
 {
-  "maintenance": {
-    "usageCount": 0,
-    "lastMaintenanceTime": null
+  "temperature": {
+    "source": "plc_line_a",
+    "path": "ns=2;s=Ladle01.Temp",
+    "selector": "$.temperature",
+    "transform": "Math.round(value)"
   },
-  "lifecycle": {
-    "totalPours": 0,
-    "totalSteelHandled": 0
-  },
-  "ops": {
-    "lastCheckTime": null
+  "currentLocation": {
+    "source": "factory_mqtt",
+    "topic": "position/ladle/001",
+    "selector": "$.position.zone",
+    "transform": "value.toLowerCase().replace(/\\s/g, '_')"
   }
 }
 ```
 
-**索引**：
+**`memory` JSON 示例**
+
+```json
+{
+  "currentAssignment": {
+    "taskId": "task_20260411_001",
+    "destination": "caster_2",
+    "deadline": "2026-04-11T10:30:00Z"
+  },
+  "lastDecision": {
+    "mode": "cortex",
+    "summary": "优先送达 caster_2"
+  }
+}
+```
+
+**`current_plan` JSON 示例**
+
+```json
+{
+  "id": "plan_20260411_001",
+  "planType": "deliveryAdjustment",
+  "status": "ready",
+  "steps": [
+    {
+      "service": "assignTargetLocation",
+      "args": {
+        "targetLocation": "caster_2"
+      }
+    },
+    {
+      "service": "moveTo",
+      "args": {
+        "targetLocation": "caster_2"
+      }
+    }
+  ]
+}
+```
+
+**索引**
+
 - `PRIMARY KEY (id)`
 - `KEY idx_model (model_id)`
 - `KEY idx_state (current_state)`
@@ -93,44 +200,48 @@
 
 ---
 
-### 3. instance_variables（实例变量值表）
+### 3. `instance_variables`（实例变量值表）
 
-变量值是核心业务数据，需要单独存储以支持查询、排序和索引。
+变量值是核心业务数据，单独存储以支持查询、排序和索引。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
-| id | BIGINT | PK, AUTO_INCREMENT | 自增ID |
-| instance_id | VARCHAR(64) | FK, NOT NULL | 关联 instances.id |
+| id | BIGINT | PK, AUTO_INCREMENT | 自增 ID |
+| instance_id | VARCHAR(64) | FK, NOT NULL | 关联 `instances.id` |
 | name | VARCHAR(64) | NOT NULL | 变量名 |
-| value | VARCHAR(255) | INDEX | 变量值 (统一字符串存储) |
-| value_type | VARCHAR(16) | - | 实际类型 (number/string/boolean) |
+| value | VARCHAR(255) | INDEX | 变量值，统一字符串持久化 |
+| value_type | VARCHAR(16) | - | 实际类型，如 `number/string/boolean` |
 | updated_at | DATETIME | NOT NULL | 更新时间 |
 
-**联合索引**：
-- `PRIMARY KEY (id)`
-- `UNIQUE KEY uk_instance_var (instance_id, name)` - 一个实例的变量名不重复
-- `KEY idx_value (value)` - 支持变量值查询
+**设计说明**
 
-**说明**：
-- 数值类型变量存储为字符串，应用层转换
-- 需要查询的变量（如 steelAmount > 100）在此表操作
+- `variables` 的权威运行态在本表
+- 接口层返回实例详情时，可按需把本表变量聚合回 JSON
+- 需要过滤、排序、比较的变量尽量走本表查询
+
+**联合索引**
+
+- `PRIMARY KEY (id)`
+- `UNIQUE KEY uk_instance_var (instance_id, name)`
+- `KEY idx_value (value)`
+- `KEY idx_instance_updated (instance_id, updated_at)`
 
 ---
 
-### 4. instance_alarms（实例告警表）
+### 4. `instance_alarms`（实例告警表）
 
 告警有生命周期状态，需要独立表支持状态管理。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
-| id | VARCHAR(64) | PK | 告警ID |
-| instance_id | VARCHAR(64) | FK, NOT NULL, INDEX | 关联 instances.id |
-| rule_id | VARCHAR(128) | NOT NULL | 触发规则名 (如: temperatureExceeded) |
-| severity | VARCHAR(16) | NOT NULL, INDEX | 级别 (warning/critical) |
-| level | INT | NOT NULL, INDEX | 告警等级 (1-5) |
-| status | VARCHAR(16) | NOT NULL, INDEX | 状态 (triggered/confirmed/cleared) |
+| id | VARCHAR(64) | PK | 告警 ID |
+| instance_id | VARCHAR(64) | FK, NOT NULL, INDEX | 关联 `instances.id` |
+| rule_id | VARCHAR(128) | NOT NULL | 触发规则名或告警定义名 |
+| severity | VARCHAR(16) | NOT NULL, INDEX | 级别，如 `warning/critical` |
+| level | INT | NOT NULL, INDEX | 告警等级 |
+| status | VARCHAR(16) | NOT NULL, INDEX | 状态，如 `triggered/confirmed/cleared` |
 | message | VARCHAR(500) | NOT NULL | 告警消息 |
-| payload | JSON | - | 上下文数据 (温度值、阈值等) |
+| payload | JSON | - | 上下文数据 |
 | triggered_at | DATETIME | NOT NULL, INDEX | 触发时间 |
 | confirmed_at | DATETIME | - | 确认时间 |
 | confirmed_by | VARCHAR(64) | - | 确认人 |
@@ -138,272 +249,170 @@
 | cleared_by | VARCHAR(64) | - | 清除人 |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 
-**状态流转**：
-```
-triggered → confirmed → cleared
-     ↓           ↓
-   (自动清除)   (人工确认)
-```
+**索引**
 
-**payload JSON 示例**：
-```json
-{
-  "variable": "temperature",
-  "currentValue": 1850,
-  "threshold": 1800,
-  "unit": "℃"
-}
-```
-
-**索引**：
 - `PRIMARY KEY (id)`
 - `KEY idx_instance (instance_id)`
 - `KEY idx_status (status)`
 - `KEY idx_level (level)`
 - `KEY idx_severity (severity)`
 - `KEY idx_triggered (triggered_at)`
-- `KEY idx_cleared (cleared_at)`
-- `KEY idx_instance_status (instance_id, status)` - 查询实例活跃告警
+- `KEY idx_instance_status (instance_id, status)`
 
 ---
 
-### 5. instance_events（实例事件表）
+### 5. `instance_events`（实例事件表）
 
-事件是只增不改的时序数据，结构简单。
+事件是只增不改的时序数据。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
-| id | VARCHAR(64) | PK | 事件ID |
-| instance_id | VARCHAR(64) | FK, NOT NULL, INDEX | 关联 instances.id |
-| event_type | VARCHAR(64) | NOT NULL, INDEX | 类型 (state-change/service-call/alarm-trigger/variable-change) |
+| id | VARCHAR(64) | PK | 事件 ID |
+| instance_id | VARCHAR(64) | FK, NOT NULL, INDEX | 关联 `instances.id` |
+| event_type | VARCHAR(64) | NOT NULL, INDEX | 事件类型 |
 | timestamp | DATETIME | NOT NULL, INDEX | 发生时间 |
 | payload | JSON | - | 事件数据 |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 
-**payload JSON 示例**：
+**payload 示例**
+
 ```json
-// state-change
-{ "from": "empty", "to": "receiving", "trigger": "beginLoad" }
-
-// service-call  
-{ "service": "loadSteel", "params": { "weight": 150 }, "result": "success" }
-
-// variable-change
-{ "variable": "temperature", "old": 1500, "new": 1520 }
-
-// alarm-trigger
-{ "alarmId": "alarm_ladle_001_001", "ruleId": "temperatureExceeded" }
+{
+  "from": "receiving",
+  "to": "full",
+  "trigger": "beginLoad"
+}
 ```
 
-**索引**：
+```json
+{
+  "service": "moveTo",
+  "params": {
+    "targetLocation": "caster_2"
+  },
+  "result": "success"
+}
+```
+
+```json
+{
+  "planId": "plan_20260411_001",
+  "mode": "cortex",
+  "reason": "routeConflictDetected"
+}
+```
+
+**索引**
+
 - `PRIMARY KEY (id)`
 - `KEY idx_instance (instance_id)`
 - `KEY idx_type (event_type)`
 - `KEY idx_timestamp (timestamp)`
-- `KEY idx_instance_time (instance_id, timestamp)` - 查询实例时间线
+- `KEY idx_instance_time (instance_id, timestamp)`
 
 ---
 
-### 6. instance_logs（可选，实例日志表）
+### 6. `instance_logs`（可选日志表）
 
-如果日志需要持久化，建议单独表（或送外部日志系统如 ELK）。
+若需要持久化日志，建议独立表或外部日志系统。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
-| id | BIGINT | PK, AUTO_INCREMENT | 自增ID |
-| instance_id | VARCHAR(64) | FK, NOT NULL, INDEX | 关联 instances.id |
+| id | BIGINT | PK, AUTO_INCREMENT | 自增 ID |
+| instance_id | VARCHAR(64) | FK, NOT NULL, INDEX | 关联 `instances.id` |
 | timestamp | DATETIME | NOT NULL, INDEX | 时间戳 |
-| level | VARCHAR(16) | INDEX | 级别 (debug/info/warn/error) |
+| level | VARCHAR(16) | INDEX | 级别 |
 | message | TEXT | - | 日志内容 |
-| source | VARCHAR(32) | - | 来源 (state-machine/service/schedule/rule/system) |
-| context | JSON | - | 上下文 (文件名、行号等) |
+| source | VARCHAR(32) | - | 来源，如 `state-machine/service/schedule/rule/cortex` |
+| context | JSON | - | 上下文 |
 
-**context JSON 示例**：
+---
+
+## v2 结构映射
+
+### 模型文件结构
+
 ```json
 {
-  "file": "loadSteel.py",
-  "line": 42,
-  "function": "execute",
-  "traceId": "trace_001"
+  "$schema": "https://agent-studio.io/schema/v2",
+  "metadata": {},
+  "attributes": {},
+  "variables": {},
+  "derivedProperties": {},
+  "rules": {},
+  "functions": {},
+  "services": {},
+  "states": {},
+  "transitions": {},
+  "behaviors": {},
+  "events": {},
+  "alarms": {},
+  "schedules": {},
+  "goals": {},
+  "decisionPolicies": {},
+  "memory": {},
+  "plans": {}
 }
 ```
 
-**索引**：
-- `PRIMARY KEY (id)`
-- `KEY idx_instance (instance_id)`
-- `KEY idx_level (level)`
-- `KEY idx_timestamp (timestamp)`
-
----
-
-## ER 关系图
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  File System                                                            │
-│  /models/ladle.json  ← 完整模型配置 (attributes, variables, rules,       │
-│  /models/crane.json     states, transitions, services, alarms, schedules)│
-└─────────────────────────────────────────────────────────────────────────┘
-                               │
-                               │ file_path
-                               ▼
-┌─────────┐               ┌─────────────┐               ┌─────────────────┐
-│ models  │──────────────►│  instances  │◄──────────────│instance_variables│
-│(元数据)  │    1:N        │  (实例主表)  │    1:N        │   (变量值)       │
-└─────────┘               └──────┬──────┘               └─────────────────┘
-                                 │
-            ┌────────────────────┼────────────────────┐
-            │                    │                    │
-            ▼                    ▼                    ▼
-     ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-     │instance_alar│      │instance_even│      │instance_logs│
-     │    ms       │      │    ts       │      │   (可选)     │
-     │  (告警表)    │      │  (事件表)    │      │  (日志表)    │
-     └─────────────┘      └─────────────┘      └─────────────┘
-```
-
----
-
-## 常用查询示例
-
-### 获取实例完整信息
-```sql
-SELECT 
-  i.*,
-  JSON_OBJECTAGG(iv.name, iv.value) as variables
-FROM instances i
-LEFT JOIN instance_variables iv ON i.id = iv.instance_id
-WHERE i.id = 'ladle_001' AND i.is_deleted = FALSE
-GROUP BY i.id;
-```
-
-### 查询钢水量超过 100 吨的实例
-```sql
-SELECT DISTINCT i.*
-FROM instances i
-JOIN instance_variables iv ON i.id = iv.instance_id
-WHERE iv.name = 'steelAmount' AND CAST(iv.value AS DECIMAL) > 100;
-```
-
-### 查询实例的活跃告警（未清除），按等级降序
-```sql
-SELECT * FROM instance_alarms 
-WHERE instance_id = 'ladle_001' AND status != 'cleared'
-ORDER BY level DESC, triggered_at DESC;
-```
-
-### 查询待确认的严重告警（level >= 3）
-```sql
-SELECT * FROM instance_alarms 
-WHERE status = 'triggered' AND level >= 3;
-```
-
-### 查询实例最近 24 小时的事件时间线
-```sql
-SELECT * FROM instance_events 
-WHERE instance_id = 'ladle_001' 
-  AND timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-ORDER BY timestamp DESC;
-```
-
-### 查询实例的最新状态变更事件
-```sql
-SELECT * FROM instance_events 
-WHERE instance_id = 'ladle_001' AND event_type = 'state-change'
-ORDER BY timestamp DESC
-LIMIT 1;
-```
-
----
-
-## 数据清理策略
-
-| 表名 | 保留策略 | 说明 |
-|------|----------|------|
-| models | 永久保留 | 模型元数据，占用极小 |
-| instances | 软删除，保留 1 年 | 标记 is_deleted，定期物理删除 |
-| instance_variables | 随实例删除 | 实例删除时级联删除 |
-| instance_alarms | 保留 90 天 | 已清除的告警可归档到冷存储 |
-| instance_events | 保留 30 天 | 定期归档到冷存储（如 S3） |
-| instance_logs | 保留 7 天 | 或直送 ELK，不存本地 |
-
----
-
-## model.json 文件结构参考
+### 实例文件结构
 
 ```json
 {
-  "$schema": "https://agent-studio.io/schema/v1",
-  "metadata": {
-    "version": "1.0",
-    "name": "ladle",
-    "title": "钢包智能体",
-    "tags": ["logistics", "steelmaking"],
-    "group": "logistics",
-    "creator": "张三",
-    "createdAt": "2024-06-01T10:00:00Z",
-    "updatedAt": "2024-06-01T10:00:00Z",
-    "description": "钢包智能体，负责盛放和运输钢水"
-  },
-  "attributes": {
-    "capacity": { "type": "number", "default": 200, "x-unit": "ton" },
-    "maxTemperature": { "type": "number", "default": 1800, "x-unit": "℃" }
-  },
-  "variables": {
-    "steelAmount": { "type": "number", "default": 0, "x-unit": "ton" },
-    "temperature": { "type": "number", "default": 25, "x-unit": "℃" }
-  },
-  "derivedProperties": {
-    "fillRate": { "type": "number", "x-formula": "steelAmount / capacity * 100" }
-  },
-  "rules": {
-    "capacityLimit": { "condition": "steelAmount <= capacity", ... }
-  },
-  "states": { ... },
-  "transitions": { ... },
-  "services": { ... },
-  "alarms": { ... },
-  "schedules": { ... }
-}
-```
-
----
-
-## 实例数据结构参考
-
-```json
-{
-  "$schema": "https://agent-studio.io/schema/v1/instance",
+  "$schema": "https://agent-studio.io/schema/v2/instance",
   "id": "ladle_001",
   "modelId": "ladle",
-  "state": "empty",
-  "metadata": {
-    "name": "ladle_001",
-    "title": "1号钢包",
-    "description": "转炉跨1号钢包",
-    "creator": "张三",
-    "createdAt": "2024-06-01T10:00:00Z",
-    "updatedAt": "2024-06-01T10:00:00Z"
-  },
-  "attributes": {
-    "capacity": 200,
-    "maxTemperature": 1800
-  },
-  "variables": {
-    "steelAmount": 0,
-    "temperature": 25,
-    "carbonContent": 0,
-    "steelGrade": "",
-    "currentLocation": "standby_area"
-  },
-  "extensions": {
-    "maintenance": { "usageCount": 0, "lastMaintenanceTime": null },
-    "lifecycle": { "totalPours": 0, "totalSteelHandled": 0 }
-  }
+  "state": "full",
+  "metadata": {},
+  "attributes": {},
+  "variables": {},
+  "bindings": {},
+  "memory": {},
+  "activeGoals": [],
+  "currentPlan": {},
+  "extensions": {}
 }
 ```
 
 ---
 
-**文档版本**: 1.0  
-**创建日期**: 2026-04-09
+## 存储策略建议
+
+### 应优先单独成表的内容
+
+- 高频变化、需要过滤排序的 `variables`
+- 告警生命周期数据
+- 事件时间线
+- 日志
+
+### 应优先放 JSON 的内容
+
+- `attributes`
+- `bindings`
+- `memory`
+- `active_goals`
+- `current_plan`
+- `extensions`
+
+### 未来可拆分的内容
+
+如果后续出现下列场景，可以再考虑单独拆表：
+
+- 需要按目标状态统计 `activeGoals`
+- 需要检索 `currentPlan.steps.service`
+- 需要分析长期 `memory` 历史
+
+在 v2 初期，这些内容仍以 JSON 为主更合适。
+
+---
+
+## 结论
+
+Agent Studio v2 的数据库设计遵循一个简单原则：
+
+- 模型定义继续文件化
+- 实例运行态分层存储
+- 高频变量值独立化
+- 低频认知上下文 JSON 化
+
+这样可以在不增加存储复杂度的前提下，让同一套系统同时承载具身 agent、反应式 agent 和带有限 `cortex` 能力的 hybrid agent。

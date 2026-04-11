@@ -1,164 +1,319 @@
-# Agent Studio 智能体模型设计方法论
+# Agent Studio 智能体模型方法论
 
-## 1. 核心设计理念
+## 1. 核心立场
 
-### 1.1 数字孪生 (Digital Twin)
-模型定义采用**数字孪生**思想，将物理实体抽象为可计算、可交互的智能体。每个智能体同时具有：
-- **静态属性 (Attributes)**：不可变的物理/配置特性
-- **动态状态 (Variables)**：随时间变化的可观测数据
-- **派生特性 (Derived Properties)**：基于状态的计算属性
+### 1.1 智能体优先
+Agent Studio 统一以 **agent** 作为核心抽象，不再把“物模型”和“智能体模型”看成两套平行体系。
 
-### 1.2 状态-行为分离
-将智能体的**状态定义**与**行为逻辑**解耦：
-- `states` 只描述"在什么状态下"
-- `services` / `functions` 描述"能做什么"
-- `behaviors` 描述"如何响应外部事件"
+- 物模型是 agent 的**具身部分**
+- `reflex` 是 agent 的**快速响应系统**
+- `cortex` 是 agent 的**慢速决策系统**
 
-### 1.3 声明式规则引擎
-通过 `rules` 模块实现**声明式约束**，而非过程式校验：
-- 规则独立于业务逻辑
-- 可配置触发时机 (pre/post)
-- 支持参数化复用
+这意味着：
 
----
+- 钢包、天车、设备单元可以是 agent
+- 产线调度、工艺协调、资源编排也可以是 agent
+- 它们使用同一份顶层 schema，只是能力重心不同
 
-## 2. 模型结构分层
+### 1.2 概念分层，配置扁平
+`embodiment / reflex / cortex` 是方法论分层和引擎视角，不是配置文件中的独立嵌套块。
 
-### 2.1 元数据层 (Metadata)
+配置作者面对的仍然是一份扁平顶层结构，例如：
+
+- `attributes`
+- `variables`
+- `rules`
+- `services`
+- `states`
+- `goals`
+- `decisionPolicies`
+- `memory`
+- `plans`
+
+这样做的目标是同时满足：
+
+- 抽象清晰
+- 配置成本低
+- 向后兼容强
+
+### 1.3 向后兼容优先
+v2 schema 采用“保留骨架、补齐语义、收紧边界”的演进策略。
+
+- 保留现有 `attributes / variables / rules / services / states / transitions / behaviors / alarms / schedules`
+- 新增 `goals / decisionPolicies / memory / plans`
+- 通过校验器保证职责边界，而不是通过继续增加配置层级来解决混乱
+
+## 2. 顶层结构
+
+推荐的 v2 顶层结构如下：
+
+```json
+{
+  "$schema": "https://agent-studio.io/schema/v2",
+  "metadata": {},
+  "attributes": {},
+  "variables": {},
+  "derivedProperties": {},
+  "rules": {},
+  "functions": {},
+  "services": {},
+  "states": {},
+  "transitions": {},
+  "behaviors": {},
+  "events": {},
+  "alarms": {},
+  "schedules": {},
+  "goals": {},
+  "decisionPolicies": {},
+  "memory": {},
+  "plans": {}
+}
 ```
-metadata: 智能体的身份与分类信息
-  - 基础标识：name, title, description
-  - 分类标签：tags, group
-  - 管理信息：creator, createdAt, updatedAt
-```
-**设计意图**：支持智能体的发现、检索、权限管理和生命周期追踪。
 
-### 2.2 特性层 (Characteristics)
-描述智能体"是什么"和"有什么"。
+### 2.1 具身相关字段
 
-| 模块 | 语义 | 可变性 | 典型内容 |
-|------|------|--------|----------|
-| `attributes` | 固有属性 | 不可变 | 容量、耐温上限、材质规格 |
-| `variables` | 状态变量 | 可变 | 当前温度、位置、钢水量 |
-| `derivedProperties` | 派生属性 | 计算得出 | 填充率、剩余容量 |
+- `attributes`: agent 的稳定特征或配置边界
+- `variables`: agent 的运行时状态
+- `derivedProperties`: 基于属性和变量计算得出的派生视图
 
-**设计意图**：
-- `attributes` 与 `variables` 的区分反映了**物理约束**与**运行时状态**的本质区别
-- `derivedProperties` 避免数据冗余，确保一致性
+### 2.2 `reflex` 相关字段
 
-### 2.3 能力层 (Capabilities)
-描述智能体"能做什么"。
+- `rules`: 硬约束、校验、权限和安全边界
+- `functions`: 纯计算或查询逻辑
+- `services`: 标准动作入口
+- `states / transitions`: 快速、确定性的状态机
+- `behaviors`: 全局事件响应
+- `events`: 事件契约
+- `alarms`: 告警生命周期定义
+- `schedules`: 基于时间的检查与动作
 
-| 模块 | 调用方式 | 副作用 | 语义定位 |
-|------|----------|--------|----------|
-| `functions` | 被动调用 (call) | 无 | 纯计算函数，查询/计算 |
-| `services` | 主动调用 (invoke) | 有 | 业务服务，修改状态 |
+### 2.3 `cortex` 相关字段
 
-**设计意图**：
-- 区分**查询操作** (functions) 与**命令操作** (services)
-- services 内置规则检查 (pre/post rules)，确保操作安全
-- 支持权限控制 (permissions.roles)
+- `goals`: agent 追求的目标
+- `decisionPolicies`: 何时由 `reflex` 升级到 `cortex`，以及决策时必须遵守的边界
+- `memory`: 决策上下文槽位定义
+- `plans`: `cortex` 输出的结构化计划模板
 
-### 2.4 规则层 (Rules)
-```
-rules: 业务约束与校验规则
-  - condition: 触发条件表达式
-  - parameters: 可配置的规则参数
-  - onViolation: 违反时的处理策略 (reject/warn)
-```
-**设计意图**：
-- 将业务规则从代码中剥离，实现**规则外置化**
-- 支持规则复用（多个 service 可引用同一 rule）
-- 参数化设计允许同类规则的不同配置
+## 3. `reflex` 与 `cortex` 的职责边界
 
-### 2.5 状态层 (State Management)
-描述智能体"处于什么状态"及"如何流转"。
+### 3.1 `reflex`
+`reflex` 适合表达：
 
-```
-states: 有限状态集合
-  - group: 状态分组（如 loadState, processState）
-  - initialState: 初始状态标记
-  - actions: 进入/退出时执行的动作
+- 快速响应
+- 局部判断
+- 确定性流转
+- 硬约束执行
+- 定时检查
+- 异常触发
 
-transitions: 状态转换规则
-  - trigger: 触发条件（event/timeout/condition）
-  - from/to: 源状态与目标状态
-  - priority: 多规则冲突时的优先级
-```
-**设计意图**：
-- 采用**有限状态机 (FSM)** 建模，确保状态流转的确定性
-- 状态分组支持复杂状态机管理
-- trigger 的多类型支持（事件/超时/条件）增强表达力
-- actions 支持状态进入/退出的副作用执行
+常见场景：
 
-### 2.6 响应层 (Reactive Behaviors)
-```
-behaviors: 事件订阅与响应
-  - trigger: 订阅的事件或条件
-  - actions: 触发后执行的响应动作
-```
-**设计意图**：
-- 与 `transitions` 的区别：`transitions` 是**状态间**的流转，`behaviors` 是**全局**的事件响应
-- 支持智能体对外部事件的**被动响应**，而非主动查询
+- 温度超限拒绝执行
+- 钢包满载时发出移动预警
+- 到达寿命阈值时自动进入维护状态
 
-### 2.7 事件与告警层 (Events & Alarms)
-```
-events: 事件定义（类型契约）
-  - 描述智能体可能发出的事件结构
+### 3.2 `cortex`
+`cortex` 适合表达：
 
-alarms: 告警规则
-  - trigger: 告警触发条件
-  - recovery: 告警恢复条件
-  - severity/level: 严重程度分级
-```
-**设计意图**：
-- `events` 作为**类型契约**，确保事件消费者理解事件结构
-- `alarms` 是特殊的事件——具有生命周期（触发-恢复）
-- 支持时间窗口条件 (time-sliding window)，适合监控场景
+- 多目标权衡
+- 异常场景下的策略切换
+- 计划生成
+- 跨实体协调
+- 慢速、代价较高的决策
 
-### 2.8 调度层 (Schedules)
-```
-schedules: 定时任务
-  - cron: 调度表达式
-  - actions: 定时执行的动作
-```
-**设计意图**：
-- 支持**周期性检查**和**定时任务**
-- 与 behaviors 互补：behaviors 响应事件，schedules 基于时间
+常见场景：
 
----
+- 运输冲突下的任务重排
+- 安全与时效目标冲突时的权衡
+- 调度 agent 对多个钢包的路径与工位分配
 
-## 3. 关键设计模式
+### 3.3 硬约束优先
+`cortex` 不能绕过：
 
-### 3.1 表达式引擎
-多处使用表达式 (`x-formula`, `condition`) 引用智能体的属性：
-```
-this.attributes.capacity          // 引用属性
-this.variables.steelAmount        // 引用变量
-this.derivedProperties.fillRate   // 引用派生属性
-```
-**意图**：实现声明式配置，避免硬编码逻辑。
+- `rules`
+- 权限校验
+- 状态机前置约束
+- 安全边界
 
-### 3.2 规则挂载机制
-Rules 可被挂载到多个位置：
-- `variables.x-rules.pre/post`：变量变更前/后校验
-- `services.rules.pre/post`：服务执行前/后校验
+也就是说：
 
-**意图**：实现**关注点分离**，校验逻辑与业务逻辑解耦。
+- `cortex` 可以决定“下一步做什么”
+- 但不能决定“忽略容量上限和安全门禁”
 
-### 3.3 动作类型系统
-Actions 支持多种类型：
-- `runScript`：执行脚本
-- `triggerEvent`：触发事件
+## 4. 字段职责规则
 
-**意图**：统一的副作用执行框架。
+### 4.1 `functions` 必须纯
+`functions` 只允许读取上下文，不允许写入：
 
-### 3.4 触发器类型系统
-Trigger 支持多种触发方式：
-- `event`：特定事件发生
-- `timeout`：超时
-- `condition`：条件满足（可配合时间窗口）
+- `variables`
+- `attributes`
+- `memory`
+- `state`
 
-**意图**：支持**事件驱动**、**定时驱动**、**条件驱动**三种语义。
+`functions` 的用途是：
 
+- 查询
+- 计算
+- 模拟评估
 
+凡是会修改运行态的逻辑，都应进入 `services`、状态动作、调度动作或计划执行器。
+
+### 4.2 `services` 是统一动作入口
+`services` 是 agent 可被调用的命令面。
+
+- 可由人工调用
+- 可由系统调用
+- 可由 `reflex` 触发
+- 可由 `cortex` 计划落地
+
+建议：
+
+- 能复用的动作尽量收口到 `services`
+- `plans` 中的执行步骤优先引用 `services`
+
+### 4.3 `rules` 只放硬约束，不放目标优化
+适合放进 `rules`：
+
+- 容量上限
+- 安全温度范围
+- 权限校验
+- 机械门禁
+- 状态前置条件
+
+不适合放进 `rules`：
+
+- 吞吐最大化
+- 等待时间最小化
+- 优先保障高等级订单
+
+这些属于 `goals` 或 `decisionPolicies` 的范畴。
+
+### 4.4 `state` 与业务状态分离
+实例层 `state` 表示 **内部 `reflex` 状态机状态**。
+
+如果需要额外暴露外部业务状态，应使用独立变量名，例如：
+
+- `processStatus`
+- `transportPhase`
+
+避免继续使用一个含义重叠的 `variables.status`。
+
+## 5. 模型定义与实例运行态
+
+### 5.1 `model.json`
+`model.json` 只描述模型定义，不描述某个实例当前值。
+
+应包含：
+
+- 字段定义
+- 规则与能力定义
+- 状态机定义
+- 目标与决策策略定义
+- 记忆槽位定义
+- 计划结构定义
+
+### 5.2 实例文件
+实例文件描述某个具体 agent 的运行态。
+
+推荐包含：
+
+- `id`
+- `modelId`
+- `metadata`
+- `state`
+- `attributes`
+- `variables`
+- `bindings`
+- `memory`
+- `activeGoals`
+- `currentPlan`
+- `extensions`
+
+### 5.3 `bindings`
+`bindings` 只出现在实例层，用于描述外部接线方式。
+
+例如：
+
+- `variables.temperature = 1650`
+- `bindings.temperature.source = "plc_line_a"`
+
+这样可以清晰区分：
+
+- `variables`: 当前内部值
+- `bindings`: 数据从哪里来、如何映射
+
+## 6. 必选项与条件必选项
+
+### 6.1 最小必选项
+
+- `$schema`
+- `metadata.name`
+- `metadata.title`
+
+同时模型至少具备以下之一：
+
+- `attributes`
+- `variables`
+- `services`
+- `goals`
+
+### 6.2 条件必选项
+
+- 存在 `derivedProperties` 时，其依赖字段必须存在
+- 存在 `transitions` 时，必须存在 `states`
+- 存在 `decisionPolicies` 时，其引用的 `goals / memory / plans` 必须存在
+- 存在 `alarms / behaviors / schedules` 时，其动作引用的事件、服务或动作必须存在
+
+## 7. 两类典型 agent
+
+### 7.1 实体型 agent
+例如钢包、天车、设备单元。
+
+特点：
+
+- 具身信息重
+- `reflex` 重
+- `cortex` 轻
+
+典型能力：
+
+- 安全检查
+- 状态流转
+- 局部异常处理
+- 简单计划调整
+
+### 7.2 调度型 agent
+例如产线调度、工艺协调、资源编排。
+
+特点：
+
+- 具身信息轻
+- `reflex` 适中
+- `cortex` 重
+
+典型能力：
+
+- 多目标权衡
+- 冲突消解
+- 中短期计划生成
+- 多实体协作决策
+
+## 8. 实现建议
+
+### 8.1 迁移顺序
+
+1. 先收紧旧 schema 的职责边界
+2. 再最小化引入 `goals / decisionPolicies`
+3. 最后补充 `memory / plans`
+
+### 8.2 校验优先级
+优先实现以下校验：
+
+- 引用完整性校验
+- `functions` 纯函数校验
+- 状态机一致性校验
+- `cortex` 引用校验
+- 模型与实例职责边界校验
+
+## 9. 一句话总结
+Agent Studio 的 v2 方向不是把“物模型”替换成“智能体模型”，而是把物模型纳入统一的 agent 抽象中，在保持配置扁平的前提下，让同一份 schema 同时覆盖具身、`reflex` 和 `cortex`。

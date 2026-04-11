@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Agent Studio API - Instances",
-    "version": "1.0.0",
-    "description": "Agent Studio RESTful API"
+    "version": "2.0.0",
+    "description": "Agent Studio instance lifecycle and runtime context API."
   },
   "servers": [
     {
@@ -19,7 +19,7 @@
   "tags": [
     {
       "name": "Instances",
-      "description": "Agent instance lifecycle and data"
+      "description": "Agent instance lifecycle and runtime data"
     }
   ],
   "paths": {
@@ -40,13 +40,6 @@
           },
           {
             "name": "state",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "search",
             "in": "query",
             "schema": {
               "type": "string"
@@ -86,7 +79,11 @@
                     "pagination": {
                       "$ref": "#/components/schemas/Pagination"
                     }
-                  }
+                  },
+                  "required": [
+                    "data",
+                    "pagination"
+                  ]
                 }
               }
             }
@@ -121,7 +118,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -148,7 +145,7 @@
         "tags": [
           "Instances"
         ],
-        "summary": "Get instance",
+        "summary": "Get instance detail",
         "operationId": "getInstance",
         "parameters": [
           {
@@ -211,7 +208,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated",
+            "description": "Updated instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -305,11 +302,11 @@
             "properties": {
               "code": {
                 "type": "string",
-                "example": "CAPACITY_EXCEEDED"
+                "example": "INVALID_INSTANCE_SCHEMA"
               },
               "message": {
                 "type": "string",
-                "example": "Current steel amount exceeds capacity limit."
+                "example": "Instance schema validation failed."
               },
               "details": {
                 "type": "object"
@@ -325,6 +322,111 @@
           "error"
         ]
       },
+      "Binding": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "example": "plc_line_a"
+          },
+          "path": {
+            "type": "string",
+            "example": "ns=2;s=Ladle01.Temp"
+          },
+          "topic": {
+            "type": "string",
+            "example": "position/ladle/001"
+          },
+          "selector": {
+            "type": "string",
+            "example": "$.temperature"
+          },
+          "transform": {
+            "type": "string",
+            "example": "Math.round(value)"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "GoalAssignment": {
+        "type": "object",
+        "properties": {
+          "goalId": {
+            "type": "string",
+            "example": "safeHandling"
+          },
+          "status": {
+            "type": "string",
+            "example": "active"
+          },
+          "priority": {
+            "type": "integer",
+            "example": 100
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "goalId",
+          "status"
+        ]
+      },
+      "PlanStep": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "example": "moveTo"
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "service"
+        ]
+      },
+      "CurrentPlan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "plan_20260411_001"
+          },
+          "planType": {
+            "type": "string",
+            "example": "deliveryAdjustment"
+          },
+          "status": {
+            "type": "string",
+            "example": "ready"
+          },
+          "summary": {
+            "type": "string",
+            "example": "先确认目标工位，再执行移动到 caster_2。"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "planType",
+          "status"
+        ]
+      },
       "Instance": {
         "type": "object",
         "properties": {
@@ -338,79 +440,81 @@
           },
           "state": {
             "type": "string",
-            "example": "empty"
+            "example": "full"
           },
           "metadata": {
             "type": "object",
             "example": {
-              "name": "ladle",
+              "name": "ladle_001",
               "title": "1号钢包",
-              "description": "这是一个钢包的数字孪生...",
-              "tags": [
-                "steelmaking",
-                "ladle"
-              ],
-              "creator": "张三",
-              "createdAt": "2024-06-01T10:00:00Z",
-              "updatedAt": "2024-06-01T10:00:00Z",
-              "kind": "ladle",
-              "version": "1.0.0"
+              "description": "转炉跨 1 号钢包实例",
+              "version": "2.0.0"
             }
           },
           "attributes": {
             "type": "object",
             "example": {
-              "capacity": {
-                "title": "冷却水流量",
-                "unit": "L/min",
-                "description": "钢包冷却系统水流量",
-                "value": 150,
-                "isCustom": true
-              },
-              "maxTemperature": {
-                "title": "冷却水流量",
-                "unit": "L/min",
-                "description": "钢包冷却系统水流量",
-                "value": 150
-              }
+              "capacity": 200,
+              "maxTemperature": 1800,
+              "insulationDuration": 120,
+              "refractoryLife": 80
             }
           },
           "variables": {
             "type": "object",
             "example": {
-              "steelAmount": {
-                "title": "冷却水流量",
-                "unit": "L/min",
-                "description": "钢包冷却系统水流量",
-                "value": 150,
-                "isCustom": false,
-                "bind": {
-                  "source": "plc_line_a",
-                  "path": "ns=2;s=Ladle01.Weight",
-                  "selector": "$.value",
-                  "transform": "value * 0.001"
-                }
+              "steelAmount": 150,
+              "temperature": 1650,
+              "currentLocation": "converter_1",
+              "targetLocation": "caster_2",
+              "processStatus": "awaiting_transport"
+            }
+          },
+          "bindings": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Binding"
+            },
+            "example": {
+              "temperature": {
+                "source": "plc_line_a",
+                "path": "ns=2;s=Ladle01.Temp",
+                "selector": "$.temperature",
+                "transform": "Math.round(value)"
               }
             }
           },
-          "extensions": {
+          "memory": {
             "type": "object",
             "example": {
-              "attributes": {},
-              "variables": {},
-              "derivedProperties": {},
-              "functions": {},
-              "services": {},
-              "alarms": {},
-              "behaviors": {},
-              "schedules": {}
+              "currentAssignment": {
+                "taskId": "task_20260411_001",
+                "destination": "caster_2"
+              },
+              "lastDecision": {
+                "mode": "cortex",
+                "summary": "优先送达 caster_2"
+              }
             }
+          },
+          "activeGoals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GoalAssignment"
+            }
+          },
+          "currentPlan": {
+            "$ref": "#/components/schemas/CurrentPlan"
+          },
+          "extensions": {
+            "type": "object"
           }
         },
         "required": [
           "id",
           "modelId",
-          "state"
+          "state",
+          "variables"
         ]
       },
       "InstanceInput": {
@@ -426,7 +530,7 @@
           },
           "state": {
             "type": "string",
-            "example": "empty"
+            "example": "full"
           },
           "metadata": {
             "type": "object"
@@ -436,6 +540,21 @@
           },
           "variables": {
             "type": "object"
+          },
+          "bindings": {
+            "type": "object"
+          },
+          "memory": {
+            "type": "object"
+          },
+          "activeGoals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GoalAssignment"
+            }
+          },
+          "currentPlan": {
+            "$ref": "#/components/schemas/CurrentPlan"
           },
           "extensions": {
             "type": "object"
