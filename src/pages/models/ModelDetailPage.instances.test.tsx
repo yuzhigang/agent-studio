@@ -3,12 +3,17 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, test } from 'vitest';
 import { instanceService } from '@/mocks/services/instanceService';
 import { modelService } from '@/mocks/services/modelService';
-import { ModelDetailPage } from './ModelDetailPage';
+import { ModelsPage } from './ModelsPage';
 
-function renderModelDetail(pathname = '/models/ladle') {
-  const router = createMemoryRouter([{ path: '/models/:modelId', element: <ModelDetailPage /> }], {
-    initialEntries: [pathname],
-  });
+function renderModelsWorkbench(pathname = '/models/ladle') {
+  const router = createMemoryRouter(
+    [
+      { path: '/models', element: <ModelsPage /> },
+      { path: '/models/:modelId', element: <ModelsPage /> },
+      { path: '/models/:modelId/instances/:instanceId', element: <ModelsPage /> },
+    ],
+    { initialEntries: [pathname] },
+  );
   render(<RouterProvider router={router} />);
   return router;
 }
@@ -20,9 +25,9 @@ beforeEach(async () => {
 });
 
 test('shows instances for the current model and creates a new instance', async () => {
-  renderModelDetail();
+  renderModelsWorkbench();
 
-  expect(await screen.findByText('1号钢包')).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: /ladle_001/i })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'New Instance' }));
   const dialog = await screen.findByRole('dialog', { name: 'Create Instance' });
@@ -30,13 +35,18 @@ test('shows instances for the current model and creates a new instance', async (
   fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: '2号钢包' } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
 
-  expect(await screen.findByText('2号钢包')).toBeInTheDocument();
+  await waitFor(
+    () => {
+      expect(screen.getByRole('button', { name: /ladle_002/i })).toHaveAttribute('aria-pressed', 'true');
+    },
+    { timeout: 5000 },
+  );
 });
 
 test('rejects duplicate instance id at service boundary even when page-level list is stale', async () => {
-  renderModelDetail();
+  renderModelsWorkbench();
 
-  expect(await screen.findByText('1号钢包')).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: /ladle_001/i })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'New Instance' }));
   const dialog = await screen.findByRole('dialog', { name: 'Create Instance' });

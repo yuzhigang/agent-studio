@@ -3,12 +3,17 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, test } from 'vitest';
 import { instanceService } from '@/mocks/services/instanceService';
 import { modelService } from '@/mocks/services/modelService';
-import { InstanceDetailPage } from './InstanceDetailPage';
+import { ModelsPage } from '@/pages/models/ModelsPage';
 
-function renderInstanceDetail(pathname = '/models/ladle/instances/ladle_001') {
-  const router = createMemoryRouter([{ path: '/models/:modelId/instances/:instanceId', element: <InstanceDetailPage /> }], {
-    initialEntries: [pathname],
-  });
+function renderEmbeddedDetail(pathname = '/models/ladle/instances/ladle_001') {
+  const router = createMemoryRouter(
+    [
+      { path: '/models', element: <ModelsPage /> },
+      { path: '/models/:modelId', element: <ModelsPage /> },
+      { path: '/models/:modelId/instances/:instanceId', element: <ModelsPage /> },
+    ],
+    { initialEntries: [pathname] },
+  );
   render(<RouterProvider router={router} />);
   return router;
 }
@@ -19,10 +24,10 @@ beforeEach(async () => {
   await instanceService.reset();
 });
 
-test('edits instance variables and bindings and saves them', async () => {
-  renderInstanceDetail();
+test('edits instance variables and bindings from embedded detail and saves them', async () => {
+  renderEmbeddedDetail();
 
-  expect(await screen.findByDisplayValue('1号钢包')).toBeInTheDocument();
+  await screen.findByDisplayValue('1号钢包');
 
   fireEvent.click(screen.getByRole('tab', { name: 'Variables' }));
   fireEvent.change(screen.getByLabelText('processStatus'), { target: { value: 'transport_ready' } });
@@ -48,9 +53,9 @@ test('edits instance variables and bindings and saves them', async () => {
   expect(updated?.bindings?.steelAmount?.source).toBe('factory_mqtt_v2');
 });
 
-test('shows not found when route modelId does not match instance modelId', async () => {
-  renderInstanceDetail('/models/not-ladle/instances/ladle_001');
+test('shows not found when route instance id does not exist', async () => {
+  renderEmbeddedDetail('/models/ladle/instances/not_exists');
 
-  expect(await screen.findByText('Instance not found')).toBeInTheDocument();
+  await screen.findByText('Instance not found');
   expect(screen.queryByDisplayValue('1号钢包')).not.toBeInTheDocument();
 });
