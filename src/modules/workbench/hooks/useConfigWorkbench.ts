@@ -11,7 +11,9 @@ export function useConfigWorkbench(modelIdParam?: string, instanceIdParam?: stri
   const [loadingInstances, setLoadingInstances] = useState(true);
 
   const selectedModel = models.find((model) => model.metadata.name === modelIdParam) ?? models[0] ?? null;
-  const selectedInstance = instances.find((instance) => instance.id === instanceIdParam) ?? instances[0] ?? null;
+  const selectedInstance = instanceIdParam
+    ? instances.find((instance) => instance.id === instanceIdParam) ?? null
+    : null;
 
   useEffect(() => {
     let active = true;

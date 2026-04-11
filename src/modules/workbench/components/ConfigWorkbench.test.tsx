@@ -40,7 +40,10 @@ function WorkbenchHarness() {
 
 function renderWorkbench(pathname = '/models/ladle/instances/ladle_001') {
   const router = createMemoryRouter(
-    [{ path: '/models/:modelId/instances/:instanceId', element: <WorkbenchHarness /> }],
+    [
+      { path: '/models/:modelId', element: <WorkbenchHarness /> },
+      { path: '/models/:modelId/instances/:instanceId', element: <WorkbenchHarness /> },
+    ],
     { initialEntries: [pathname] },
   );
 
@@ -58,4 +61,12 @@ test('loads models and derives selected model/instance from route params', async
   expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('button', { name: 'ladle_001' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('does not preselect an instance when the route only targets a model', async () => {
+  renderWorkbench('/models/ladle');
+
+  expect(await screen.findByRole('heading', { name: 'Models' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '钢包智能体' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'ladle_001' })).toHaveAttribute('aria-pressed', 'false');
 });
