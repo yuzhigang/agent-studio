@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { beforeEach } from 'vitest';
+import { modelService } from '@/mocks/services/modelService';
 import { appRoutes } from './router';
 
 function renderWithRoute(pathname: string) {
@@ -9,6 +11,11 @@ function renderWithRoute(pathname: string) {
 
   render(<RouterProvider router={router} />);
 }
+
+beforeEach(async () => {
+  localStorage.clear();
+  await modelService.reset();
+});
 
 test('redirects / to /models and renders layout navigation', async () => {
   renderWithRoute('/');
@@ -25,13 +32,13 @@ test('renders /settings route', async () => {
 });
 
 test('renders /models/:modelId route', async () => {
-  renderWithRoute('/models/model-alpha');
+  renderWithRoute('/models/ladle');
 
-  expect(await screen.findByRole('heading', { name: 'Model Detail' })).toBeInTheDocument();
+  expect(await screen.findByDisplayValue('钢包智能体')).toBeInTheDocument();
 });
 
 test('renders /models/:modelId/instances/:instanceId route', async () => {
-  renderWithRoute('/models/model-alpha/instances/instance-01');
+  renderWithRoute('/models/ladle/instances/ladle_001');
 
   expect(await screen.findByRole('heading', { name: 'Instance Detail' })).toBeInTheDocument();
 });
