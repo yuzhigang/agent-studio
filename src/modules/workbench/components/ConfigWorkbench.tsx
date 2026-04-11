@@ -28,21 +28,20 @@ export function ConfigWorkbench({ modelIdParam, instanceIdParam }: ConfigWorkben
   }
 
   return (
-    <section
-      data-testid="config-workbench"
-      style={{ display: 'grid', gridTemplateColumns: '240px 260px minmax(0, 1fr)', gap: 12, alignItems: 'start' }}
-    >
-      <CompactModelList
-        models={models}
-        selectedModelId={selectedModelId}
-        onSelect={(nextModelId) => {
-          navigate(`/models/${nextModelId}`);
-        }}
-        onCreate={createModel}
-      />
+    <section data-testid="config-workbench" className="config-workbench">
+      <section className="workbench-pane workbench-pane--list workbench-pane--models">
+        <CompactModelList
+          models={models}
+          selectedModelId={selectedModelId}
+          onSelect={(nextModelId) => {
+            navigate(`/models/${nextModelId}`);
+          }}
+          onCreate={createModel}
+        />
+      </section>
 
-      <section aria-label="Instances Pane">
-        <Flex justify="end" style={{ marginBottom: 8 }}>
+      <section className="workbench-pane workbench-pane--list workbench-pane--instances" aria-label="Instances Pane">
+        <Flex justify="end" className="workbench-pane__actions">
           {selectedModel ? (
             <CreateInstanceModal
               model={selectedModel}
@@ -71,7 +70,9 @@ export function ConfigWorkbench({ modelIdParam, instanceIdParam }: ConfigWorkben
         )}
       </section>
 
-      <InstanceDetailWorkbench modelId={routeModelId} instanceId={routeInstanceId} />
+      <section className="workbench-pane workbench-pane--detail">
+        <InstanceDetailWorkbench modelId={routeModelId} instanceId={routeInstanceId} />
+      </section>
     </section>
   );
 }

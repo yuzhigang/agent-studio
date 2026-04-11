@@ -5,6 +5,7 @@ import { instanceService } from '@/mocks/services/instanceService';
 import { modelService } from '@/mocks/services/modelService';
 import { CompactInstanceList } from '@/modules/workbench/components/CompactInstanceList';
 import { CompactModelList } from '@/modules/workbench/components/CompactModelList';
+import { ConfigWorkbench } from '@/modules/workbench/components/ConfigWorkbench';
 import { WorkbenchPlaceholder } from '@/modules/workbench/components/WorkbenchPlaceholder';
 import { useConfigWorkbench } from '@/modules/workbench/hooks/useConfigWorkbench';
 import type { AgentModel } from '@/types/domain/model';
@@ -65,6 +66,24 @@ function renderWorkbench(pathname = '/models/ladle/instances/ladle_001') {
   render(<RouterProvider router={router} />);
 }
 
+function RoutedConfigWorkbench() {
+  const { modelId = '', instanceId = '' } = useParams();
+
+  return <ConfigWorkbench modelIdParam={modelId} instanceIdParam={instanceId} />;
+}
+
+function renderRealWorkbench(pathname = '/models/ladle/instances/ladle_001') {
+  const router = createMemoryRouter(
+    [
+      { path: '/models/:modelId', element: <RoutedConfigWorkbench /> },
+      { path: '/models/:modelId/instances/:instanceId', element: <RoutedConfigWorkbench /> },
+    ],
+    { initialEntries: [pathname] },
+  );
+
+  render(<RouterProvider router={router} />);
+}
+
 beforeEach(async () => {
   localStorage.clear();
   await Promise.all([modelService.reset(), instanceService.reset()]);
@@ -112,4 +131,17 @@ test('shows detail placeholder before an instance is selected', async () => {
     expect(screen.getByText('Select an instance to edit')).toBeInTheDocument();
   });
   expect(screen.queryByRole('heading', { name: '1号钢包' })).not.toBeInTheDocument();
+});
+
+test('renders the compact workbench structure with layout classes', async () => {
+  renderRealWorkbench('/models/ladle/instances/ladle_001');
+
+  const workbench = await screen.findByTestId('config-workbench');
+  expect(workbench).toHaveClass('config-workbench');
+  expect(workbench.querySelector('.workbench-pane--models')).not.toBeNull();
+  expect(workbench.querySelector('.workbench-pane--instances')).not.toBeNull();
+  expect(workbench.querySelector('.workbench-pane--detail')).not.toBeNull();
+  expect(await screen.findByLabelText('Models')).toBeInTheDocument();
+  expect(await screen.findByLabelText('Instances')).toBeInTheDocument();
+  expect(await screen.findByLabelText('Instance Detail')).toBeInTheDocument();
 });
