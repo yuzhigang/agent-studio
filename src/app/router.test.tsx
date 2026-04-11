@@ -40,5 +40,5 @@ test('renders /models/:modelId route', async () => {
 test('renders /models/:modelId/instances/:instanceId route', async () => {
   renderWithRoute('/models/ladle/instances/ladle_001');
 
-  expect(await screen.findByRole('heading', { name: 'Instance Detail' })).toBeInTheDocument();
+  expect(await screen.findByDisplayValue('1号钢包')).toBeInTheDocument();
 });

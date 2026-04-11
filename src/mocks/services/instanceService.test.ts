@@ -45,3 +45,11 @@ test('throws when updating a non-existent instance', async () => {
   const saved = await instanceService.getById('missing-instance');
   expect(saved).toBeNull();
 });
+
+test('rejects duplicate instance id on create', async () => {
+  const original = structuredClone((await instanceService.listByModel('ladle'))[0]);
+  await expect(instanceService.create(original)).rejects.toThrow('Instance ID already exists');
+
+  const instances = await instanceService.listByModel('ladle');
+  expect(instances.filter((instance) => instance.id === original.id)).toHaveLength(1);
+});

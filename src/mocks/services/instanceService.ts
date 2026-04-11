@@ -14,7 +14,12 @@ export const instanceService = {
   },
   async create(instance: AgentInstance): Promise<AgentInstance> {
     await delay();
-    const next = [...instanceRepository.list(), instance];
+    const current = instanceRepository.list();
+    if (current.some((item) => item.id === instance.id)) {
+      throw new Error(`Instance ID already exists: ${instance.id}`);
+    }
+
+    const next = [...current, instance];
     instanceRepository.saveAll(next);
     return instance;
   },
