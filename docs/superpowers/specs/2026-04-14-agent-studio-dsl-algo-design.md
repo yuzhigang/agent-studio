@@ -171,7 +171,40 @@ ladle.loadSteel -> <function>
 
 脚本通过 `exec()` 在受限 globals 字典中执行，不共享模块级别的全局状态。
 
-### 4.4 纯算法脚本示例
+### 4.4 预置标准库
+
+为降低算法和 adapter 的编写成本，沙箱默认注入以下标准库模块，脚本和算法函数中可直接引用，无需手动 `import`：
+
+**数学计算**
+- `math` — 标准数学函数（sin, cos, sqrt, ceil, floor 等）
+- `random` — 随机数生成
+- `statistics` — 基础统计（mean, median, stdev, variance 等）
+
+**聚合与迭代**
+- `itertools` — 迭代器工具
+- `functools` — 高阶函数（reduce, partial 等）
+- `operator` — 运算符函数
+- `collections` — Counter, defaultdict, deque, OrderedDict 等
+
+**数据处理**
+- `json` — JSON 序列化/反序列化
+- `datetime` / `time` — 日期时间处理
+- `re` — 正则表达式
+
+**字符串与工具**
+- `string` — 字符串常量
+- `copy` — 深拷贝与浅拷贝
+- `typing` — 类型提示支持
+
+**使用示例：**
+```python
+import math
+avg_temp = statistics.mean([l['temperature'] for l in ladles])
+```
+
+> 注：虽然 `import` 语法被保留，但沙箱会拦截对非白名单模块的导入请求，并抛出 `ImportError`。
+
+### 4.5 纯算法脚本示例
 
 ```python
 # algo_packages/ladle_dispatcher/__init__.py
