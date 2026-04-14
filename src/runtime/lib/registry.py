@@ -1,11 +1,11 @@
+"""LibRegistry: discovers and resolves @lib_function decorated libraries."""
+
 import importlib
 import importlib.util
-import os
 import sys
 import threading
 from pathlib import Path
 
-from src.runtime.lib.decorator import lib_function
 from src.runtime.lib.exceptions import LibNotFoundError, LibRegistrationError
 
 
@@ -45,9 +45,9 @@ class LibRegistry:
     def clear(self):
         with self._rlock:
             self._registry.clear()
-        for mod_name in list(self._loaded_modules):
-            sys.modules.pop(mod_name, None)
-        self._loaded_modules.clear()
+            for mod_name in list(self._loaded_modules):
+                sys.modules.pop(mod_name, None)
+            self._loaded_modules.clear()
 
     def scan(self, agents_root: str):
         agents_path = Path(agents_root)

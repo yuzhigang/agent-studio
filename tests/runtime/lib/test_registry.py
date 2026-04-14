@@ -1,5 +1,4 @@
 import os
-import sys
 import pytest
 from src.runtime.lib.registry import LibRegistry
 from src.runtime.lib.exceptions import LibNotFoundError, LibRegistrationError
