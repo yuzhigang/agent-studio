@@ -39,6 +39,7 @@ from src.runtime.lib.exceptions import (
     LibRegistrationError,
     ScriptExecutionError,
     ImmutableContextError,
+    LibValidationError,
 )
 
 def test_exceptions_are_runtime_error_subclasses():
@@ -47,6 +48,7 @@ def test_exceptions_are_runtime_error_subclasses():
     assert issubclass(LibRegistrationError, RuntimeError)
     assert issubclass(ScriptExecutionError, RuntimeError)
     assert issubclass(ImmutableContextError, RuntimeError)
+    assert issubclass(LibValidationError, RuntimeError)
 
 def test_lib_not_found_error_carries_details():
     e = LibNotFoundError("foo.bar", details="not registered")
@@ -96,6 +98,13 @@ class ImmutableContextError(RuntimeError):
     def __init__(self, operation: str = ""):
         self.operation = operation
         super().__init__(f"Immutable context: {operation} is not allowed")
+
+
+class LibValidationError(RuntimeError):
+    def __init__(self, name: str, details: str = ""):
+        self.name = name
+        self.details = details
+        super().__init__(f"Lib validation error: {name} ({details})")
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -328,19 +337,20 @@ class LibRegistry:
                 for py_file in scripts_dir.glob("*.py"):
                     self._load_module(namespace, py_file)
 
-    def _load_module(self, namespace: str, py_file: Path):
+    def _exec_module(self, namespace: str, py_file: Path):
         module_name = f"_lib_registry_{namespace}_{py_file.stem}"
-        # Clean up stale module entry
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-        self._loaded_modules.discard(module_name)
-
-        spec = importlib.util.spec_from_file_location(module_name, py_file)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+        if module_name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(module_name, py_file)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+        else:
+            module = sys.modules[module_name]
+            importlib.reload(module)
         self._loaded_modules.add(module_name)
+        return module
 
+    def _register_functions(self, namespace: str, py_file: Path, module):
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
             meta = getattr(obj, "_lib_meta", None)
@@ -354,6 +364,27 @@ class LibRegistry:
                 )
             key = f"{namespace}.{py_file.stem}.{meta['name']}"
             self._registry[key] = meta["func"]
+
+    def _load_module(self, namespace: str, py_file: Path):
+        module = self._exec_module(namespace, py_file)
+        self._register_functions(namespace, py_file, module)
+
+    def reload_module(self, py_file_path: str):
+        py_file = Path(py_file_path)
+        if self._agents_root is None:
+            return
+        try:
+            rel = py_file.relative_to(self._agents_root)
+        except ValueError:
+            return
+        parts = rel.parts
+        if len(parts) < 3 or parts[1] != "scripts":
+            return
+        namespace = parts[0]
+
+        with self._rlock:
+            module = self._exec_module(namespace, py_file)
+            self._register_functions(namespace, py_file, module)
 
     def lookup(self, namespace: str, module: str, name: str):
         key = f"{namespace}.{module}.{name}"
@@ -461,8 +492,8 @@ class _LibProxyNode:
 
 
 class LibProxy:
-    def __init__(self, default_namespace: str | None = None):
-        self._registry = LibRegistry()
+    def __init__(self, default_namespace: str | None = None, registry: LibRegistry | None = None):
+        self._registry = registry or LibRegistry(_singleton=True)
         self._default_namespace = default_namespace
 
     def __getattr__(self, name: str):
@@ -521,6 +552,16 @@ def test_sandbox_blocks_eval():
     with pytest.raises(ScriptExecutionError):
         executor.execute("eval('1+1')", {})
 
+def test_sandbox_blocks_compile():
+    executor = SandboxExecutor()
+    with pytest.raises(ScriptExecutionError):
+        executor.execute("compile('1+1', '<string>', 'eval')", {})
+
+def test_sandbox_blocks_getattr():
+    executor = SandboxExecutor()
+    with pytest.raises(ScriptExecutionError):
+        executor.execute("getattr({}, 'keys')", {})
+
 def test_safe_builtins_has_math():
     assert "abs" in SAFE_BUILTINS
     assert "open" not in SAFE_BUILTINS
@@ -555,6 +596,12 @@ SAFE_BUILTINS = frozenset({
     "True", "False", "None",
 })
 
+FORBIDDEN_BUILTINS = frozenset({
+    "open", "eval", "exec", "__import__", "compile",
+    "getattr", "setattr", "delattr", "input", "breakpoint",
+    "help", "quit", "exit",
+})
+
 PRELOADED_MODULES = {
     "math", "random", "statistics", "itertools", "functools",
     "operator", "collections", "json", "datetime", "time", "re",
@@ -578,7 +625,11 @@ class SandboxExecutor:
         except SyntaxError as e:
             raise ScriptExecutionError(str(e), line=e.lineno)
 
-        safe_builtins = {name: __builtins__[name] for name in SAFE_BUILTINS if name in __builtins__}
+        safe_builtins = {
+            name: __builtins__[name]
+            for name in SAFE_BUILTINS
+            if name in __builtins__ and name not in FORBIDDEN_BUILTINS
+        }
         safe_builtins["__import__"] = _make_import_hook(PRELOADED_MODULES)
 
         preloaded = {}
@@ -605,7 +656,7 @@ class SandboxExecutor:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/runtime/lib/test_sandbox.py -v`
-Expected: 5 passed
+Expected: 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -634,6 +685,7 @@ from src.runtime.lib.exceptions import (
     LibRegistrationError,
     ScriptExecutionError,
     ImmutableContextError,
+    LibValidationError,
 )
 
 __all__ = [
@@ -647,6 +699,7 @@ __all__ = [
     "LibRegistrationError",
     "ScriptExecutionError",
     "ImmutableContextError",
+    "LibValidationError",
 ]
 ```
 
@@ -696,7 +749,7 @@ def demo(args: dict) -> dict:
         registry.scan(tmpdir)
         assert registry.lookup("ladle", "demo", "demo")({}) == {"version": 1}
 
-        watcher = LibWatcher(tmpdir)
+        watcher = LibWatcher(tmpdir, registry=registry)
         watcher.start()
 
         # Modify file
@@ -751,9 +804,9 @@ class _ReloadHandler(FileSystemEventHandler):
 
 
 class LibWatcher:
-    def __init__(self, agents_root: str):
+    def __init__(self, agents_root: str, registry: LibRegistry | None = None):
         self.agents_root = agents_root
-        self.registry = LibRegistry()
+        self.registry = registry or LibRegistry(_singleton=True)
         self.observer = Observer()
         self.handler = _ReloadHandler(self.registry, agents_root)
 
@@ -766,55 +819,7 @@ class LibWatcher:
         self.observer.join()
 ```
 
-Add `reload_module` to `src/runtime/lib/registry.py` inside `LibRegistry`:
-
-```python
-    def reload_module(self, py_file_path: str):
-        py_file = Path(py_file_path)
-        # Infer namespace from path relative to agents_root
-        # We store agents_root during scan, or re-derive it
-        # For simplicity, assume namespace is the parent-of-parent of scripts/
-        parts = py_file.parts
-        try:
-            scripts_idx = parts.index("scripts")
-        except ValueError:
-            return
-        if scripts_idx == 0:
-            return
-        namespace = parts[scripts_idx - 1]
-        self._load_module(namespace, py_file)
-```
-
-Update `scan` to store `_agents_root`:
-
-```python
-    def scan(self, agents_root: str):
-        agents_path = Path(agents_root)
-        self._agents_root = agents_path
-        ...
-```
-
-And add `reload_module`:
-
-```python
-    def reload_module(self, py_file_path: str):
-        py_file = Path(py_file_path)
-        if self._agents_root is None:
-            return
-        try:
-            rel = py_file.relative_to(self._agents_root)
-        except ValueError:
-            return
-        parts = rel.parts
-        if len(parts) < 3 or parts[1] != "scripts":
-            return
-        namespace = parts[0]
-
-        # Load module *outside* the lock to avoid re-entrancy issues
-        self._load_module(namespace, py_file)
-```
-
-Note: `_load_module` now clears and re-adds the `sys.modules` entry, and the registry update happens under `_rlock` inside `_load_module`.
+No additional registry changes needed — `reload_module` was already added in Task 3 using `importlib.reload()` and relative-path namespace derivation.
 
 - [ ] **Step 4: Run test to verify it passes**
 
