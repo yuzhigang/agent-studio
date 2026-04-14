@@ -122,7 +122,11 @@ class LibRegistry:
         else:
             namespace = parts[1]  # agent name
 
+        prefix = f"{namespace}.{py_file.stem}."
         with self._rlock:
+            for key in list(self._registry.keys()):
+                if key.startswith(prefix):
+                    del self._registry[key]
             module = self._exec_module(namespace, py_file)
             self._register_functions(namespace, py_file, module)
 

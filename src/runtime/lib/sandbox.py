@@ -57,7 +57,7 @@ class SandboxExecutor:
         for mod_name in PRELOADED_MODULES:
             try:
                 preloaded[mod_name] = importlib.import_module(mod_name)
-            except Exception:
+            except ImportError:
                 pass
 
         globals_dict = {"__builtins__": safe_builtins, **preloaded, **context}

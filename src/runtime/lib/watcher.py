@@ -8,11 +8,17 @@ class _ReloadHandler(FileSystemEventHandler):
     def __init__(self, registry: LibRegistry):
         self.registry = registry
 
-    def on_modified(self, event):
+    def _handle(self, event):
         if event.is_directory:
             return
         if event.src_path.endswith(".py"):
             self.registry.reload_module(event.src_path)
+
+    def on_modified(self, event):
+        self._handle(event)
+
+    def on_created(self, event):
+        self._handle(event)
 
 
 class LibWatcher:
