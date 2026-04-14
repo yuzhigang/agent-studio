@@ -80,7 +80,7 @@ def load_steel(args: dict) -> dict:
 AlgoRegistry.scan("algo_packages/")
 ```
 
-扫描器递归遍历所有 `.py` 文件，import 模块，收集所有带 `@algo_function` / `@algo_service` 装饰器的函数，建立映射表：
+扫描器递归遍历所有 `.py` 文件，import 模块，收集所有带 `@algo_function` 装饰器的函数，建立映射表：
 
 ```
 ladle_dispatcher.getCandidateLadles -> <function>
@@ -177,7 +177,7 @@ ladle.loadSteel -> <function>
 # algo_packages/ladle_dispatcher/__init__.py
 from agent_studio.runtime.algo import algo_function
 
-@algo_function(name="getCandidateLadles", package="ladle_dispatcher")
+@algo_function(name="getCandidateLadles", package="ladle_dispatcher", readonly=True)
 def get_candidate_ladles(args: dict) -> dict:
     ladles = args.get("ladles", [])
     converter_id = args.get("converterId")
