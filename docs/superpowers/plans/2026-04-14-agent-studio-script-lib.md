@@ -245,7 +245,10 @@ from src.runtime.lib.registry import LibRegistry
 
 @pytest.fixture
 def registry():
-    return LibRegistry()
+    reg = LibRegistry()
+    yield reg
+    reg.clear()
+    LibRegistry.reset_instance()
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -271,14 +274,30 @@ class LibRegistry:
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._registry = {}
-                    cls._instance._rlock = threading.RLock()
-        return cls._instance
+    def __new__(cls, *, _singleton: bool = False):
+        if _singleton:
+            if cls._instance is None:
+                with cls._lock:
+                    if cls._instance is None:
+                        cls._instance = super().__new__(cls)
+                        cls._instance._init()
+            return cls._instance
+        return super().__new__(cls)
+
+    def __init__(self, *, _singleton: bool = False):
+        if not _singleton or getattr(self, "_registry", None) is None:
+            self._init()
+
+    def _init(self):
+        self._registry = {}
+        self._rlock = threading.RLock()
+        self._agents_root: Path | None = None
+        self._loaded_modules: set[str] = set()
+
+    @classmethod
+    def reset_instance(cls):
+        with cls._lock:
+            cls._instance = None
 
     @property
     def _data(self):
@@ -287,11 +306,15 @@ class LibRegistry:
     def clear(self):
         with self._rlock:
             self._registry.clear()
+        for mod_name in list(self._loaded_modules):
+            sys.modules.pop(mod_name, None)
+        self._loaded_modules.clear()
 
     def scan(self, agents_root: str):
         agents_path = Path(agents_root)
         if not agents_path.exists():
             return
+        self._agents_root = agents_path
 
         with self._rlock:
             self._registry.clear()
@@ -307,10 +330,16 @@ class LibRegistry:
 
     def _load_module(self, namespace: str, py_file: Path):
         module_name = f"_lib_registry_{namespace}_{py_file.stem}"
+        # Clean up stale module entry
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        self._loaded_modules.discard(module_name)
+
         spec = importlib.util.spec_from_file_location(module_name, py_file)
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
+        self._loaded_modules.add(module_name)
 
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
@@ -472,10 +501,15 @@ def test_sandbox_executes_simple_script():
     result = executor.execute("a = 1 + 2\nresult = a * 3", {"args": {"x": 1}})
     assert result == 9
 
-def test_sandbox_returns_last_expression():
+def test_sandbox_can_import_whitelisted_module():
     executor = SandboxExecutor()
-    result = executor.execute("return args['x'] + 1", {"args": {"x": 5}})
-    assert result == 6
+    result = executor.execute("import math\nresult = math.ceil(2.3)", {})
+    assert result == 3
+
+def test_sandbox_blocks_non_whitelisted_import():
+    executor = SandboxExecutor()
+    with pytest.raises(ScriptExecutionError):
+        executor.execute("import os\nresult = 1", {})
 
 def test_sandbox_blocks_open():
     executor = SandboxExecutor()
@@ -502,8 +536,8 @@ Expected: FAIL with `ModuleNotFoundError`
 ```python
 # src/runtime/lib/sandbox.py
 import ast
+import importlib
 import traceback
-from types import MappingProxyType
 
 from src.runtime.lib.exceptions import ScriptExecutionError, ImmutableContextError
 
@@ -521,33 +555,48 @@ SAFE_BUILTINS = frozenset({
     "True", "False", "None",
 })
 
+PRELOADED_MODULES = {
+    "math", "random", "statistics", "itertools", "functools",
+    "operator", "collections", "json", "datetime", "time", "re",
+    "string", "copy", "typing",
+}
+
+
+def _make_import_hook(allowed: set[str]):
+    def _import(name, globals=None, locals=None, fromlist=(), level=0):
+        base = name.split(".")[0]
+        if base not in allowed:
+            raise ImportError(f"Import of '{name}' is not allowed in this sandbox")
+        return __import__(name, globals, locals, fromlist, level)
+    return _import
+
 
 class SandboxExecutor:
-    def __init__(self, allow_import: bool = False):
-        self.allow_import = allow_import
-
     def execute(self, script: str, context: dict):
         try:
             tree = ast.parse(script, mode="exec")
         except SyntaxError as e:
             raise ScriptExecutionError(str(e), line=e.lineno)
 
-        if not self.allow_import:
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-                    raise ScriptExecutionError("import statements are not allowed in this sandbox")
-
         safe_builtins = {name: __builtins__[name] for name in SAFE_BUILTINS if name in __builtins__}
-        globals_dict = {"__builtins__": safe_builtins, **context}
+        safe_builtins["__import__"] = _make_import_hook(PRELOADED_MODULES)
+
+        preloaded = {}
+        for mod_name in PRELOADED_MODULES:
+            try:
+                preloaded[mod_name] = importlib.import_module(mod_name)
+            except Exception:
+                pass
+
+        globals_dict = {"__builtins__": safe_builtins, **preloaded, **context}
 
         try:
             exec(compile(tree, "<sandbox>", "exec"), globals_dict)
         except Exception as e:
-            tb = traceback.format_exc()
             if isinstance(e, ImmutableContextError):
                 raise
-            line = getattr(e, "__traceback__", None)
-            lineno = line.tb_lineno if line else None
+            tb = e.__traceback__
+            lineno = tb.tb_lineno if tb else None
             raise ScriptExecutionError(str(e), line=lineno) from e
 
         return globals_dict.get("result")
@@ -736,29 +785,36 @@ Add `reload_module` to `src/runtime/lib/registry.py` inside `LibRegistry`:
         self._load_module(namespace, py_file)
 ```
 
-Wait — storing `agents_root` is cleaner. Update `scan` to store it:
+Update `scan` to store `_agents_root`:
 
 ```python
     def scan(self, agents_root: str):
-        self._agents_root = Path(agents_root)
+        agents_path = Path(agents_root)
+        self._agents_root = agents_path
         ...
 ```
 
-And `reload_module`:
+And add `reload_module`:
 
 ```python
     def reload_module(self, py_file_path: str):
         py_file = Path(py_file_path)
+        if self._agents_root is None:
+            return
         try:
-            scripts_idx = py_file.parts.index("scripts")
+            rel = py_file.relative_to(self._agents_root)
         except ValueError:
             return
-        if scripts_idx == 0:
+        parts = rel.parts
+        if len(parts) < 3 or parts[1] != "scripts":
             return
-        namespace = py_file.parts[scripts_idx - 1]
-        with self._rlock:
-            self._load_module(namespace, py_file)
+        namespace = parts[0]
+
+        # Load module *outside* the lock to avoid re-entrancy issues
+        self._load_module(namespace, py_file)
 ```
+
+Note: `_load_module` now clears and re-adds the `sys.modules` entry, and the registry update happens under `_rlock` inside `_load_module`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -780,6 +836,18 @@ git commit -m "feat: add LibWatcher for hot reload"
 - Test: `tests/runtime/lib/test_integration.py`
 
 - [ ] **Step 1: Write the failing test**
+
+First create `tests/fixtures/agents/converter/scripts/planner.py`:
+
+```python
+from src.runtime.lib.decorator import lib_function
+
+@lib_function(name="plan", namespace="converter", readonly=True)
+def plan(args: dict) -> dict:
+    return {"plan": args["target"]}
+```
+
+Then write the test:
 
 ```python
 import os
@@ -808,7 +876,7 @@ result = lib.dispatcher.getCandidates({'converterId': args.converterId})
     assert result == {"candidates": []}
 
 def test_cross_namespace_call(registry: LibRegistry):
-    registry._data["converter.planner.plan"] = lambda args: {"plan": args["target"]}
+    registry.scan(os.path.join(FIXTURES, "agents"))
     proxy = LibProxy(default_namespace="ladle")
 
     script = "result = lib.converter.planner.plan({'target': 'A1'})"
@@ -834,7 +902,7 @@ Expected: 2 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/runtime/lib/test_integration.py
+git add tests/runtime/lib/test_integration.py tests/fixtures/agents/converter/scripts/planner.py
 git commit -m "test: end-to-end lib proxy + sandbox integration"
 ```
 
