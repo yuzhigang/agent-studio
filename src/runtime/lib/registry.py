@@ -1,9 +1,8 @@
 """LibRegistry: discovers and resolves @lib_function decorated libraries."""
 
-import importlib
-import importlib.util
 import sys
 import threading
+import types
 from pathlib import Path
 
 from src.runtime.lib.exceptions import LibNotFoundError, LibRegistrationError
@@ -79,14 +78,11 @@ class LibRegistry:
 
     def _exec_module(self, namespace: str, py_file: Path):
         module_name = f"_lib_registry_{namespace}_{py_file.stem}"
-        if module_name not in sys.modules:
-            spec = importlib.util.spec_from_file_location(module_name, py_file)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-        else:
-            module = sys.modules[module_name]
-            importlib.reload(module)
+        module = types.ModuleType(module_name)
+        sys.modules[module_name] = module
+        with open(py_file, "rb") as f:
+            code = compile(f.read(), str(py_file), "exec")
+        exec(code, module.__dict__)
         self._loaded_modules.add(module_name)
         return module
 
