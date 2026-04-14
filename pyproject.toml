@@ -1,0 +1,18 @@
+[project]
+name = "agent-studio"
+version = "0.1.0"
+description = "Agent Studio"
+requires-python = ">=3.11"
+dependencies = [
+    "watchdog>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
