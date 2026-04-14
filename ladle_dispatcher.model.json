@@ -1,0 +1,983 @@
+{
+  "$schema": "https://agent-studio.io/schema/v2",
+  "metadata": {
+    "version": "2.0",
+    "name": "ladle_dispatcher",
+    "title": "钢包调度员智能体",
+    "group": "scheduling",
+    "description": "用于转炉配包的调度型智能体。"
+  },
+  "attributes": {
+    "maxDispatchWindowSec": {
+      "type": "number",
+      "default": 90
+    },
+    "temperatureSafetyMargin": {
+      "type": "number",
+      "default": 20
+    },
+    "dispatchTimeoutSec": {
+      "type": "number",
+      "default": 240
+    },
+    "maxReplanTimes": {
+      "type": "number",
+      "default": 3
+    }
+  },
+  "variables": {
+    "dispatchMode": {
+      "type": "string",
+      "default": "normal",
+      "x-audit": true
+    },
+    "processStatus": {
+      "type": "string",
+      "default": "idle",
+      "x-audit": true
+    },
+    "pendingRequests": {
+      "type": "array",
+      "default": [],
+      "x-audit": true
+    },
+    "candidateRanking": {
+      "type": "array",
+      "default": [],
+      "x-audit": true
+    },
+    "activeAssignments": {
+      "type": "object",
+      "default": {},
+      "x-audit": true
+    },
+    "resourceLocks": {
+      "type": "object",
+      "default": {},
+      "x-audit": true
+    },
+    "replanCounter": {
+      "type": "number",
+      "default": 0,
+      "x-audit": true
+    },
+    "lastError": {
+      "type": "string",
+      "default": "",
+      "x-audit": true
+    }
+  },
+  "derivedProperties": {},
+  "rules": {
+    "requestPayloadValid": {
+      "condition": "args.requestId != null && args.converterId != null && args.requiredByTime != null && args.steelGrade != null",
+      "onViolation": {
+        "action": "reject",
+        "error": {
+          "code": "INVALID_REQUEST_PAYLOAD"
+        }
+      }
+    },
+    "ladleNotLocked": {
+      "condition": "args.isLocked != true",
+      "onViolation": {
+        "action": "reject",
+        "error": {
+          "code": "LADLE_ALREADY_LOCKED"
+        }
+      }
+    },
+    "gradeCompatible": {
+      "condition": "args.gradeCompatible == true",
+      "onViolation": {
+        "action": "reject",
+        "error": {
+          "code": "GRADE_NOT_COMPATIBLE"
+        }
+      }
+    },
+    "temperatureSufficient": {
+      "condition": "args.estimatedArrivalTemp == null || args.minRequiredTemp == null || args.estimatedArrivalTemp >= args.minRequiredTemp + this.attributes.temperatureSafetyMargin",
+      "onViolation": {
+        "action": "reject",
+        "error": {
+          "code": "ARRIVAL_TEMPERATURE_LOW"
+        }
+      }
+    },
+    "replanWithinLimit": {
+      "condition": "this.variables.replanCounter < this.attributes.maxReplanTimes",
+      "onViolation": {
+        "action": "warn",
+        "warning": {
+          "code": "REPLAN_LIMIT_REACHED"
+        }
+      }
+    }
+  },
+  "functions": {
+    "estimateArrivalTime": {
+      "type": "script",
+      "scriptEngine": "python",
+      "script": "eta_sec = max(0, args.get('baseTravelSec', 0) + args.get('queueDelaySec', 0))\nreturn {'etaSec': eta_sec}",
+      "parameters": {
+        "baseTravelSec": {
+          "type": "number"
+        },
+        "queueDelaySec": {
+          "type": "number"
+        }
+      },
+      "returns": {
+        "etaSec": {
+          "type": "number"
+        }
+      }
+    },
+    "scoreCandidate": {
+      "type": "script",
+      "scriptEngine": "python",
+      "script": "eta = args.get('etaScore', 0)\ntemp = args.get('tempScore', 0)\ngrade = args.get('gradeScore', 0)\nconflict = args.get('conflictPenalty', 0)\ntotal = 0.4 * eta + 0.3 * temp + 0.2 * grade - 0.1 * conflict\nreturn {'totalScore': total}",
+      "parameters": {
+        "etaScore": {
+          "type": "number"
+        },
+        "tempScore": {
+          "type": "number"
+        },
+        "gradeScore": {
+          "type": "number"
+        },
+        "conflictPenalty": {
+          "type": "number"
+        }
+      },
+      "returns": {
+        "totalScore": {
+          "type": "number"
+        }
+      }
+    },
+    "getCandidateLadles": {
+      "type": "script",
+      "scriptEngine": "python",
+      "scriptPath": "scripts/ladle_dispatcher/getCandidateLadles.py",
+      "entrypoint": "getCandidateLadles",
+      "description": "查询并筛选可用钢包候选集，实现位于外部 Python 文件。",
+      "parameters": {
+        "requestId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        },
+        "steelGrade": {
+          "type": "string"
+        },
+        "requiredByTime": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "minRequiredTemp": {
+          "type": "number"
+        },
+        "requiredWeight": {
+          "type": "number"
+        },
+        "availableLadles": {
+          "type": "array",
+          "description": "可选，用于测试或外部注入钢包列表"
+        }
+      },
+      "returns": {
+        "candidates": {
+          "type": "array",
+          "description": "候选钢包列表，含预计算得分"
+        },
+        "candidateCount": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "services": {
+    "createDispatchTask": {
+      "type": "script",
+      "scriptEngine": "python",
+      "rules": {
+        "pre": [
+          {
+            "rule": "requestPayloadValid"
+          }
+        ],
+        "post": []
+      },
+      "script": "if not isinstance(this.variables.pendingRequests, list):\n    this.variables.pendingRequests = []\nreq = {'requestId': args.requestId, 'taskId': args.get('taskId', f\"TASK-{args.requestId}\"), 'converterId': args.converterId, 'steelGrade': args.steelGrade, 'requiredByTime': args.requiredByTime, 'priority': args.get('priority', 50)}\nthis.variables.pendingRequests.append(req)\nthis.variables.processStatus = 'request_queued'\nreturn {'success': True, 'taskId': req['taskId']}",
+      "parameters": {
+        "requestId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        },
+        "steelGrade": {
+          "type": "string"
+        },
+        "requiredByTime": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        }
+      },
+      "returns": {
+        "success": {
+          "type": "boolean"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "permissions": {
+        "roles": [
+          "dispatcher_operator",
+          "mes_system",
+          "system"
+        ]
+      }
+    },
+    "lockLadle": {
+      "type": "script",
+      "scriptEngine": "python",
+      "rules": {
+        "pre": [
+          {
+            "rule": "ladleNotLocked"
+          }
+        ],
+        "post": []
+      },
+      "script": "if not isinstance(this.variables.resourceLocks, dict):\n    this.variables.resourceLocks = {}\nthis.variables.resourceLocks[args.ladleId] = {'taskId': args.taskId}\nreturn {'success': True}",
+      "parameters": {
+        "ladleId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "isLocked": {
+          "type": "boolean"
+        }
+      },
+      "returns": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "permissions": {
+        "roles": [
+          "dispatcher_operator",
+          "cortex",
+          "system"
+        ]
+      }
+    },
+    "assignLadleToConverter": {
+      "type": "script",
+      "scriptEngine": "python",
+      "rules": {
+        "pre": [
+          {
+            "rule": "gradeCompatible"
+          },
+          {
+            "rule": "temperatureSufficient"
+          }
+        ],
+        "post": []
+      },
+      "script": "if not isinstance(this.variables.activeAssignments, dict):\n    this.variables.activeAssignments = {}\nthis.variables.activeAssignments[args.taskId] = {'taskId': args.taskId, 'ladleId': args.ladleId, 'converterId': args.converterId, 'steelGrade': args.steelGrade, 'totalScore': args.get('totalScore', 0), 'status': 'assigned'}\nthis.variables.processStatus = 'assignment_committed'\nreturn {'success': True}",
+      "parameters": {
+        "taskId": {
+          "type": "string"
+        },
+        "ladleId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        },
+        "steelGrade": {
+          "type": "string"
+        },
+        "gradeCompatible": {
+          "type": "boolean"
+        },
+        "estimatedArrivalTemp": {
+          "type": "number"
+        },
+        "minRequiredTemp": {
+          "type": "number"
+        },
+        "totalScore": {
+          "type": "number"
+        }
+      },
+      "returns": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "permissions": {
+        "roles": [
+          "dispatcher_operator",
+          "cortex",
+          "system"
+        ]
+      }
+    },
+    "triggerReplan": {
+      "type": "script",
+      "scriptEngine": "python",
+      "rules": {
+        "pre": [
+          {
+            "rule": "replanWithinLimit"
+          }
+        ],
+        "post": []
+      },
+      "script": "this.variables.replanCounter = this.variables.replanCounter + 1\nthis.variables.processStatus = 'replanning'\nthis.variables.lastError = args.get('reason', 'replan_triggered')\nreturn {'success': True, 'replanCounter': this.variables.replanCounter}",
+      "parameters": {
+        "taskId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "returns": {
+        "success": {
+          "type": "boolean"
+        },
+        "replanCounter": {
+          "type": "number"
+        }
+      },
+      "permissions": {
+        "roles": [
+          "dispatcher_operator",
+          "cortex",
+          "system"
+        ]
+      }
+    }
+  },
+  "states": {
+    "idle": {
+      "title": "空闲",
+      "group": "dispatchState",
+      "initialState": true
+    },
+    "evaluating": {
+      "title": "评估中",
+      "group": "dispatchState"
+    },
+    "assigning": {
+      "title": "下发中",
+      "group": "dispatchState"
+    },
+    "monitoring": {
+      "title": "监控中",
+      "group": "dispatchState"
+    },
+    "replanning": {
+      "title": "重调度",
+      "group": "dispatchState"
+    }
+  },
+  "transitions": {
+    "idleToEvaluating": {
+      "from": "idle",
+      "to": "evaluating",
+      "trigger": {
+        "type": "event",
+        "name": "converterNeedLadle"
+      }
+    },
+    "evaluatingToAssigning": {
+      "from": "evaluating",
+      "to": "assigning",
+      "trigger": {
+        "type": "event",
+        "name": "candidateSelected"
+      }
+    },
+    "assigningToMonitoring": {
+      "from": "assigning",
+      "to": "monitoring",
+      "trigger": {
+        "type": "event",
+        "name": "ladleAssigned"
+      }
+    },
+    "monitoringToReplanning": {
+      "from": "monitoring",
+      "to": "replanning",
+      "trigger": {
+        "type": "event",
+        "name": "dispatchTimeoutDetected"
+      }
+    },
+    "replanningToAssigning": {
+      "from": "replanning",
+      "to": "assigning",
+      "trigger": {
+        "type": "event",
+        "name": "replanningCandidateSelected"
+      }
+    },
+    "monitoringToIdle": {
+      "from": "monitoring",
+      "to": "idle",
+      "trigger": {
+        "type": "event",
+        "name": "assignmentCompleted"
+      }
+    }
+  },
+  "behaviors": {
+    "onNeedLadleQueue": {
+      "trigger": {
+        "type": "event",
+        "name": "converterNeedLadle",
+        "when": "payload.requestId != null"
+      },
+      "priority": 1,
+      "actions": [
+        {
+          "type": "runScript",
+          "scriptEngine": "python",
+          "script": "if not isinstance(this.variables.pendingRequests, list):\n    this.variables.pendingRequests = []\nthis.variables.pendingRequests.append({'requestId': payload.requestId, 'taskId': payload.taskId if getattr(payload, 'taskId', None) else f\"TASK-{payload.requestId}\", 'converterId': payload.converterId, 'steelGrade': payload.steelGrade, 'requiredByTime': payload.requiredByTime})\nthis.variables.processStatus = 'request_queued'"
+        },
+        {
+          "type": "triggerEvent",
+          "name": "dispatchRequestQueued",
+          "payload": {
+            "taskId": "payload.taskId != null ? payload.taskId : 'TASK-' + payload.requestId",
+            "requestId": "payload.requestId",
+            "converterId": "payload.converterId"
+          }
+        }
+      ]
+    },
+    "onLadleEmptiedCompleteAssignment": {
+      "trigger": {
+        "type": "event",
+        "name": "ladleEmptied"
+      },
+      "priority": 8,
+      "actions": [
+        {
+          "type": "runScript",
+          "scriptEngine": "python",
+          "script": "task_id = ''\\nif isinstance(this.variables.activeAssignments, dict):\\n    for k,v in this.variables.activeAssignments.items():\\n        if v.get('ladleId') == payload.ladleId and v.get('status') == 'assigned':\\n            task_id = k\\n            break\\nif task_id != '':\\n    this.variables.activeAssignments[task_id]['status'] = 'completed'\\nif isinstance(this.variables.activeAssignments, dict):\\n    active = [x for x in this.variables.activeAssignments.values() if x.get('status') == 'assigned']\\n    this.variables.processStatus = 'idle' if len(active) == 0 else this.variables.processStatus"
+        }
+      ]
+    },
+    "emitDispatchAssignedToLadle": {
+      "trigger": {
+        "type": "event",
+        "name": "candidateSelected"
+      },
+      "priority": 5,
+      "actions": [
+        {
+          "type": "triggerEvent",
+          "name": "dispatchAssigned",
+          "payload": {
+            "destinationType": "'converter'",
+            "destinationId": "payload.converterId",
+            "taskId": "payload.taskId",
+            "ladleId": "payload.ladleId"
+          }
+        },
+        {
+          "type": "triggerEvent",
+          "name": "ladleAssigned",
+          "payload": {
+            "taskId": "payload.taskId",
+            "ladleId": "payload.ladleId",
+            "converterId": "payload.converterId"
+          }
+        }
+      ]
+    },
+    "onLadleLoadedSync": {
+      "trigger": {
+        "type": "event",
+        "name": "ladleLoaded"
+      },
+      "priority": 7,
+      "actions": [
+        {
+          "type": "runScript",
+          "scriptEngine": "python",
+          "script": "this.variables.lastError = ''\\nthis.variables.processStatus = 'ladle_loaded'"
+        }
+      ]
+    },
+    "onCandidateReadySelect": {
+      "trigger": {
+        "type": "event",
+        "name": "candidateSnapshotReady",
+        "when": "payload.candidateCount > 0"
+      },
+      "priority": 3,
+      "actions": [
+        {
+          "type": "triggerEvent",
+          "name": "candidateSelected",
+          "payload": {
+            "taskId": "payload.taskId",
+            "requestId": "payload.requestId",
+            "converterId": "payload.converterId",
+            "ladleId": "payload.primary.ladleId",
+            "totalScore": "payload.primary.totalScore"
+          }
+        }
+      ]
+    },
+    "onLadleStatusChangedSync": {
+      "trigger": {
+        "type": "event",
+        "name": "ladleStatusChanged"
+      },
+      "priority": 6,
+      "actions": [
+        {
+          "type": "runScript",
+          "scriptEngine": "python",
+          "script": "this.variables.processStatus = f'ladle_{payload.state}' if getattr(payload,'state',None) else this.variables.processStatus"
+        }
+      ]
+    },
+    "requestCandidateSnapshot": {
+      "trigger": {
+        "type": "event",
+        "name": "dispatchRequestQueued"
+      },
+      "priority": 2,
+      "actions": [
+        {
+          "type": "triggerEvent",
+          "name": "candidateSnapshotRequested",
+          "payload": {
+            "taskId": "payload.taskId",
+            "requestId": "payload.requestId",
+            "converterId": "payload.converterId"
+          }
+        }
+      ]
+    },
+    "resolveCandidateSnapshot": {
+      "trigger": {
+        "type": "event",
+        "name": "candidateSnapshotRequested"
+      },
+      "priority": 2,
+      "actions": [
+        {
+          "type": "runScript",
+          "scriptEngine": "python",
+          "script": "request = None\nfor req in this.variables.pendingRequests:\n    if req.get('taskId') == payload.taskId:\n        request = req\n        break\nargs = request if request else {}\nargs['converterId'] = payload.converterId\nargs['requestId'] = payload.requestId\nresult = this.functions.getCandidateLadles(args)\nthis.variables.candidateSnapshotResult = {\n    'taskId': payload.taskId,\n    'requestId': payload.requestId,\n    'converterId': payload.converterId,\n    'candidateCount': result['candidateCount'],\n    'primary': None\n}\nif result['candidateCount'] > 0:\n    ranked = []\n    for c in result['candidates']:\n        score_res = this.functions.scoreCandidate({\n            'etaScore': c['etaScore'],\n            'tempScore': c['tempScore'],\n            'gradeScore': c['gradeScore'],\n            'conflictPenalty': c['conflictPenalty']\n        })\n        ranked.append({**c, 'totalScore': score_res['totalScore']})\n    ranked.sort(key=lambda x: x['totalScore'], reverse=True)\n    this.variables.candidateSnapshotResult['primary'] = ranked[0]\n    this.variables.candidateRanking = ranked\nelse:\n    this.variables.candidateRanking = []"
+        },
+        {
+          "type": "triggerEvent",
+          "name": "candidateSnapshotReady",
+          "payload": {
+            "taskId": "this.variables.candidateSnapshotResult.taskId",
+            "requestId": "this.variables.candidateSnapshotResult.requestId",
+            "converterId": "this.variables.candidateSnapshotResult.converterId",
+            "candidateCount": "this.variables.candidateSnapshotResult.candidateCount",
+            "primary": "this.variables.candidateSnapshotResult.primary"
+          }
+        }
+      ]
+    },
+    "onNoCandidate": {
+      "trigger": {
+        "type": "event",
+        "name": "candidateSnapshotReady",
+        "when": "payload.candidateCount == 0"
+      },
+      "priority": 4,
+      "actions": [
+        {
+          "type": "triggerAlarm",
+          "alarm": "noCandidateAvailable.critical"
+        },
+        {
+          "type": "triggerEvent",
+          "name": "assignmentFailed",
+          "payload": {
+            "taskId": "payload.taskId",
+            "reason": "'no_candidate'"
+          }
+        }
+      ]
+    }
+  },
+  "events": {
+    "converterNeedLadle": {
+      "payload": {
+        "requestId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        },
+        "steelGrade": {
+          "type": "string"
+        },
+        "requiredByTime": {
+          "type": "string"
+        }
+      }
+    },
+    "dispatchRequestQueued": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        }
+      }
+    },
+    "candidateSnapshotRequested": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        }
+      }
+    },
+    "candidateSnapshotReady": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        },
+        "candidateCount": {
+          "type": "number"
+        },
+        "primary": {
+          "type": "object"
+        }
+      }
+    },
+    "candidateSelected": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "ladleId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        },
+        "totalScore": {
+          "type": "number"
+        }
+      }
+    },
+    "ladleAssigned": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "ladleId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        }
+      }
+    },
+    "assignmentCompleted": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        }
+      }
+    },
+    "assignmentFailed": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "dispatchTimeoutDetected": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        }
+      }
+    },
+    "replanningCandidateSelected": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "ladleId": {
+          "type": "string"
+        },
+        "converterId": {
+          "type": "string"
+        }
+      }
+    },
+    "dispatchAssigned": {
+      "payload": {
+        "destinationType": {
+          "type": "string"
+        },
+        "destinationId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "ladleId": {
+          "type": "string"
+        }
+      }
+    },
+    "routeConflictDetected": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "conflictId": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      }
+    },
+    "ladleStatusChanged": {
+      "payload": {
+        "ladleId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        }
+      }
+    },
+    "ladleLoaded": {
+      "payload": {
+        "ladleId": {
+          "type": "string"
+        },
+        "steelAmount": {
+          "type": "number"
+        },
+        "steelGrade": {
+          "type": "string"
+        },
+        "temperature": {
+          "type": "number"
+        }
+      }
+    },
+    "ladleEmptied": {
+      "payload": {
+        "ladleId": {
+          "type": "string"
+        },
+        "usageCount": {
+          "type": "number"
+        }
+      }
+    },
+    "deliveryDelayDetected": {
+      "payload": {
+        "taskId": {
+          "type": "string"
+        },
+        "minutesLate": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "alarms": {
+    "noCandidateAvailable.critical": {
+      "category": "dispatchFailure",
+      "severity": "critical",
+      "level": 1,
+      "trigger": {
+        "type": "condition",
+        "window": {
+          "type": "time-sliding",
+          "duration": 60
+        },
+        "condition": "this.variables.processStatus == 'request_queued' && this.variables.candidateRanking == []"
+      },
+      "clear": {
+        "type": "condition",
+        "window": {
+          "type": "time-sliding",
+          "duration": 60
+        },
+        "condition": "this.variables.candidateRanking != []"
+      }
+    },
+    "frequentReplan.warning": {
+      "category": "dispatchStability",
+      "severity": "warning",
+      "level": 2,
+      "trigger": {
+        "type": "condition",
+        "window": {
+          "type": "time-sliding",
+          "duration": 300
+        },
+        "condition": "this.variables.replanCounter >= this.attributes.maxReplanTimes"
+      },
+      "clear": {
+        "type": "condition",
+        "window": {
+          "type": "time-sliding",
+          "duration": 300
+        },
+        "condition": "this.variables.replanCounter < this.attributes.maxReplanTimes"
+      }
+    }
+  },
+  "schedules": {
+    "scanDispatchTimeouts": {
+      "name": "scanDispatchTimeouts",
+      "cron": "*/30 * * * * *",
+      "actions": [
+        {
+          "type": "runScript",
+          "scriptEngine": "python",
+          "script": "print(f\"[Schedule] active={len(this.variables.activeAssignments)}\")"
+        }
+      ]
+    }
+  },
+  "goals": {
+    "safetyFirst": {
+      "priority": 100,
+      "successCondition": "this.variables.lastError != 'safety_violation'"
+    },
+    "onTimeDelivery": {
+      "priority": 90,
+      "successCondition": "this.variables.lastError != 'dispatch_timeout'"
+    },
+    "replanMinimization": {
+      "priority": 70,
+      "successCondition": "this.variables.replanCounter < this.attributes.maxReplanTimes"
+    }
+  },
+  "decisionPolicies": {
+    "defaultOperationalMode": {
+      "preferredMode": "reflex",
+      "goals": [
+        "safetyFirst",
+        "onTimeDelivery",
+        "replanMinimization"
+      ],
+      "escalateWhen": [
+        {
+          "type": "event",
+          "name": "dispatchTimeoutDetected"
+        },
+        {
+          "type": "event",
+          "name": "assignmentFailed"
+        }
+      ],
+      "memorySlots": [
+        "lastNAssignments",
+        "abnormalPatterns",
+        "lastDecisionRationale"
+      ],
+      "plan": "ladleAssignmentPlan",
+      "constraints": [
+        "rules",
+        "permissions",
+        "stateMachine"
+      ]
+    }
+  },
+  "memory": {
+    "lastNAssignments": {
+      "type": "array",
+      "maxItems": 100
+    },
+    "abnormalPatterns": {
+      "type": "array",
+      "maxItems": 50
+    },
+    "lastDecisionRationale": {
+      "type": "object"
+    }
+  },
+  "plans": {
+    "ladleAssignmentPlan": {
+      "stepSchema": {
+        "service": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        }
+      },
+      "allowedServices": [
+        "createDispatchTask",
+        "lockLadle",
+        "assignLadleToConverter",
+        "triggerReplan"
+      ],
+      "successCondition": "this.variables.lastError == ''"
+    }
+  }
+}

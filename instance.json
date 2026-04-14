@@ -1,0 +1,199 @@
+{
+  "$schema": "https://agent-studio.io/schema/v2/instance",
+  "id": "ladle_001",
+  "modelId": "ladle",
+  "state": "full",
+  "metadata": {
+    "name": "ladle_001",
+    "title": "1号钢包",
+    "description": "转炉跨 1 号钢包实例，包含运行值、绑定关系和轻量认知上下文。",
+    "creator": "张三",
+    "createdAt": "2024-06-01T10:00:00Z",
+    "updatedAt": "2026-04-11T10:00:00Z",
+    "version": "2.0.0"
+  },
+  "attributes": {
+    "capacity": 200,
+    "maxTemperature": 1800,
+    "insulationDuration": 120,
+    "refractoryLife": 80
+  },
+  "variables": {
+    "steelAmount": 150,
+    "temperature": 1650,
+    "carbonContent": 0.15,
+    "steelGrade": "Q235B",
+    "currentLocation": "converter_1",
+    "targetLocation": "caster_2",
+    "processStatus": "awaiting_transport",
+    "usageCount": 45,
+    "lastMaintenanceTime": "2025-03-15T08:30:00Z",
+    "tiltAngle": 0,
+    "isLidClosed": true,
+    "locationX": 1.251,
+    "locationY": 3.68
+  },
+  "bindings": {
+    "steelAmount": {
+      "source": "plc_line_a",
+      "path": "ns=2;s=Ladle01.Weight",
+      "selector": "$.value",
+      "transform": "value * 0.001"
+    },
+    "temperature": {
+      "source": "plc_line_a",
+      "path": "ns=2;s=Ladle01.Temp",
+      "selector": "$.temperature",
+      "transform": "Math.round(value)"
+    },
+    "carbonContent": {
+      "source": "mes_system",
+      "path": "/ladles/001/analysis",
+      "selector": "$.chemical.carbon.percent",
+      "transform": "parseFloat(value.toFixed(3))"
+    },
+    "steelGrade": {
+      "source": "mes_system",
+      "path": "/ladles/001/grade",
+      "selector": "$.grade.name",
+      "transform": "value.toUpperCase()"
+    },
+    "currentLocation": {
+      "source": "factory_mqtt",
+      "topic": "position/ladle/001",
+      "selector": "$.position.zone",
+      "transform": "value.toLowerCase().replace(/\\s/g, '_')"
+    },
+    "locationX": {
+      "source": "factory_mqtt",
+      "topic": "position/ladle/001",
+      "selector": "$.position.x",
+      "transform": "value / 1000"
+    },
+    "locationY": {
+      "source": "factory_mqtt",
+      "topic": "position/ladle/001",
+      "selector": "$.position.y",
+      "transform": "value / 1000"
+    },
+    "processStatus": {
+      "source": "factory_mqtt",
+      "topic": "status/ladle/001",
+      "selector": "$.state.current",
+      "transform": "value"
+    },
+    "usageCount": {
+      "source": "mes_system",
+      "path": "/ladles/001/maintenance",
+      "selector": "$.cycles.completed",
+      "transform": "parseInt(value)"
+    },
+    "lastMaintenanceTime": {
+      "source": "mes_system",
+      "path": "/ladles/001/maintenance",
+      "selector": "$.lastMaintenance.timestamp",
+      "transform": "new Date(value).toISOString()"
+    },
+    "tiltAngle": {
+      "source": "plc_line_a",
+      "path": "ns=2;s=Ladle01.Tilt.Angle",
+      "selector": "$.angle.degrees",
+      "transform": "Math.max(-90, Math.min(90, value))"
+    },
+    "isLidClosed": {
+      "source": "plc_line_a",
+      "path": "ns=2;s=Ladle01.Lid.Status",
+      "selector": "$.sensors.lidSwitch",
+      "transform": "value === 1 || value === true"
+    }
+  },
+  "memory": {
+    "currentAssignment": {
+      "taskId": "task_20260411_001",
+      "destination": "caster_2",
+      "deadline": "2026-04-11T10:30:00Z"
+    },
+    "recentAbnormalEvents": [
+      {
+        "id": "abn_001",
+        "type": "routeConflictDetected",
+        "timestamp": "2026-04-11T09:58:00Z",
+        "summary": "2号连铸机入口繁忙，建议重新评估到位顺序。"
+      }
+    ],
+    "lastDecision": {
+      "mode": "cortex",
+      "timestamp": "2026-04-11T10:00:00Z",
+      "summary": "保留当前钢种与温度窗口，优先送达 caster_2。",
+      "reason": "安全目标满足，时效目标存在轻微压力。"
+    }
+  },
+  "activeGoals": [
+    {
+      "goalId": "safeHandling",
+      "status": "active",
+      "priority": 100,
+      "startedAt": "2026-04-11T09:50:00Z"
+    },
+    {
+      "goalId": "timelyDelivery",
+      "status": "active",
+      "priority": 80,
+      "startedAt": "2026-04-11T09:50:00Z"
+    }
+  ],
+  "currentPlan": {
+    "id": "plan_20260411_001",
+    "planType": "deliveryAdjustment",
+    "status": "ready",
+    "summary": "先确认目标工位，再执行移动到 caster_2。",
+    "generatedAt": "2026-04-11T10:00:00Z",
+    "steps": [
+      {
+        "service": "assignTargetLocation",
+        "args": {
+          "targetLocation": "caster_2",
+          "reason": "dispatch_reconfirmation"
+        }
+      },
+      {
+        "service": "moveTo",
+        "args": {
+          "targetLocation": "caster_2",
+          "emergency": false
+        }
+      }
+    ]
+  },
+  "extensions": {
+    "attributes":{
+      
+    },
+    "alarms": {
+      "highFillRate.high": {
+        "category": "highFillRate",
+        "title": "高装载率预警",
+        "trigger": {
+          "type": "condition",
+          "window": {
+            "type": "time-sliding",
+            "duration": 300
+          },
+          "condition": "this.variables.steelAmount >= this.attributes.capacity * 0.95"
+        },
+        "recovery": {
+          "type": "condition",
+          "window": {
+            "type": "time-sliding",
+            "duration": 300
+          },
+          "condition": "this.variables.steelAmount < this.attributes.capacity * 0.95"
+        },
+        "severity": "warning",
+        "level": 1,
+        "message": "钢包装载率达到 {fillRate}% ，移动和倾倒时请谨慎操作",
+        "recoveryMessage": "钢包装载率已恢复到安全范围"
+      }
+    }
+  }
+}

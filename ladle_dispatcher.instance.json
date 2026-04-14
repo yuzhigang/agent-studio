@@ -1,0 +1,76 @@
+{
+  "$schema": "https://agent-studio.io/schema/v2/instance",
+  "id": "ladle-dispatcher-001",
+  "modelId": "ladle_dispatcher",
+  "state": "idle",
+  "metadata": {
+    "name": "ladle-dispatcher-001",
+    "title": "钢包调度员 1 号实例",
+    "description": "用于与 ladle.model 联调的钢包调度实例。",
+    "creator": "Agent Studio",
+    "createdAt": "2026-04-13T00:00:00Z",
+    "updatedAt": "2026-04-13T00:00:00Z",
+    "version": "2.0.0"
+  },
+  "attributes": {
+    "maxDispatchWindowSec": 90,
+    "temperatureSafetyMargin": 20,
+    "dispatchTimeoutSec": 240,
+    "maxReplanTimes": 3
+  },
+  "variables": {
+    "dispatchMode": "normal",
+    "processStatus": "idle",
+    "pendingRequests": [],
+    "candidateRanking": [],
+    "activeAssignments": {},
+    "resourceLocks": {},
+    "replanCounter": 0,
+    "lastError": ""
+  },
+  "bindings": {
+    "dispatchMode": {
+      "source": "ops_console",
+      "path": "/dispatcher/001/mode",
+      "selector": "$.mode",
+      "transform": "value"
+    },
+    "lastError": {
+      "source": "monitoring_system",
+      "path": "/dispatcher/001/errors/latest",
+      "selector": "$.message",
+      "transform": "value || ''"
+    }
+  },
+  "memory": {
+    "lastNAssignments": [],
+    "abnormalPatterns": [],
+    "lastDecisionRationale": {
+      "mode": "reflex",
+      "timestamp": "2026-04-13T00:00:00Z",
+      "summary": "初始运行，无历史任务。"
+    }
+  },
+  "activeGoals": [
+    {
+      "goalId": "safetyFirst",
+      "status": "active",
+      "priority": 100,
+      "startedAt": "2026-04-13T00:00:00Z"
+    },
+    {
+      "goalId": "onTimeDelivery",
+      "status": "active",
+      "priority": 90,
+      "startedAt": "2026-04-13T00:00:00Z"
+    },
+    {
+      "goalId": "replanMinimization",
+      "status": "active",
+      "priority": 70,
+      "startedAt": "2026-04-13T00:00:00Z"
+    }
+  ],
+  "currentPlan": null,
+  "extensions": {}
+}
