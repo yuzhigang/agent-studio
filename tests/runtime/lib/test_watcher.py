@@ -39,6 +39,10 @@ def demo(args: dict) -> dict:
     return {"version": 2}
 ''')
 
-        time.sleep(1.0)
-        assert registry.lookup("ladle", "demo", "demo")({}) == {"version": 2}
+        for _ in range(50):
+            if registry.lookup("ladle", "demo", "demo")({}) == {"version": 2}:
+                break
+            time.sleep(0.1)
+        else:
+            assert False, "hot reload did not occur"
         watcher.stop()

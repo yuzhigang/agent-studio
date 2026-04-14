@@ -1,4 +1,3 @@
-import os
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -6,9 +5,8 @@ from src.runtime.lib.registry import LibRegistry
 
 
 class _ReloadHandler(FileSystemEventHandler):
-    def __init__(self, registry: LibRegistry, agents_root: str):
+    def __init__(self, registry: LibRegistry):
         self.registry = registry
-        self.agents_root = agents_root
 
     def on_modified(self, event):
         if event.is_directory:
@@ -22,7 +20,7 @@ class LibWatcher:
         self.agents_root = agents_root
         self.registry = registry or LibRegistry(_singleton=True)
         self.observer = Observer()
-        self.handler = _ReloadHandler(self.registry, agents_root)
+        self.handler = _ReloadHandler(self.registry)
 
     def start(self):
         self.observer.schedule(self.handler, self.agents_root, recursive=True)
