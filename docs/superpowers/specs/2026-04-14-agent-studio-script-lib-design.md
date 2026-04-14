@@ -53,7 +53,7 @@ agents/
 脚本函数统一使用 `@lib_function` 装饰器声明元数据，启动时自动扫描注册。`readonly` 参数用于标记该函数是否承诺为纯计算函数。`namespace` 为必填字段，用于校验脚本所在目录与声明的命名空间是否一致；若不一致，注册时抛出 `LibRegistrationError`。
 
 ```python
-from agent_studio.runtime.lib import lib_function
+from runtime.lib import lib_function
 
 @lib_function(
     name="getCandidates",
@@ -264,7 +264,7 @@ avg_temp = statistics.mean([l['temperature'] for l in ladles])
 
 ```python
 # agents/ladle/scripts/dispatcher.py
-from agent_studio.runtime.lib import lib_function
+from runtime.lib import lib_function
 
 @lib_function(name="getCandidates", namespace="ladle", readonly=True)
 def get_candidates(args: dict) -> dict:

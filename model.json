@@ -1,1088 +1,1138 @@
 {
-  "$schema": "https://agent-studio.io/schema/v2",
-  "metadata": {
-    "version": "2.0",
-    "name": "ladle",
-    "title": "钢包智能体",
-    "tags": [
-      "logistics",
-      "steelmaking"
-    ],
-    "group": "logistics",
-    "creator": "张三",
-    "createdAt": "2024-06-01T10:00:00Z",
-    "updatedAt": "2026-04-11T10:00:00Z",
-    "description": "钢包智能体，兼具具身状态、快速反射和有限慢速决策能力。"
-  },
-  "attributes": {
-    "capacity": {
-      "type": "number",
-      "title": "容量",
-      "description": "钢包最大容量",
-      "x-unit": "ton",
-      "default": 200.0,
-      "minimum": 0,
-      "maximum": 500
-    },
-    "maxTemperature": {
-      "type": "number",
-      "title": "最高耐温",
-      "description": "钢包能承受的最高温度",
-      "x-unit": "℃",
-      "default": 1800.0,
-      "minimum": 0,
-      "maximum": 2000
-    },
-    "insulationDuration": {
-      "type": "number",
-      "title": "保温时间",
-      "description": "钢水最大保温时长",
-      "x-unit": "min",
-      "nullable": true,
-      "default": 120.0,
-      "minimum": 0,
-      "maximum": 300
-    },
-    "refractoryLife": {
-      "type": "number",
-      "title": "耐材寿命",
-      "description": "耐材允许的最大使用次数",
-      "x-unit": "times",
-      "default": 80,
-      "minimum": 1,
-      "maximum": 500
-    }
-  },
-  "variables": {
-    "steelAmount": {
-      "type": "number",
-      "title": "钢水量",
-      "description": "当前钢包内钢水重量",
-      "x-unit": "ton",
-      "default": 0.0,
-      "minimum": 0,
-      "maximum": 500,
-      "x-rules": {
-        "pre": [
-          {
-            "rule": "capacityLimit"
-          }
-        ]
-      }
-    },
-    "temperature": {
-      "type": "number",
-      "title": "钢水温度",
-      "description": "当前钢水温度",
-      "x-unit": "℃",
-      "default": 25.0,
-      "minimum": -50,
-      "maximum": 2000,
-      "x-rules": {
-        "pre": [
-          {
-            "rule": "temperatureSafetyRange"
-          }
+    "$schema": "https://agent-studio.io/schema/v2",
+    "metadata": {
+        "version": "2.0",
+        "name": "ladle",
+        "title": "钢包智能体",
+        "tags": [
+            "logistics",
+            "steelmaking"
         ],
-        "post": [
-          {
-            "rule": "temperatureNotRisingNaturally"
-          }
-        ]
-      }
+        "group": "logistics",
+        "creator": "张三",
+        "createdAt": "2024-06-01T10:00:00Z",
+        "updatedAt": "2026-04-11T10:00:00Z",
+        "description": "钢包智能体，兼具具身状态、快速反射和有限慢速决策能力。"
     },
-    "carbonContent": {
-      "type": "number",
-      "title": "碳含量",
-      "description": "钢水中碳元素百分比",
-      "x-unit": "%",
-      "default": 0.0,
-      "minimum": 0,
-      "maximum": 2.0
-    },
-    "steelGrade": {
-      "type": "string",
-      "title": "钢种",
-      "description": "当前钢水的钢种牌号",
-      "default": ""
-    },
-    "currentLocation": {
-      "type": "string",
-      "title": "当前位置",
-      "description": "钢包当前所在位置",
-      "default": "standby_area"
-    },
-    "targetLocation": {
-      "type": "string",
-      "title": "目标位置",
-      "description": "钢包下一站计划目标位置",
-      "nullable": true,
-      "default": ""
-    },
-    "processStatus": {
-      "type": "string",
-      "title": "业务状态",
-      "description": "面向外部业务观察的状态标签，不等同于实例 state。",
-      "default": "idle"
-    },
-    "usageCount": {
-      "type": "number",
-      "title": "使用次数",
-      "description": "当前耐材累计使用次数",
-      "default": 0,
-      "minimum": 0,
-      "maximum": 1000
-    },
-    "lastMaintenanceTime": {
-      "type": "string",
-      "title": "上次维护时间",
-      "description": "上次完成维护的时间",
-      "nullable": true,
-      "default": null
-    },
-    "tiltAngle": {
-      "type": "number",
-      "title": "倾角",
-      "description": "钢包当前倾角",
-      "x-unit": "degree",
-      "default": 0,
-      "minimum": -90,
-      "maximum": 90
-    },
-    "isLidClosed": {
-      "type": "boolean",
-      "title": "包盖闭合",
-      "description": "移动前用于门禁检查的状态量",
-      "default": true
-    },
-    "locationX": {
-      "type": "number",
-      "title": "X 坐标",
-      "description": "钢包当前位置 X 坐标",
-      "x-unit": "m",
-      "default": 0
-    },
-    "locationY": {
-      "type": "number",
-      "title": "Y 坐标",
-      "description": "钢包当前位置 Y 坐标",
-      "x-unit": "m",
-      "default": 0
-    }
-  },
-  "derivedProperties": {
-    "fillRate": {
-      "type": "number",
-      "title": "填充率",
-      "description": "钢包填充百分比",
-      "x-unit": "%",
-      "x-formula": "this.variables.steelAmount / this.attributes.capacity * 100",
-      "x-dependOn": [
-        "steelAmount",
-        "capacity"
-      ]
-    },
-    "remainingCapacity": {
-      "type": "number",
-      "title": "剩余容量",
-      "description": "还可装载的钢水量",
-      "x-unit": "ton",
-      "x-formula": "this.attributes.capacity - this.variables.steelAmount",
-      "x-dependOn": [
-        "steelAmount",
-        "capacity"
-      ]
-    },
-    "remainingRefractoryLife": {
-      "type": "number",
-      "title": "剩余耐材寿命",
-      "description": "耐材剩余可用次数",
-      "x-formula": "this.attributes.refractoryLife - this.variables.usageCount",
-      "x-dependOn": [
-        "usageCount",
-        "refractoryLife"
-      ]
-    }
-  },
-  "rules": {
-    "capacityLimit": {
-      "name": "capacityLimit",
-      "title": "容量上限检查",
-      "condition": "this.variables.steelAmount <= this.attributes.capacity",
-      "parameters": {
-        "limit": {
-          "type": "number",
-          "default": "this.attributes.capacity",
-          "description": "容量上限值"
-        }
-      },
-      "onViolation": {
-        "action": "reject",
-        "error": {
-          "code": "CAPACITY_EXCEEDED",
-          "message": "当前钢水量 {steelAmount} 吨超过容量上限 {capacity} 吨"
-        }
-      }
-    },
-    "temperatureSafetyRange": {
-      "title": "温度安全范围检查",
-      "condition": "this.variables.temperature >= $minTemp && this.variables.temperature <= $maxTemp",
-      "parameters": {
-        "minTemp": {
-          "type": "number",
-          "default": -50
+    "attributes": {
+        "capacity": {
+            "type": "number",
+            "title": "容量",
+            "description": "钢包最大容量",
+            "x-audit": true,
+            "x-unit": "ton",
+            "default": 200.0,
+            "minimum": 0,
+            "maximum": 500
         },
-        "maxTemp": {
-          "type": "number",
-          "default": "this.attributes.maxTemperature"
-        }
-      },
-      "onViolation": {
-        "action": "reject",
-        "error": {
-          "code": "TEMPERATURE_OUT_OF_RANGE",
-          "message": "温度 {temperature}℃ 超出安全范围 [{$minTemp}, {$maxTemp}]"
-        }
-      }
-    },
-    "temperatureNotRisingNaturally": {
-      "title": "温度异常上升检查",
-      "condition": "args.previousValue == null || this.variables.temperature <= args.previousValue || args.source == 'loadSteel' || args.source == 'reheat' || args.source == 'manual_override'",
-      "onViolation": {
-        "action": "warn",
-        "warning": {
-          "code": "TEMPERATURE_RISE_WITHOUT_CAUSE",
-          "message": "温度从 {previousTemperature}℃ 异常升高到 {temperature}℃，请检查数据源或执行人工复核"
-        }
-      }
-    },
-    "minPourTemperature": {
-      "title": "最低倾倒温度检查",
-      "condition": "this.variables.temperature >= $threshold",
-      "parameters": {
-        "threshold": {
-          "type": "number",
-          "default": 1500
-        }
-      },
-      "onViolation": {
-        "action": "reject",
-        "error": {
-          "code": "TEMPERATURE_TOO_LOW",
-          "message": "当前温度 {temperature}℃ 低于最低倾倒温度 {$threshold}℃",
-          "suggestion": "等待加热或降低拉坯速度"
-        }
-      }
-    },
-    "refractoryLifeCheck": {
-      "title": "耐材寿命检查",
-      "condition": "this.variables.usageCount < this.attributes.refractoryLife",
-      "onViolation": {
-        "action": "reject",
-        "error": {
-          "code": "REFRACTORY_LIFE_EXHAUSTED",
-          "message": "耐材已使用 {usageCount} 次，达到寿命上限 {refractoryLife} 次",
-          "suggestion": "请先执行维护，重置使用次数"
-        }
-      }
-    },
-    "highLoadMoveWarning": {
-      "title": "高负载移动预警",
-      "condition": "this.derivedProperties.fillRate < $threshold || args.emergency == true",
-      "parameters": {
-        "threshold": {
-          "type": "number",
-          "default": 95
-        }
-      },
-      "onViolation": {
-        "action": "warn",
-        "warning": {
-          "code": "HIGH_LOAD_MOVE",
-          "message": "钢包填充率 {fillRate}% 较高，移动时请谨慎操作"
-        }
-      }
-    },
-    "hasSteelBeforePour": {
-      "title": "倾倒前必须有钢水",
-      "condition": "this.variables.steelAmount > 0",
-      "onViolation": {
-        "action": "reject",
-        "error": {
-          "code": "NO_STEEL_TO_POUR",
-          "message": "钢包内没有钢水，无法倾倒"
-        }
-      }
-    },
-    "lidClosedBeforeMove": {
-      "title": "移动前包盖闭合检查",
-      "condition": "this.variables.isLidClosed == true || args.emergency == true",
-      "onViolation": {
-        "action": "reject",
-        "error": {
-          "code": "LID_NOT_CLOSED",
-          "message": "包盖未闭合，禁止执行移动"
-        }
-      }
-    }
-  },
-  "functions": {
-    "calculateLoad": {
-      "title": "计算可装载量",
-      "type": "script",
-      "scriptEngine": "python",
-      "script": "capacity_remaining = this.attributes.capacity - this.variables.steelAmount\nrequested = args.weight\nactual = min(requested, capacity_remaining)\nreturn {'requested': requested, 'actual': actual, 'capacityRemaining': capacity_remaining}",
-      "description": "计算可装载量（纯计算，不修改状态）",
-      "parameters": {
-        "weight": {
-          "type": "number",
-          "description": "请求装载的钢水重量"
-        }
-      },
-      "returns": {
-        "requested": {
-          "type": "number"
+        "maxTemperature": {
+            "type": "number",
+            "title": "最高耐温",
+            "description": "钢包能承受的最高温度",
+            "x-audit": true,
+            "x-unit": "℃",
+            "default": 1800.0,
+            "minimum": 0,
+            "maximum": 2000
         },
-        "actual": {
-          "type": "number"
+        "insulationDuration": {
+            "type": "number",
+            "title": "保温时间",
+            "description": "钢水最大保温时长",
+            "x-audit": true,
+            "x-unit": "min",
+            "nullable": true,
+            "default": 120.0,
+            "minimum": 0,
+            "maximum": 300
         },
-        "capacityRemaining": {
-          "type": "number"
+        "refractoryLife": {
+            "type": "number",
+            "title": "耐材寿命",
+            "description": "耐材允许的最大使用次数",
+            "x-audit": true,
+            "x-unit": "times",
+            "default": 80,
+            "minimum": 1,
+            "maximum": 500
         }
-      }
     },
-    "calculateTemperatureDrop": {
-      "title": "计算温度下降",
-      "type": "script",
-      "scriptEngine": "python",
-      "script": "elapsed_minutes = args.get('elapsedMinutes', 0)\ntemp_drop_rate = args.get('tempDropRate', 1.5)\ncurrent_temp = max(25, this.variables.temperature - elapsed_minutes * temp_drop_rate)\nreturn {'temperatureDrop': elapsed_minutes * temp_drop_rate, 'currentTemp': current_temp, 'elapsedMinutes': elapsed_minutes}",
-      "description": "基于输入时间窗口推算温降，不修改运行态。",
-      "parameters": {
-        "elapsedMinutes": {
-          "type": "number",
-          "description": "距离上次测温的分钟数"
-        },
-        "tempDropRate": {
-          "type": "number",
-          "description": "温降速率"
-        }
-      },
-      "returns": {
-        "temperatureDrop": {
-          "type": "number"
-        },
-        "currentTemp": {
-          "type": "number"
-        },
-        "elapsedMinutes": {
-          "type": "number"
-        }
-      }
-    }
-  },
-  "services": {
-    "assignTargetLocation": {
-      "title": "设置目标位置",
-      "type": "script",
-      "scriptEngine": "python",
-      "script": "this.variables.targetLocation = args.targetLocation\nthis.variables.processStatus = 'task_assigned'\nreturn {'success': True, 'targetLocation': this.variables.targetLocation, 'reason': args.get('reason', 'manual')}",
-      "parameters": {
-        "targetLocation": {
-          "type": "string",
-          "description": "目标位置"
-        },
-        "reason": {
-          "type": "string",
-          "description": "设置原因"
-        }
-      },
-      "returns": {
-        "success": {
-          "type": "boolean"
-        },
-        "targetLocation": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        }
-      }
-    },
-    "loadSteel": {
-      "title": "向钢包装载钢水",
-      "type": "script",
-      "scriptEngine": "python",
-      "rules": {
-        "pre": [
-          {
-            "rule": "refractoryLifeCheck"
-          },
-          {
-            "rule": "capacityLimit"
-          }
-        ],
-        "post": []
-      },
-      "script": "capacity_remaining = this.attributes.capacity - this.variables.steelAmount\nif capacity_remaining <= 0:\n    return {'success': False, 'message': '钢包已满', 'loadedAmount': 0}\nloaded_amount = min(args.weight, capacity_remaining)\nthis.variables.steelAmount += loaded_amount\nthis.variables.temperature = args.temperature\nthis.variables.steelGrade = args.steelGrade\nthis.variables.carbonContent = args.get('carbonContent', 0)\nthis.variables.processStatus = 'receiving_complete'\nreturn {'success': True, 'message': '装载成功', 'loadedAmount': loaded_amount, 'totalAmount': this.variables.steelAmount}",
-      "parameters": {
-        "weight": {
-          "type": "number",
-          "description": "装载钢水重量"
+    "variables": {
+        "steelAmount": {
+            "type": "number",
+            "title": "钢水量",
+            "description": "当前钢包内钢水重量",
+            "x-audit": true,
+            "x-unit": "ton",
+            "default": 0.0,
+            "minimum": 0,
+            "maximum": 500,
+            "x-rules": {
+                "pre": [
+                    {
+                        "rule": "capacityLimit"
+                    }
+                ]
+            }
         },
         "temperature": {
-          "type": "number",
-          "description": "钢水温度"
-        },
-        "steelGrade": {
-          "type": "string",
-          "description": "钢种牌号"
+            "type": "number",
+            "title": "钢水温度",
+            "description": "当前钢水温度",
+            "x-audit": true,
+            "x-unit": "℃",
+            "default": 25.0,
+            "minimum": -50,
+            "maximum": 2000,
+            "x-rules": {
+                "pre": [
+                    {
+                        "rule": "temperatureSafetyRange"
+                    }
+                ],
+                "post": [
+                    {
+                        "rule": "temperatureNotRisingNaturally"
+                    }
+                ]
+            }
         },
         "carbonContent": {
-          "type": "number",
-          "description": "碳含量百分比"
-        }
-      },
-      "returns": {
-        "success": {
-          "type": "boolean"
-        },
-        "message": {
-          "type": "string"
-        },
-        "loadedAmount": {
-          "type": "number"
-        },
-        "totalAmount": {
-          "type": "number"
-        }
-      },
-      "permissions": {
-        "roles": [
-          "converter_operator",
-          "system"
-        ],
-        "description": "转炉操作员或系统可执行装载操作"
-      }
-    },
-    "pour": {
-      "title": "倾倒钢水",
-      "type": "script",
-      "scriptEngine": "python",
-      "rules": {
-        "pre": [
-          {
-            "rule": "hasSteelBeforePour"
-          },
-          {
-            "rule": "minPourTemperature"
-          }
-        ],
-        "post": []
-      },
-      "script": "if this.variables.steelAmount <= 0:\n    return {'success': False, 'message': '没有钢水可供倾倒', 'pouredAmount': 0}\npoured_amount = this.variables.steelAmount\nthis.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade = ''\nthis.variables.carbonContent = 0\nthis.variables.usageCount += 1\nthis.variables.processStatus = 'poured'\nreturn {'success': True, 'message': '倾倒成功', 'pouredAmount': poured_amount, 'location': this.variables.currentLocation}",
-      "parameters": {},
-      "returns": {
-        "success": {
-          "type": "boolean"
-        },
-        "message": {
-          "type": "string"
-        },
-        "pouredAmount": {
-          "type": "number"
-        },
-        "location": {
-          "type": "string"
-        }
-      },
-      "permissions": {
-        "roles": [
-          "caster_operator",
-          "system"
-        ],
-        "description": "连铸操作员或系统可执行倾倒操作"
-      }
-    },
-    "moveTo": {
-      "title": "移动钢包到指定位置",
-      "type": "script",
-      "scriptEngine": "python",
-      "rules": {
-        "pre": [
-          {
-            "rule": "highLoadMoveWarning",
-            "parameters": {
-              "threshold": 90
-            }
-          },
-          {
-            "rule": "lidClosedBeforeMove"
-          }
-        ],
-        "post": []
-      },
-      "script": "from_location = this.variables.currentLocation\nto_location = args.targetLocation\nthis.variables.currentLocation = to_location\nthis.variables.targetLocation = ''\nthis.variables.processStatus = 'in_transit'\nreturn {'success': True, 'from': from_location, 'to': to_location}",
-      "parameters": {
-        "targetLocation": {
-          "type": "string",
-          "description": "目标位置"
-        },
-        "emergency": {
-          "type": "boolean",
-          "description": "是否紧急移动"
-        }
-      },
-      "returns": {
-        "success": {
-          "type": "boolean"
-        },
-        "from": {
-          "type": "string"
-        },
-        "to": {
-          "type": "string"
-        }
-      },
-      "permissions": {
-        "roles": [
-          "logistics_operator",
-          "crane_driver",
-          "system"
-        ],
-        "description": "物流操作员、天车司机或系统可执行移动操作"
-      }
-    }
-  },
-  "states": {
-    "empty": {
-      "title": "空包",
-      "description": "钢包为空，等待接钢",
-      "group": "loadState",
-      "initialState": true,
-      "actions": {
-        "beforeEnter": [
-          {
-            "type": "runScript",
-            "delay": 0,
-            "scriptEngine": "python",
-            "script": "this.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade = ''\nthis.variables.carbonContent = 0\nthis.variables.processStatus = 'empty'"
-          }
-        ],
-        "afterEnter": [
-          {
-            "type": "triggerEvent",
-            "name": "ladleStatusChanged",
-            "payload": {
-              "ladleId": "this.id",
-              "state": "empty",
-              "timestamp": "datetime.now().isoformat()"
-            }
-          }
-        ]
-      }
-    },
-    "receiving": {
-      "title": "接钢中",
-      "description": "正在接收钢水",
-      "group": "loadState",
-      "actions": {
-        "beforeEnter": [
-          {
-            "type": "runScript",
-            "delay": 0,
-            "scriptEngine": "python",
-            "script": "this.variables.processStatus = 'receiving'"
-          }
-        ],
-        "afterEnter": [
-          {
-            "type": "triggerEvent",
-            "name": "ladleStatusChanged",
-            "payload": {
-              "ladleId": "this.id",
-              "state": "receiving"
-            }
-          }
-        ]
-      }
-    },
-    "full": {
-      "title": "满包",
-      "description": "钢包已满，等待运输",
-      "group": "loadState",
-      "actions": {
-        "beforeEnter": [
-          {
-            "type": "runScript",
-            "delay": 0,
-            "scriptEngine": "python",
-            "script": "this.variables.processStatus = 'awaiting_transport'"
-          }
-        ],
-        "afterEnter": [
-          {
-            "type": "triggerEvent",
-            "name": "ladleLoaded",
-            "payload": {
-              "ladleId": "this.id",
-              "steelAmount": "this.variables.steelAmount",
-              "steelGrade": "this.variables.steelGrade",
-              "temperature": "this.variables.temperature"
-            }
-          }
-        ]
-      }
-    },
-    "pouring": {
-      "title": "倾倒中",
-      "description": "正在倾倒钢水",
-      "group": "processState",
-      "actions": {
-        "beforeEnter": [
-          {
-            "type": "runScript",
-            "delay": 0,
-            "scriptEngine": "python",
-            "script": "this.variables.processStatus = 'pouring'"
-          }
-        ],
-        "afterExit": [
-          {
-            "type": "triggerEvent",
-            "name": "ladleEmptied",
-            "payload": {
-              "ladleId": "this.id",
-              "usageCount": "this.variables.usageCount"
-            }
-          }
-        ]
-      }
-    },
-    "maintenance": {
-      "title": "维护中",
-      "description": "钢包正在维护或更换耐材",
-      "group": "maintenanceState",
-      "actions": {
-        "beforeEnter": [
-          {
-            "type": "runScript",
-            "delay": 0,
-            "scriptEngine": "python",
-            "script": "this.variables.processStatus = 'maintenance'\nimport datetime\nthis.variables.lastMaintenanceTime = datetime.datetime.now().isoformat()"
-          }
-        ],
-        "beforeExit": [
-          {
-            "type": "runScript",
-            "delay": 0,
-            "scriptEngine": "python",
-            "script": "this.variables.usageCount = 0"
-          }
-        ]
-      }
-    }
-  },
-  "transitions": {
-    "emptyToReceiving": {
-      "title": "空包转接钢",
-      "from": "empty",
-      "to": "receiving",
-      "trigger": {
-        "type": "event",
-        "name": "beginLoad"
-      },
-      "actions": [
-        {
-          "type": "runScript",
-          "scriptEngine": "python",
-          "script": "print(f'[Transition] 钢包 {this.id} 收到开始接钢指令，来源: {payload.source}')"
-        }
-      ]
-    },
-    "receivingToFull": {
-      "title": "接钢转满包",
-      "from": "receiving",
-      "to": "full",
-      "trigger": {
-        "type": "timeout",
-        "delay": 3000
-      }
-    },
-    "fullToPouring": {
-      "title": "满包转倾倒",
-      "from": "full",
-      "to": "pouring",
-      "priority": 1,
-      "trigger": {
-        "type": "event",
-        "name": "beginPour"
-      }
-    },
-    "receivingToPouring": {
-      "title": "接钢中直接倾倒",
-      "from": "receiving",
-      "to": "pouring",
-      "priority": 2,
-      "trigger": {
-        "type": "event",
-        "name": "beginPour",
-        "when": "payload.steelAmount > 0"
-      }
-    },
-    "pouringToEmpty": {
-      "title": "倾倒转空包",
-      "from": "pouring",
-      "to": "empty",
-      "trigger": {
-        "type": "condition",
-        "window": {
-          "type": "time-sliding",
-          "duration": 300
-        },
-        "condition": "this.variables.steelAmount <= 0"
-      }
-    },
-    "emptyToMaintenance": {
-      "title": "空包转维护",
-      "from": "empty",
-      "to": "maintenance",
-      "trigger": {
-        "type": "condition",
-        "window": {
-          "type": "time-sliding",
-          "duration": 86400
-        },
-        "condition": "this.variables.usageCount >= this.attributes.refractoryLife"
-      }
-    },
-    "maintenanceToEmpty": {
-      "title": "维护转空包",
-      "from": "maintenance",
-      "to": "empty",
-      "trigger": {
-        "type": "event",
-        "name": "maintenanceComplete"
-      }
-    }
-  },
-  "behaviors": {
-    "captureConverterTarget": {
-      "title": "记录转炉目标位置",
-      "trigger": {
-        "type": "event",
-        "name": "beginLoad",
-        "when": "payload.converterId != null"
-      },
-      "actions": [
-        {
-          "type": "runScript",
-          "scriptEngine": "python",
-          "script": "this.variables.targetLocation = f'converter_{payload.converterId}'"
-        }
-      ]
-    },
-    "captureAssignedDestination": {
-      "title": "接收外部派工目标",
-      "trigger": {
-        "type": "event",
-        "name": "dispatchAssigned",
-        "when": "payload.destinationId != null"
-      },
-      "actions": [
-        {
-          "type": "runScript",
-          "scriptEngine": "python",
-          "script": "this.variables.targetLocation = f\"{payload.destinationType}_{payload.destinationId}\"\nthis.variables.processStatus = 'task_assigned'"
-        }
-      ]
-    }
-  },
-  "events": {
-    "beginLoad": {
-      "title": "开始接钢",
-      "payload": {
-        "source": {
-          "type": "string",
-          "description": "指令来源"
-        },
-        "converterId": {
-          "type": "string",
-          "description": "转炉编号"
-        }
-      }
-    },
-    "beginPour": {
-      "title": "开始倾倒",
-      "payload": {
-        "steelAmount": {
-          "type": "number",
-          "description": "允许倾倒的钢水量"
-        }
-      }
-    },
-    "maintenanceComplete": {
-      "title": "维护完成",
-      "payload": {
-        "operator": {
-          "type": "string",
-          "description": "维护完成确认人"
-        }
-      }
-    },
-    "dispatchAssigned": {
-      "title": "派工目标已下发",
-      "payload": {
-        "destinationType": {
-          "type": "string",
-          "description": "目标类型，如 converter 或 caster"
-        },
-        "destinationId": {
-          "type": "string",
-          "description": "目标编号"
-        },
-        "taskId": {
-          "type": "string",
-          "description": "任务标识"
-        }
-      }
-    },
-    "routeConflictDetected": {
-      "title": "运输冲突被发现",
-      "payload": {
-        "conflictId": {
-          "type": "string"
-        },
-        "severity": {
-          "type": "string"
-        }
-      }
-    },
-    "deliveryDelayDetected": {
-      "title": "配送延迟被发现",
-      "payload": {
-        "minutesLate": {
-          "type": "number"
-        }
-      }
-    },
-    "ladleStatusChanged": {
-      "title": "钢包 reflex 状态发生变化",
-      "payload": {
-        "ladleId": {
-          "type": "string",
-          "description": "钢包 ID"
-        },
-        "state": {
-          "type": "string",
-          "description": "新的 reflex 状态"
-        },
-        "timestamp": {
-          "type": "string",
-          "description": "ISO 8601 时间戳"
-        }
-      }
-    },
-    "ladleLoaded": {
-      "title": "钢包接钢完成",
-      "payload": {
-        "ladleId": {
-          "type": "string"
-        },
-        "steelAmount": {
-          "type": "number"
+            "type": "number",
+            "title": "碳含量",
+            "description": "钢水中碳元素百分比",
+            "x-audit": true,
+            "x-unit": "%",
+            "default": 0.0,
+            "minimum": 0,
+            "maximum": 2.0
         },
         "steelGrade": {
-          "type": "string"
+            "type": "string",
+            "title": "钢种",
+            "description": "当前钢水的钢种牌号",
+            "x-audit": true,
+            "default": ""
         },
-        "temperature": {
-          "type": "number"
-        }
-      }
-    },
-    "ladleEmptied": {
-      "title": "钢包倾倒完成",
-      "payload": {
-        "ladleId": {
-          "type": "string"
+        "currentLocation": {
+            "type": "string",
+            "title": "当前位置",
+            "description": "钢包当前所在位置",
+            "x-audit": true,
+            "default": "standby_area"
+        },
+        "targetLocation": {
+            "type": "string",
+            "title": "目标位置",
+            "description": "钢包下一站计划目标位置",
+            "x-audit": true,
+            "nullable": true,
+            "default": ""
+        },
+        "processStatus": {
+            "type": "string",
+            "title": "业务状态",
+            "description": "面向外部业务观察的状态标签，不等同于实例 state。",
+            "x-audit": true,
+            "default": "idle"
         },
         "usageCount": {
-          "type": "number"
+            "type": "number",
+            "title": "使用次数",
+            "description": "当前耐材累计使用次数",
+            "x-audit": true,
+            "default": 0,
+            "minimum": 0,
+            "maximum": 1000
+        },
+        "lastMaintenanceTime": {
+            "type": "string",
+            "title": "上次维护时间",
+            "description": "上次完成维护的时间",
+            "x-audit": true,
+            "nullable": true,
+            "default": null
+        },
+        "tiltAngle": {
+            "type": "number",
+            "title": "倾角",
+            "description": "钢包当前倾角",
+            "x-audit": true,
+            "x-unit": "degree",
+            "default": 0,
+            "minimum": -90,
+            "maximum": 90
+        },
+        "isLidClosed": {
+            "type": "boolean",
+            "title": "包盖闭合",
+            "description": "移动前用于门禁检查的状态量",
+            "x-audit": true,
+            "default": true
+        },
+        "locationX": {
+            "type": "number",
+            "title": "X 坐标",
+            "description": "钢包当前位置 X 坐标",
+            "x-audit": true,
+            "x-unit": "m",
+            "default": 0
+        },
+        "locationY": {
+            "type": "number",
+            "title": "Y 坐标",
+            "description": "钢包当前位置 Y 坐标",
+            "x-audit": true,
+            "x-unit": "m",
+            "default": 0
         }
-      }
-    }
-  },
-  "alarms": {
-    "highFillRate.warning": {
-      "title": "高装载率预警",
-      "trigger": {
-        "type": "condition",
-        "window": {
-          "type": "time-sliding",
-          "duration": 300
-        },
-        "condition": "this.variables.steelAmount >= this.attributes.capacity * 0.95"
-      },
-      "recovery": {
-        "type": "condition",
-        "window": {
-          "type": "time-sliding",
-          "duration": 300
-        },
-        "condition": "this.variables.steelAmount < this.attributes.capacity * 0.95"
-      },
-      "severity": "warning",
-      "level": 1,
-      "message": "钢包装载率达到 {fillRate}% ，移动和倾倒时请谨慎操作",
-      "recoveryMessage": "钢包装载率已恢复到安全范围"
     },
-    "temperatureTooLow.warning": {
-      "title": "钢水温度偏低预警",
-      "trigger": {
-        "type": "condition",
-        "window": {
-          "type": "time-sliding",
-          "duration": 300
+    "derivedProperties": {
+        "fillRate": {
+            "type": "number",
+            "title": "填充率",
+            "description": "钢包填充百分比",
+            "x-audit": true,
+            "x-unit": "%",
+            "x-formula": "this.variables.steelAmount / this.attributes.capacity * 100",
+            "x-dependOn": [
+                "steelAmount",
+                "capacity"
+            ]
         },
-        "condition": "this.variables.steelAmount > 0 && this.variables.temperature < 1500"
-      },
-      "recovery": {
-        "type": "condition",
-        "window": {
-          "type": "time-sliding",
-          "duration": 300
+        "remainingCapacity": {
+            "type": "number",
+            "title": "剩余容量",
+            "description": "还可装载的钢水量",
+            "x-audit": true,
+            "x-unit": "ton",
+            "x-formula": "this.attributes.capacity - this.variables.steelAmount",
+            "x-dependOn": [
+                "steelAmount",
+                "capacity"
+            ]
         },
-        "condition": "this.variables.temperature >= 1500 || this.variables.steelAmount <= 0"
-      },
-      "severity": "warning",
-      "level": 2,
-      "message": "当前温度 {temperature}℃ 低于建议运输下限",
-      "recoveryMessage": "温度已恢复到建议运输范围"
-    }
-  },
-  "schedules": {
-    "checkTemperature": {
-      "name": "checkTemperature",
-      "title": "定期检查钢水温度",
-      "cron": "*/5 * * * *",
-      "actions": [
-        {
-          "type": "runScript",
-          "scriptEngine": "python",
-          "script": "if this.variables.steelAmount > 0:\n    print(f'[Schedule] 钢包 {this.id} 温度检查: {this.variables.temperature}℃')"
+        "remainingRefractoryLife": {
+            "type": "number",
+            "title": "剩余耐材寿命",
+            "description": "耐材剩余可用次数",
+            "x-audit": true,
+            "x-formula": "this.attributes.refractoryLife - this.variables.usageCount",
+            "x-dependOn": [
+                "usageCount",
+                "refractoryLife"
+            ]
         }
-      ]
     },
-    "checkRefractoryLife": {
-      "name": "checkRefractoryLife",
-      "title": "检查耐材寿命",
-      "cron": "0 */1 * * *",
-      "actions": [
-        {
-          "type": "runScript",
-          "scriptEngine": "python",
-          "script": "remaining_life = this.attributes.refractoryLife - this.variables.usageCount\nif remaining_life <= 10:\n    print(f'[Schedule:Warning] 钢包 {this.id} 耐材剩余寿命: {remaining_life} 次')"
+    "links": {
+        "assignedCaster": {
+            "title": "绑定铸机",
+            "targetType": "ContinuousCaster",
+            "cardinality": "0..1",
+            "nullable": true
+        },
+        "transportCrane": {
+            "title": "当前运输天车",
+            "targetType": "Crane",
+            "cardinality": "0..1",
+            "nullable": true
+        },
+        "currentHeat": {
+            "title": "当前炉次记录",
+            "targetType": "HeatRecord",
+            "cardinality": "0..1"
         }
-      ]
-    }
-  },
-  "goals": {
-    "safeHandling": {
-      "title": "安全承载",
-      "description": "在任何运输和倾倒动作中优先满足安全边界。",
-      "priority": 100,
-      "successCondition": "this.variables.steelAmount <= this.attributes.capacity && this.variables.temperature <= this.attributes.maxTemperature"
     },
-    "timelyDelivery": {
-      "title": "按时送达工位",
-      "description": "尽量降低运输等待时间，在不违反安全边界的前提下按计划送达目标工位。",
-      "priority": 80,
-      "successCondition": "this.variables.targetLocation == '' || this.variables.currentLocation == this.variables.targetLocation"
-    }
-  },
-  "decisionPolicies": {
-    "defaultOperationalMode": {
-      "title": "默认运行模式",
-      "preferredMode": "reflex",
-      "goals": [
-        "safeHandling",
-        "timelyDelivery"
-      ],
-      "escalateWhen": [
-        {
-          "type": "goalConflict",
-          "goals": [
-            "safeHandling",
-            "timelyDelivery"
-          ]
+    "rules": {
+        "capacityLimit": {
+            "name": "capacityLimit",
+            "title": "容量上限检查",
+            "condition": "this.variables.steelAmount <= this.attributes.capacity",
+            "parameters": {
+                "limit": {
+                    "type": "number",
+                    "default": "this.attributes.capacity",
+                    "description": "容量上限值"
+                }
+            },
+            "onViolation": {
+                "action": "reject",
+                "error": {
+                    "code": "CAPACITY_EXCEEDED",
+                    "message": "当前钢水量 {steelAmount} 吨超过容量上限 {capacity} 吨"
+                }
+            }
         },
-        {
-          "type": "event",
-          "name": "routeConflictDetected"
+        "temperatureSafetyRange": {
+            "title": "温度安全范围检查",
+            "condition": "this.variables.temperature >= $minTemp && this.variables.temperature <= $maxTemp",
+            "parameters": {
+                "minTemp": {
+                    "type": "number",
+                    "default": -50
+                },
+                "maxTemp": {
+                    "type": "number",
+                    "default": "this.attributes.maxTemperature"
+                }
+            },
+            "onViolation": {
+                "action": "reject",
+                "error": {
+                    "code": "TEMPERATURE_OUT_OF_RANGE",
+                    "message": "温度 {temperature}℃ 超出安全范围 [{$minTemp}, {$maxTemp}]"
+                }
+            }
         },
-        {
-          "type": "event",
-          "name": "deliveryDelayDetected"
+        "temperatureNotRisingNaturally": {
+            "title": "温度异常上升检查",
+            "condition": "args.previousValue == null || this.variables.temperature <= args.previousValue || args.source == 'loadSteel' || args.source == 'reheat' || args.source == 'manual_override'",
+            "onViolation": {
+                "action": "warn",
+                "warning": {
+                    "code": "TEMPERATURE_RISE_WITHOUT_CAUSE",
+                    "message": "温度从 {previousTemperature}℃ 异常升高到 {temperature}℃，请检查数据源或执行人工复核"
+                }
+            }
+        },
+        "minPourTemperature": {
+            "title": "最低倾倒温度检查",
+            "condition": "this.variables.temperature >= $threshold",
+            "parameters": {
+                "threshold": {
+                    "type": "number",
+                    "default": 1500
+                }
+            },
+            "onViolation": {
+                "action": "reject",
+                "error": {
+                    "code": "TEMPERATURE_TOO_LOW",
+                    "message": "当前温度 {temperature}℃ 低于最低倾倒温度 {$threshold}℃",
+                    "suggestion": "等待加热或降低拉坯速度"
+                }
+            }
+        },
+        "refractoryLifeCheck": {
+            "title": "耐材寿命检查",
+            "condition": "this.variables.usageCount < this.attributes.refractoryLife",
+            "onViolation": {
+                "action": "reject",
+                "error": {
+                    "code": "REFRACTORY_LIFE_EXHAUSTED",
+                    "message": "耐材已使用 {usageCount} 次，达到寿命上限 {refractoryLife} 次",
+                    "suggestion": "请先执行维护，重置使用次数"
+                }
+            }
+        },
+        "highLoadMoveWarning": {
+            "title": "高负载移动预警",
+            "condition": "this.derivedProperties.fillRate < $threshold || args.emergency == true",
+            "parameters": {
+                "threshold": {
+                    "type": "number",
+                    "default": 95
+                }
+            },
+            "onViolation": {
+                "action": "warn",
+                "warning": {
+                    "code": "HIGH_LOAD_MOVE",
+                    "message": "钢包填充率 {fillRate}% 较高，移动时请谨慎操作"
+                }
+            }
+        },
+        "hasSteelBeforePour": {
+            "title": "倾倒前必须有钢水",
+            "condition": "this.variables.steelAmount > 0",
+            "onViolation": {
+                "action": "reject",
+                "error": {
+                    "code": "NO_STEEL_TO_POUR",
+                    "message": "钢包内没有钢水，无法倾倒"
+                }
+            }
+        },
+        "lidClosedBeforeMove": {
+            "title": "移动前包盖闭合检查",
+            "condition": "this.variables.isLidClosed == true || args.emergency == true",
+            "onViolation": {
+                "action": "reject",
+                "error": {
+                    "code": "LID_NOT_CLOSED",
+                    "message": "包盖未闭合，禁止执行移动"
+                }
+            }
         }
-      ],
-      "memorySlots": [
-        "currentAssignment",
-        "recentAbnormalEvents",
-        "lastDecision"
-      ],
-      "plan": "deliveryAdjustment",
-      "constraints": [
-        "rules",
-        "permissions",
-        "stateMachine"
-      ]
-    }
-  },
-  "memory": {
-    "currentAssignment": {
-      "type": "object",
-      "title": "当前任务",
-      "description": "当前运输或倾倒任务摘要。",
-      "schema": {
-        "taskId": {
-          "type": "string"
-        },
-        "destination": {
-          "type": "string"
-        },
-        "deadline": {
-          "type": "string"
-        }
-      }
     },
-    "recentAbnormalEvents": {
-      "type": "array",
-      "title": "最近异常事件",
-      "description": "用于 cortex 判断是否需要接管的异常记录。",
-      "maxItems": 20
-    },
-    "lastDecision": {
-      "type": "object",
-      "title": "最近一次决策",
-      "description": "最近一次 cortex 决策摘要与原因。"
-    }
-  },
-  "plans": {
-    "deliveryAdjustment": {
-      "title": "配送调整计划",
-      "description": "当运输路径、目标工位或时效出现冲突时，由 cortex 生成的结构化动作计划。",
-      "stepSchema": {
-        "service": {
-          "type": "string"
+    "functions": {
+        "calculateLoad": {
+            "title": "计算可装载量",
+            "type": "script",
+            "scriptEngine": "python",
+            "script": "capacity_remaining = this.attributes.capacity - this.variables.steelAmount\nrequested = args.weight\nactual = min(requested, capacity_remaining)\nreturn {'requested': requested, 'actual': actual, 'capacityRemaining': capacity_remaining}",
+            "description": "计算可装载量（纯计算，不修改状态）",
+            "parameters": {
+                "weight": {
+                    "type": "number",
+                    "description": "请求装载的钢水重量"
+                }
+            },
+            "returns": {
+                "requested": {
+                    "type": "number"
+                },
+                "actual": {
+                    "type": "number"
+                },
+                "capacityRemaining": {
+                    "type": "number"
+                }
+            }
         },
-        "args": {
-          "type": "object"
+        "calculateTemperatureDrop": {
+            "title": "计算温度下降",
+            "type": "script",
+            "scriptEngine": "python",
+            "script": "elapsed_minutes = args.get('elapsedMinutes', 0)\ntemp_drop_rate = args.get('tempDropRate', 1.5)\ncurrent_temp = max(25, this.variables.temperature - elapsed_minutes * temp_drop_rate)\nreturn {'temperatureDrop': elapsed_minutes * temp_drop_rate, 'currentTemp': current_temp, 'elapsedMinutes': elapsed_minutes}",
+            "description": "基于输入时间窗口推算温降，不修改运行态。",
+            "parameters": {
+                "elapsedMinutes": {
+                    "type": "number",
+                    "description": "距离上次测温的分钟数"
+                },
+                "tempDropRate": {
+                    "type": "number",
+                    "description": "温降速率"
+                }
+            },
+            "returns": {
+                "temperatureDrop": {
+                    "type": "number"
+                },
+                "currentTemp": {
+                    "type": "number"
+                },
+                "elapsedMinutes": {
+                    "type": "number"
+                }
+            }
         }
-      },
-      "allowedServices": [
-        "assignTargetLocation",
-        "moveTo"
-      ],
-      "successCondition": "this.variables.targetLocation == '' || this.variables.currentLocation == this.variables.targetLocation"
+    },
+    "services": {
+        "assignTargetLocation": {
+            "title": "设置目标位置",
+            "type": "script",
+            "scriptEngine": "python",
+            "script": "this.variables.targetLocation = args.targetLocation\nthis.variables.processStatus = 'task_assigned'\nreturn {'success': True, 'targetLocation': this.variables.targetLocation, 'reason': args.get('reason', 'manual')}",
+            "parameters": {
+                "targetLocation": {
+                    "type": "string",
+                    "description": "目标位置"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "设置原因"
+                }
+            },
+            "returns": {
+                "success": {
+                    "type": "boolean"
+                },
+                "targetLocation": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "loadSteel": {
+            "title": "向钢包装载钢水",
+            "type": "script",
+            "scriptEngine": "python",
+            "rules": {
+                "pre": [
+                    {
+                        "rule": "refractoryLifeCheck"
+                    },
+                    {
+                        "rule": "capacityLimit"
+                    }
+                ],
+                "post": []
+            },
+            "script": "capacity_remaining = this.attributes.capacity - this.variables.steelAmount\nif capacity_remaining <= 0:\n    return {'success': False, 'message': '钢包已满', 'loadedAmount': 0}\nloaded_amount = min(args.weight, capacity_remaining)\nthis.variables.steelAmount += loaded_amount\nthis.variables.temperature = args.temperature\nthis.variables.steelGrade = args.steelGrade\nthis.variables.carbonContent = args.get('carbonContent', 0)\nthis.variables.processStatus = 'receiving_complete'\nreturn {'success': True, 'message': '装载成功', 'loadedAmount': loaded_amount, 'totalAmount': this.variables.steelAmount}",
+            "parameters": {
+                "weight": {
+                    "type": "number",
+                    "description": "装载钢水重量"
+                },
+                "temperature": {
+                    "type": "number",
+                    "description": "钢水温度"
+                },
+                "steelGrade": {
+                    "type": "string",
+                    "description": "钢种牌号"
+                },
+                "carbonContent": {
+                    "type": "number",
+                    "description": "碳含量百分比"
+                }
+            },
+            "returns": {
+                "success": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "loadedAmount": {
+                    "type": "number"
+                },
+                "totalAmount": {
+                    "type": "number"
+                }
+            },
+            "permissions": {
+                "roles": [
+                    "converter_operator",
+                    "system"
+                ],
+                "description": "转炉操作员或系统可执行装载操作"
+            }
+        },
+        "pour": {
+            "title": "倾倒钢水",
+            "type": "script",
+            "scriptEngine": "python",
+            "rules": {
+                "pre": [
+                    {
+                        "rule": "hasSteelBeforePour"
+                    },
+                    {
+                        "rule": "minPourTemperature"
+                    }
+                ],
+                "post": []
+            },
+            "script": "if this.variables.steelAmount <= 0:\n    return {'success': False, 'message': '没有钢水可供倾倒', 'pouredAmount': 0}\npoured_amount = this.variables.steelAmount\nthis.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade = ''\nthis.variables.carbonContent = 0\nthis.variables.usageCount += 1\nthis.variables.processStatus = 'poured'\nreturn {'success': True, 'message': '倾倒成功', 'pouredAmount': poured_amount, 'location': this.variables.currentLocation}",
+            "parameters": {},
+            "returns": {
+                "success": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "pouredAmount": {
+                    "type": "number"
+                },
+                "location": {
+                    "type": "string"
+                }
+            },
+            "permissions": {
+                "roles": [
+                    "caster_operator",
+                    "system"
+                ],
+                "description": "连铸操作员或系统可执行倾倒操作"
+            }
+        },
+        "moveTo": {
+            "title": "移动钢包到指定位置",
+            "type": "script",
+            "scriptEngine": "python",
+            "rules": {
+                "pre": [
+                    {
+                        "rule": "highLoadMoveWarning",
+                        "parameters": {
+                            "threshold": 90
+                        }
+                    },
+                    {
+                        "rule": "lidClosedBeforeMove"
+                    }
+                ],
+                "post": []
+            },
+            "script": "from_location = this.variables.currentLocation\nto_location = args.targetLocation\nthis.variables.currentLocation = to_location\nthis.variables.targetLocation = ''\nthis.variables.processStatus = 'in_transit'\nreturn {'success': True, 'from': from_location, 'to': to_location}",
+            "parameters": {
+                "targetLocation": {
+                    "type": "string",
+                    "description": "目标位置"
+                },
+                "emergency": {
+                    "type": "boolean",
+                    "description": "是否紧急移动"
+                }
+            },
+            "returns": {
+                "success": {
+                    "type": "boolean"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            },
+            "permissions": {
+                "roles": [
+                    "logistics_operator",
+                    "crane_driver",
+                    "system"
+                ],
+                "description": "物流操作员、天车司机或系统可执行移动操作"
+            }
+        }
+    },
+    "states": {
+        "empty": {
+            "title": "空包",
+            "description": "钢包为空，等待接钢",
+            "group": "loadState",
+            "initialState": true,
+            "actions": {
+                "beforeEnter": [
+                    {
+                        "type": "runScript",
+                        "delay": 0,
+                        "scriptEngine": "python",
+                        "script": "this.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade = ''\nthis.variables.carbonContent = 0\nthis.variables.processStatus = 'empty'"
+                    }
+                ],
+                "afterEnter": [
+                    {
+                        "type": "triggerEvent",
+                        "name": "ladleStatusChanged",
+                        "payload": {
+                            "ladleId": "this.id",
+                            "state": "empty",
+                            "timestamp": "datetime.now().isoformat()"
+                        }
+                    }
+                ]
+            }
+        },
+        "receiving": {
+            "title": "接钢中",
+            "description": "正在接收钢水",
+            "group": "loadState",
+            "actions": {
+                "beforeEnter": [
+                    {
+                        "type": "runScript",
+                        "delay": 0,
+                        "scriptEngine": "python",
+                        "script": "this.variables.processStatus = 'receiving'"
+                    }
+                ],
+                "afterEnter": [
+                    {
+                        "type": "triggerEvent",
+                        "name": "ladleStatusChanged",
+                        "payload": {
+                            "ladleId": "this.id",
+                            "state": "receiving"
+                        }
+                    }
+                ]
+            }
+        },
+        "full": {
+            "title": "满包",
+            "description": "钢包已满，等待运输",
+            "group": "loadState",
+            "actions": {
+                "beforeEnter": [
+                    {
+                        "type": "runScript",
+                        "delay": 0,
+                        "scriptEngine": "python",
+                        "script": "this.variables.processStatus = 'awaiting_transport'"
+                    }
+                ],
+                "afterEnter": [
+                    {
+                        "type": "triggerEvent",
+                        "name": "ladleLoaded",
+                        "payload": {
+                            "ladleId": "this.id",
+                            "steelAmount": "this.variables.steelAmount",
+                            "steelGrade": "this.variables.steelGrade",
+                            "temperature": "this.variables.temperature"
+                        }
+                    }
+                ]
+            }
+        },
+        "pouring": {
+            "title": "倾倒中",
+            "description": "正在倾倒钢水",
+            "group": "processState",
+            "actions": {
+                "beforeEnter": [
+                    {
+                        "type": "runScript",
+                        "delay": 0,
+                        "scriptEngine": "python",
+                        "script": "this.variables.processStatus = 'pouring'"
+                    }
+                ],
+                "afterExit": [
+                    {
+                        "type": "triggerEvent",
+                        "name": "ladleEmptied",
+                        "payload": {
+                            "ladleId": "this.id",
+                            "usageCount": "this.variables.usageCount"
+                        }
+                    }
+                ]
+            }
+        },
+        "maintenance": {
+            "title": "维护中",
+            "description": "钢包正在维护或更换耐材",
+            "group": "maintenanceState",
+            "actions": {
+                "beforeEnter": [
+                    {
+                        "type": "runScript",
+                        "delay": 0,
+                        "scriptEngine": "python",
+                        "script": "this.variables.processStatus = 'maintenance'\nimport datetime\nthis.variables.lastMaintenanceTime = datetime.datetime.now().isoformat()"
+                    }
+                ],
+                "beforeExit": [
+                    {
+                        "type": "runScript",
+                        "delay": 0,
+                        "scriptEngine": "python",
+                        "script": "this.variables.usageCount = 0"
+                    }
+                ]
+            }
+        }
+    },
+    "transitions": {
+        "emptyToReceiving": {
+            "title": "空包转接钢",
+            "from": "empty",
+            "to": "receiving",
+            "trigger": {
+                "type": "event",
+                "name": "beginLoad"
+            },
+            "actions": [
+                {
+                    "type": "runScript",
+                    "scriptEngine": "python",
+                    "script": "print(f'[Transition] 钢包 {this.id} 收到开始接钢指令，来源: {payload.source}')"
+                }
+            ]
+        },
+        "receivingToFull": {
+            "title": "接钢转满包",
+            "from": "receiving",
+            "to": "full",
+            "trigger": {
+                "type": "timeout",
+                "delay": 3000
+            }
+        },
+        "fullToPouring": {
+            "title": "满包转倾倒",
+            "from": "full",
+            "to": "pouring",
+            "priority": 1,
+            "trigger": {
+                "type": "event",
+                "name": "beginPour"
+            }
+        },
+        "receivingToPouring": {
+            "title": "接钢中直接倾倒",
+            "from": "receiving",
+            "to": "pouring",
+            "priority": 2,
+            "trigger": {
+                "type": "event",
+                "name": "beginPour",
+                "when": "payload.steelAmount > 0"
+            }
+        },
+        "pouringToEmpty": {
+            "title": "倾倒转空包",
+            "from": "pouring",
+            "to": "empty",
+            "trigger": {
+                "type": "condition",
+                "window": {
+                    "type": "time-sliding",
+                    "duration": 300
+                },
+                "condition": "this.variables.steelAmount <= 0"
+            }
+        },
+        "emptyToMaintenance": {
+            "title": "空包转维护",
+            "from": "empty",
+            "to": "maintenance",
+            "trigger": {
+                "type": "condition",
+                "window": {
+                    "type": "time-sliding",
+                    "duration": 86400
+                },
+                "condition": "this.variables.usageCount >= this.attributes.refractoryLife"
+            }
+        },
+        "maintenanceToEmpty": {
+            "title": "维护转空包",
+            "from": "maintenance",
+            "to": "empty",
+            "trigger": {
+                "type": "event",
+                "name": "maintenanceComplete"
+            }
+        }
+    },
+    "behaviors": {
+        "captureConverterTarget": {
+            "title": "记录转炉目标位置",
+            "trigger": {
+                "type": "event",
+                "name": "beginLoad",
+                "when": "payload.converterId != null"
+            },
+            "priority": 1,
+            "actions": [
+                {
+                    "type": "runScript",
+                    "scriptEngine": "python",
+                    "script": "this.variables.targetLocation = f'converter_{payload.converterId}'"
+                }
+            ]
+        },
+        "captureAssignedDestination": {
+            "title": "接收外部派工目标",
+            "trigger": {
+                "type": "event",
+                "name": "dispatchAssigned",
+                "when": "payload.destinationId != null"
+            },
+            "priority": 1,
+            "actions": [
+                {
+                    "type": "runScript",
+                    "scriptEngine": "python",
+                    "script": "this.variables.targetLocation = f\"{payload.destinationType}_{payload.destinationId}\"\nthis.variables.processStatus = 'task_assigned'"
+                }
+            ]
+        }
+    },
+    "events": {
+        "beginLoad": {
+            "title": "开始接钢",
+            "payload": {
+                "source": {
+                    "type": "string",
+                    "description": "指令来源"
+                },
+                "converterId": {
+                    "type": "string",
+                    "description": "转炉编号"
+                }
+            }
+        },
+        "beginPour": {
+            "title": "开始倾倒",
+            "payload": {
+                "steelAmount": {
+                    "type": "number",
+                    "description": "允许倾倒的钢水量"
+                }
+            }
+        },
+        "maintenanceComplete": {
+            "title": "维护完成",
+            "payload": {
+                "operator": {
+                    "type": "string",
+                    "description": "维护完成确认人"
+                }
+            }
+        },
+        "dispatchAssigned": {
+            "title": "派工目标已下发",
+            "payload": {
+                "destinationType": {
+                    "type": "string",
+                    "description": "目标类型，如 converter 或 caster"
+                },
+                "destinationId": {
+                    "type": "string",
+                    "description": "目标编号"
+                },
+                "taskId": {
+                    "type": "string",
+                    "description": "任务标识"
+                }
+            }
+        },
+        "routeConflictDetected": {
+            "title": "运输冲突被发现",
+            "payload": {
+                "conflictId": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                }
+            }
+        },
+        "deliveryDelayDetected": {
+            "title": "配送延迟被发现",
+            "payload": {
+                "minutesLate": {
+                    "type": "number"
+                }
+            }
+        },
+        "ladleStatusChanged": {
+            "title": "钢包 reflex 状态发生变化",
+            "payload": {
+                "ladleId": {
+                    "type": "string",
+                    "description": "钢包 ID"
+                },
+                "state": {
+                    "type": "string",
+                    "description": "新的 reflex 状态"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "description": "ISO 8601 时间戳"
+                }
+            }
+        },
+        "ladleLoaded": {
+            "title": "钢包接钢完成",
+            "payload": {
+                "ladleId": {
+                    "type": "string"
+                },
+                "steelAmount": {
+                    "type": "number"
+                },
+                "steelGrade": {
+                    "type": "string"
+                },
+                "temperature": {
+                    "type": "number"
+                }
+            }
+        },
+        "ladleEmptied": {
+            "title": "钢包倾倒完成",
+            "payload": {
+                "ladleId": {
+                    "type": "string"
+                },
+                "usageCount": {
+                    "type": "number"
+                }
+            }
+        }
+    },
+    "alarms": {
+        "highFillRate.high": {
+            "category": "highFillRate",
+            "title": "高装载率预警",
+            "trigger": {
+                "type": "condition",
+                "window": {
+                    "type": "time-sliding",
+                    "duration": 300
+                },
+                "condition": "this.variables.steelAmount >= this.attributes.capacity * 0.95"
+            },
+            "clear": {
+                "type": "condition",
+                "window": {
+                    "type": "time-sliding",
+                    "duration": 300
+                },
+                "condition": "this.variables.steelAmount < this.attributes.capacity * 0.95"
+            },
+            "severity": "warning",
+            "level": 1,
+            "triggerMessage": "钢包装载率达到 {fillRate}% ，移动和倾倒时请谨慎操作",
+            "clearMessage": "钢包装载率已恢复到安全范围"
+        },
+        "temperatureTooLow.warning": {
+            "category": "temperatureTooLow",
+            "title": "钢水温度偏低预警",
+            "trigger": {
+                "type": "condition",
+                "window": {
+                    "type": "time-sliding",
+                    "duration": 300
+                },
+                "condition": "this.variables.steelAmount > 0 && this.variables.temperature < 1500"
+            },
+            "clear": {
+                "type": "condition",
+                "window": {
+                    "type": "time-sliding",
+                    "duration": 300
+                },
+                "condition": "this.variables.temperature >= 1500 || this.variables.steelAmount <= 0"
+            },
+            "severity": "warning",
+            "level": 2,
+            "triggerMessage": "当前温度 {temperature}℃ 低于建议运输下限",
+            "clearMessage": "温度已恢复到建议运输范围"
+        }
+    },
+    "schedules": {
+        "checkTemperature": {
+            "name": "checkTemperature",
+            "title": "定期检查钢水温度",
+            "cron": "*/5 * * * *",
+            "condition": "this.variables.steelAmount > 0",
+            "actions": [
+                {
+                    "type": "runScript",
+                    "scriptEngine": "python",
+                    "script": "if this.variables.steelAmount > 0:\n    print(f'[Schedule] 钢包 {this.id} 温度检查: {this.variables.temperature}℃')"
+                }
+            ],
+            "onFailure": [
+                {
+                    "type": "triggerAlarm",
+                    "alarm": "temperatureTooLow.warning"
+                }
+            ]
+        },
+        "checkRefractoryLife": {
+            "name": "checkRefractoryLife",
+            "title": "检查耐材寿命",
+            "cron": "0 */1 * * *",
+            "actions": [
+                {
+                    "type": "runScript",
+                    "scriptEngine": "python",
+                    "script": "remaining_life = this.attributes.refractoryLife - this.variables.usageCount\nif remaining_life <= 10:\n    print(f'[Schedule:Warning] 钢包 {this.id} 耐材剩余寿命: {remaining_life} 次')"
+                }
+            ]
+        }
+    },
+    "goals": {
+        "safeHandling": {
+            "title": "安全承载",
+            "description": "在任何运输和倾倒动作中优先满足安全边界。",
+            "priority": 100,
+            "successCondition": "this.variables.steelAmount <= this.attributes.capacity && this.variables.temperature <= this.attributes.maxTemperature"
+        },
+        "timelyDelivery": {
+            "title": "按时送达工位",
+            "description": "尽量降低运输等待时间，在不违反安全边界的前提下按计划送达目标工位。",
+            "priority": 80,
+            "successCondition": "this.variables.targetLocation == '' || this.variables.currentLocation == this.variables.targetLocation"
+        }
+    },
+    "decisionPolicies": {
+        "defaultOperationalMode": {
+            "title": "默认运行模式",
+            "preferredMode": "reflex",
+            "goals": [
+                "safeHandling",
+                "timelyDelivery"
+            ],
+            "escalateWhen": [
+                {
+                    "type": "goalConflict",
+                    "goals": [
+                        "safeHandling",
+                        "timelyDelivery"
+                    ]
+                },
+                {
+                    "type": "event",
+                    "name": "routeConflictDetected"
+                },
+                {
+                    "type": "event",
+                    "name": "deliveryDelayDetected"
+                }
+            ],
+            "memorySlots": [
+                "currentAssignment",
+                "recentAbnormalEvents",
+                "lastDecision"
+            ],
+            "plan": "deliveryAdjustment",
+            "constraints": [
+                "rules",
+                "permissions",
+                "stateMachine"
+            ]
+        }
+    },
+    "memory": {
+        "currentAssignment": {
+            "type": "object",
+            "title": "当前任务",
+            "description": "当前运输或倾倒任务摘要。",
+            "schema": {
+                "taskId": {
+                    "type": "string"
+                },
+                "destination": {
+                    "type": "string"
+                },
+                "deadline": {
+                    "type": "string"
+                }
+            }
+        },
+        "recentAbnormalEvents": {
+            "type": "array",
+            "title": "最近异常事件",
+            "description": "用于 cortex 判断是否需要接管的异常记录。",
+            "maxItems": 20
+        },
+        "lastDecision": {
+            "type": "object",
+            "title": "最近一次决策",
+            "description": "最近一次 cortex 决策摘要与原因。"
+        }
+    },
+    "plans": {
+        "deliveryAdjustment": {
+            "title": "配送调整计划",
+            "description": "当运输路径、目标工位或时效出现冲突时，由 cortex 生成的结构化动作计划。",
+            "stepSchema": {
+                "service": {
+                    "type": "string"
+                },
+                "args": {
+                    "type": "object"
+                }
+            },
+            "allowedServices": [
+                "assignTargetLocation",
+                "moveTo"
+            ],
+            "successCondition": "this.variables.targetLocation == '' || this.variables.currentLocation == this.variables.targetLocation"
+        }
     }
-  }
 }
