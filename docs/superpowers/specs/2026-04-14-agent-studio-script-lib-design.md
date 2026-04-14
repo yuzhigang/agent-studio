@@ -50,7 +50,7 @@ agents/
 
 ### 3.2 装饰器与注册机制
 
-脚本函数统一使用 `@lib_function` 装饰器声明元数据，启动时自动扫描注册。`readonly` 参数用于标记该函数是否承诺为纯计算函数。
+脚本函数统一使用 `@lib_function` 装饰器声明元数据，启动时自动扫描注册。`readonly` 参数用于标记该函数是否承诺为纯计算函数。`namespace` 为必填字段，用于校验脚本所在目录与声明的命名空间是否一致；若不一致，注册时抛出 `LibRegistrationError`。
 
 ```python
 from agent_studio.runtime.lib import lib_function
@@ -114,7 +114,7 @@ shared.data_adapter.transform -> <function>
 | `this.rules` | `this.rules.capacityLimit` | 当前 model 的 rules 定义（只读） |
 | `this.derivedProperties` | `this.derivedProperties.fillRate` | 当前 agent 的派生属性计算结果 |
 | `agents.getInstance` | `agents.getInstance(id="ladle-001")` | 查询单个 agent 实例，返回 dict |
-| `agents.getInstances` | `agents.getInstances(model="ladle")` | 查询多个 agent 实例，返回 list[dict] |
+| `agents.getInstances` | `agents.getInstances(model="ladle")` | 查询多个 agent 实例，返回 list[dict]（当前版本无分页，返回全部） |
 | `agents.getModel` | `agents.getModel(id="ladle")` | 查询 model 定义配置，返回 dict |
 | `lib` | `lib.dispatcher.getCandidates(args)` | 调用当前 agent 的脚本库（省略 namespace） |
 | `lib` | `lib.shared.data_adapter.transform(args)` | 调用公共脚本库 |
@@ -213,7 +213,7 @@ SAFE_BUILTINS = {
     # 类型
     "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
     "chr", "complex", "dict", "divmod", "enumerate", "filter", "float",
-    "format", "frozenset", "hasattr", "hash", "hex", "id", "int",
+    "format", "frozenset", "hash", "hex", "id", "int",
     "isinstance", "issubclass", "iter", "len", "list", "map", "max",
     "min", "next", "object", "oct", "ord", "pow", "print", "range",
     "repr", "reversed", "round", "set", "slice", "sorted", "str",
@@ -300,7 +300,7 @@ def get_candidates(args: dict) -> dict:
 | `this.functions` | 允许调用（只读链） |
 | `this.services` | 禁止，抛出 `ImmutableContextError` |
 | `emit` | 禁止 |
-| `agents.*` | 允许 |
+| `agents.*` | 允许（`getInstance`、`getInstances`、`getModel`） |
 | `lib.*` | 允许 |
 | `api.*` | 允许 |
 
@@ -333,10 +333,10 @@ def get_candidates(args: dict) -> dict:
 ### 6.1 热更新流程
 
 1. 检测到 `.py` 文件 mtime 变更
-2. 调用 `LibRegistry.reload_module(path)`
+2. `LibRegistry` 对受影响模块的 namespace 加写锁
 3. 使用 `importlib.reload()` 重新加载 Python 模块
-4. 重新扫描装饰器，更新注册表
-5. 已启动的调用继续持有旧函数对象的引用并执行旧代码，新调用从注册表获取最新引用。重载期间通过注册表级别的读写锁保证注册表数据结构本身的线程安全，但不保证同一调用链内所有 `lib` 调用使用同一版本代码。
+4. 重新扫描装饰器，原子化地更新注册表映射
+5. 释放写锁。reload 期间新发起的 `lib` 调用在锁外阻塞等待；已启动的调用继续持有旧函数对象引用并正常执行。由于 Python 的 `importlib.reload()` 本身不是线程安全的，写锁期间禁止任何对受影响模块的新调用进入。
 
 ### 6.2 元数据变更处理
 
@@ -365,7 +365,7 @@ def get_candidates(args: dict) -> dict:
 对于原有 `algo_packages/` 下的脚本，迁移步骤：
 1. 将 `algo_packages/<package>/` 移动或复制到对应 `agents/<model>/scripts/` 目录
 2. 将 `@algo_function` 替换为 `@lib_function`
-3. 将 `package` 参数值改为对应 agent model 的 ID
+3. 将装饰器中的 `namespace` 参数值设为对应 agent model 的 ID
 4. 将 `model.json` 中的 `algo.xxx` 调用替换为 `lib.xxx`
 
 ## 9. 错误处理约定
@@ -385,6 +385,6 @@ def get_candidates(args: dict) -> dict:
 ### 9.3 DSL 脚本异常
 
 `runScript` 中的语法错误或运行时异常：
-- `SyntaxError` / `NameError`：包装为 `ScriptExecutionError`，包含行号信息
-- 越权操作（如 `functions` 中调用 `this.services.moveTo`）：抛出 `ImmutableContextError`
+- `SyntaxError` / `NameError`：包装为 `ScriptExecutionError`，包含行号信息，返回结构：`{"success": False, "error": "SCRIPT_EXECUTION_FAILED", "message": str(e), "line": ...}`
+- 越权操作（如 `functions` 中调用 `this.services.moveTo`）：抛出 `ImmutableContextError`，返回结构：`{"success": False, "error": "IMMUTABLE_CONTEXT", "message": "..."}`
 - 默认行为：阻断当前调用链，记录审计日志
