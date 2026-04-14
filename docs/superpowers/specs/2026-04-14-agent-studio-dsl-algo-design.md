@@ -39,14 +39,15 @@ algo_packages/
 
 ### 3.2 装饰器与注册机制
 
-算法函数通过装饰器声明元数据，启动时自动扫描注册。
+算法函数统一使用 `@algo_function` 装饰器声明元数据，启动时自动扫描注册。`readonly` 参数用于标记该算法是否承诺为纯计算函数。
 
 ```python
-from agent_studio.runtime.algo import algo_function, algo_service
+from agent_studio.runtime.algo import algo_function
 
 @algo_function(
     name="getCandidateLadles",
     package="ladle_dispatcher",
+    readonly=True,
 )
 def get_candidate_ladles(args: dict) -> dict:
     """
@@ -57,9 +58,10 @@ def get_candidate_ladles(args: dict) -> dict:
     # ... 复杂筛选逻辑
     return {"candidates": candidates, "candidateCount": len(candidates)}
 
-@algo_service(
+@algo_function(
     name="loadSteel",
     package="ladle",
+    readonly=False,
 )
 def load_steel(args: dict) -> dict:
     """
@@ -113,11 +115,11 @@ ladle.loadSteel -> <function>
 #### function 调用算法
 
 ```json
-"calculateLoad": {
-  "title": "计算可装载量",
+"getCandidateLadles": {
+  "title": "查询可用钢包候选集",
   "type": "runScript",
   "scriptEngine": "python",
-  "script": "return algo.ladle.calculateLoad({\n    'capacity': this.attributes.capacity,\n    'steelAmount': this.variables.steelAmount,\n    'weight': args.weight\n})"
+  "script": "return algo.ladle_dispatcher.getCandidateLadles({\n    'converterId': args.converterId,\n    'steelGrade': args.steelGrade,\n    'requiredByTime': args.requiredByTime,\n    'ladles': agents.getInstances(model='ladle'),\n    'safetyMargin': this.attributes.temperatureSafetyMargin\n})"
 }
 ```
 
@@ -153,13 +155,23 @@ ladle.loadSteel -> <function>
     {
       "type": "runScript",
       "scriptEngine": "python",
-      "script": "this.variables.targetLocation = f'converter_{payload.converterId}'"
+      "script": "target = algo.ladle_dispatcher.resolveConverterLocation({'converterId': payload.converterId})\nthis.variables.targetLocation = target['location']"
     }
   ]
 }
 ```
 
-### 4.3 纯算法脚本示例
+### 4.3 DSL 语法规范
+
+`runScript` 的 `script` 字段是一段受限 Python 代码，其执行环境为：
+
+- `this`、`agents`、`algo`、`api`、`emit`、`args`、`payload` 为运行时注入的代理对象或函数
+- `algo.<package>.<name>(...)` 在运行时被解析为 `AlgoRegistry` 中对应注册的函数调用
+- 其余语法为标准 Python（但 `__builtins__` 将被白名单过滤，移除 `open`、`eval`、`exec`、`__import__` 等危险内置函数）
+
+脚本通过 `exec()` 在受限 globals 字典中执行，不共享模块级别的全局状态。
+
+### 4.4 纯算法脚本示例
 
 ```python
 # algo_packages/ladle_dispatcher/__init__.py
@@ -216,6 +228,15 @@ def get_candidate_ladles(args: dict) -> dict:
 | `algo.*` | 允许 |
 | `api.*` | 允许 |
 
+### 5.3 沙箱实现机制
+
+`runScript` 的执行通过受限的 Python `exec()` 实现：
+
+1. **受限 globals**：为每次执行创建独立的 `globals()` 字典，注入 `this`、`agents`、`algo`、`api`、`emit`、`args`、`payload` 等代理对象。`__builtins__` 被替换为白名单子集（移除 `open`、`eval`、`exec`、`__import__`、`compile`、`getattr` 等）
+2. **代理隔离**：`this.variables` 在 `functions` 中返回 `MappingProxyType` 只读视图；在 `services`/`behaviors` 中返回可变代理，但写操作会经过审计拦截器
+3. **agents 返回深拷贝**：`agents.getInstance` 和 `agents.getInstances` 返回 agent 实例的 `deepcopy(dict)`，防止脚本修改其他 agent 的内部状态
+4. **algo 调用拦截**：`algo` 对象通过自定义 `__getattr__` 链实现，最终调用由 `AlgoRegistry` 分发，不经过 Python 的模块导入机制
+
 ## 6. 热更新机制
 
 后端通过 `watchdog` 或轮询监控 `algo_packages/` 目录下的 `.py` 文件变更。
@@ -226,7 +247,7 @@ def get_candidate_ladles(args: dict) -> dict:
 2. 调用 `AlgoRegistry.reload_module(path)`
 3. 使用 `importlib.reload()` 重新加载 Python 模块
 4. 重新扫描装饰器，更新注册表
-5. 正在执行的调用不受影响（基于 Python 模块对象替换机制）
+5. 已启动的调用继续执行旧代码，新调用使用重载后的代码。重载期间可能出现短暂的不一致，建议通过注册表级别的读写锁来缓解并发风险。
 
 ### 6.2 元数据变更处理
 
@@ -239,7 +260,7 @@ def get_candidate_ladles(args: dict) -> dict:
 ### P1 校验项
 
 1. `algo.<package>.<entrypoint>` 引用的包和入口函数必须在 `AlgoRegistry` 中存在
-2. `algo` 调用出现在 `functions` 中时，若目标算法声明 `readonly=False`，允许但告警（或按策略拒绝）
+2. `algo` 调用出现在 `functions` 中时，目标算法必须声明 `readonly=True`
 3. 禁止在 `functions` 的 `runScript` 中调用 `this.services` 或 `emit`
 
 ## 8. 迁移路径
@@ -265,4 +286,24 @@ def get_candidate_ladles(args: dict) -> dict:
 1. `api` 客户端的白名单机制（允许访问的 URL/服务列表）
 2. `agents.getInstance` 返回的 dict 是否包含 `bindings` 等实例敏感字段
 3. 算法包的版本管理（是否支持多版本并存）
-4. `algo_function` 与 `algo_service` 的区别是否需要保留，或统一为单一装饰器
+
+## 11. 错误处理约定
+
+### 11.1 算法未找到
+
+当 `algo.<package>.<entrypoint>` 无法在 `AlgoRegistry` 中解析时：
+- 校验阶段：抛出 `AlgoValidationError`，阻止 model 加载
+- 运行时：抛出 `AlgoNotFoundError`，返回 `{"success": False, "error": "ALGO_NOT_FOUND", "details": "..."}`
+
+### 11.2 算法执行异常
+
+算法函数内部抛出的 Python 异常：
+- 由 `AlgoRegistry` 捕获并包装为 `AlgoExecutionError`
+- 返回结构：`{"success": False, "error": "ALGO_EXECUTION_FAILED", "message": str(e), "traceback": "..."}`
+
+### 11.3 DSL 脚本异常
+
+`runScript` 中的语法错误或运行时异常：
+- `SyntaxError` / `NameError`：包装为 `ScriptExecutionError`，包含行号信息
+- 越权操作（如 `functions` 中调用 `this.services.moveTo`）：抛出 `ImmutableContextError`
+- 默认行为：阻断当前调用链，记录审计日志
