@@ -22,7 +22,7 @@
 - **DSL 显式命名**：所有上下文访问通过显式命名空间（`this.variables`、`this.attributes`、`lib.xxx` 等），语义清晰，便于后续做 IDE 自动补全
 - **适配器职责**：`runScript` 作为轻量适配层，负责组装参数、调用脚本函数、回写结果
 - **向后兼容**：保留现有的 `type: "runScript"` 结构和内嵌脚本能力，新能力作为增强选项存在
-- **作用域内省略 namespace**：在当前 agent 的 `model.json` 和 `scripts/` 内部调用时，可省略本 agent 的 namespace，简写为 `lib.<module>.<function>`
+- **作用域内省略 namespace**：在当前 agent 的 `model.json` 中通过 `runScript` 调用时，可省略本 agent 的 namespace，简写为 `lib.<module>.<function>`。`scripts/` 下的 Python 脚本内部作为普通 Python 函数互相调用，不通过 `lib` 代理解析。
 
 ## 3. 脚本库目录结构与自动注册
 
@@ -126,13 +126,15 @@ shared.data_adapter.transform -> <function>
 
 ### 4.2 作用域内省略 namespace
 
-在当前 agent 的 `model.json` 及其 `scripts/` 目录下的 Python 脚本中，调用本 agent 的脚本库时可省略 namespace：
+在当前 agent 的 `model.json` 中通过 `runScript` 调用时，可省略本 agent 的 namespace：
 
 ```python
-# 以下两种写法在 ladle 的 scope 中等价
+# 以下两种写法在 ladle 的 model.json runScript 中等价
 lib.dispatcher.getCandidates(args)
 lib.ladle.dispatcher.getCandidates(args)
 ```
+
+**注意**：`agents/<model>/scripts/` 下的 Python 脚本内部，函数之间直接通过普通 Python `import` 调用即可，不经过 `lib` 代理对象解析。
 
 公共库和跨 scope 调用必须显式写出完整路径：
 
@@ -198,9 +200,32 @@ lib.converter.planner.resolvePath(args)
 
 - `this`、`agents`、`lib`、`api`、`emit`、`args`、`payload` 为运行时注入的代理对象或函数
 - `lib.<module>.<name>(...)` 或 `lib.<namespace>.<module>.<name>(...)` 在运行时被解析为 `LibRegistry` 中对应注册的函数调用
-- 其余语法为标准 Python（但 `__builtins__` 将被白名单过滤，移除 `open`、`eval`、`exec`、`__import__` 等危险内置函数）
+- 其余语法为标准 Python，但 `__builtins__` 被替换为白名单子集
 
 脚本通过 `exec()` 在受限 globals 字典中执行，不共享模块级别的全局状态。
+
+#### __builtins__ 白名单
+
+允许的内置对象与函数：
+
+```python
+SAFE_BUILTINS = {
+    # 类型
+    "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
+    "chr", "complex", "dict", "divmod", "enumerate", "filter", "float",
+    "format", "frozenset", "hasattr", "hash", "hex", "id", "int",
+    "isinstance", "issubclass", "iter", "len", "list", "map", "max",
+    "min", "next", "object", "oct", "ord", "pow", "print", "range",
+    "repr", "reversed", "round", "set", "slice", "sorted", "str",
+    "sum", "tuple", "type", "vars", "zip",
+    # 异常与工具
+    "Exception", "BaseException", "RuntimeError", "ValueError", "TypeError",
+    "KeyError", "IndexError", "AttributeError", "StopIteration",
+    "True", "False", "None",
+}
+```
+
+以下内置函数被显式移除：`open`, `eval`, `exec`, `__import__`, `compile`, `getattr`, `setattr`, `delattr`, `input`, `breakpoint`, `help`, `quit`, `exit`。
 
 ### 4.5 预置标准库
 
@@ -298,7 +323,7 @@ def get_candidates(args: dict) -> dict:
 
 1. **受限 globals**：为每次执行创建独立的 `globals()` 字典，注入 `this`、`agents`、`lib`、`api`、`emit`、`args`、`payload` 等代理对象。`__builtins__` 被替换为白名单子集（移除 `open`、`eval`、`exec`、`__import__`、`compile`、`getattr` 等）
 2. **代理隔离**：`this.variables` 在 `functions` 中返回 `MappingProxyType` 只读视图；在 `services`/`behaviors` 中返回可变代理，但写操作会经过审计拦截器
-3. **agents 返回深拷贝**：`agents.getInstance` 和 `agents.getInstances` 返回 agent 实例的 `deepcopy(dict)`，防止脚本修改其他 agent 的内部状态
+3. **agents 返回深拷贝**：`agents.getInstance`、`agents.getInstances`、`agents.getModel` 均返回对应 dict 的 `deepcopy`，防止脚本修改其他 agent 的内部状态或 model 定义
 4. **lib 调用拦截**：`lib` 对象通过自定义 `__getattr__` 链实现，最终调用由 `LibRegistry` 分发，不经过 Python 的模块导入机制
 
 ## 6. 热更新机制
@@ -311,7 +336,7 @@ def get_candidates(args: dict) -> dict:
 2. 调用 `LibRegistry.reload_module(path)`
 3. 使用 `importlib.reload()` 重新加载 Python 模块
 4. 重新扫描装饰器，更新注册表
-5. 已启动的调用继续执行旧代码，新调用使用重载后的代码。重载期间可能出现短暂的不一致，建议通过注册表级别的读写锁来缓解并发风险。
+5. 已启动的调用继续持有旧函数对象的引用并执行旧代码，新调用从注册表获取最新引用。重载期间通过注册表级别的读写锁保证注册表数据结构本身的线程安全，但不保证同一调用链内所有 `lib` 调用使用同一版本代码。
 
 ### 6.2 元数据变更处理
 
@@ -325,7 +350,7 @@ def get_candidates(args: dict) -> dict:
 
 1. `lib.<module>.<entrypoint>` 或 `lib.<namespace>.<module>.<entrypoint>` 引用的路径必须在 `LibRegistry` 中存在
 2. `lib` 调用出现在 `functions` 中时，目标脚本函数必须声明 `readonly=True`
-3. 禁止在 `functions` 的 `runScript` 中调用 `this.services` 或 `emit`
+3. `functions` 中的 `runScript` 禁止调用 `this.services` 或 `emit`——主要依靠运行时沙箱代理抛出 `ImmutableContextError` 进行拦截；配置校验阶段可做简单的字符串扫描作为辅助提示，但不强求深度 AST 分析
 
 ## 8. 迁移路径
 
