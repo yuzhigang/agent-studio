@@ -1,0 +1,8 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: legacy_agent
+  title: Legacy Agent
+variables:
+  temperature:
+    type: number
+    default: 25.0

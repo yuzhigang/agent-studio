@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-studio.io/schema/v2",
+  "metadata": {
+    "name": "legacy_json_agent",
+    "title": "Legacy JSON Agent"
+  },
+  "attributes": {
+    "power": {
+      "type": "number",
+      "default": 100
+    }
+  }
+}
