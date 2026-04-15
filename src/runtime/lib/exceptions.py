@@ -38,3 +38,10 @@ class LibValidationError(RuntimeError):
         self.name = name
         self.details = details
         super().__init__(f"Lib validation error: {name} ({details})")
+
+
+class ModelConfigError(RuntimeError):
+    def __init__(self, path: str, details: str = ""):
+        self.path = path
+        self.details = details
+        super().__init__(f"Model config error at {path}: {details}")
