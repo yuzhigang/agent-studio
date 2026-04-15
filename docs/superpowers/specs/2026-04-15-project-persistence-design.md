@@ -55,7 +55,8 @@ class InstanceStore(ABC):
 class EventLogStore(ABC):
     def append(self, project_id: str, event_id: str, event_type: str, payload: dict, source: str, scope: str) -> None: ...
     def replay_after(self, project_id: str, last_event_id: str | None) -> list[dict]: ...
-    """返回按 timestamp ASC 排序的事件列表。若 last_event_id 为 None，则返回全部事件。"""
+    """返回按 timestamp ASC 排序的事件列表。若 last_event_id 为 None，则返回全部事件。
+    若 last_event_id 不为 None 但在 event_log 中不存在，抛出 ValueError 以提示数据不一致。""""
 ```
 
 ### 4.2 SQLiteStore 实现
@@ -64,8 +65,8 @@ class EventLogStore(ABC):
 - **单连接 + `threading.Lock()`**：同一个 Project 内的并发写入由 Python 锁保护。
 - **WAL 模式**：开启 `PRAGMA journal_mode=WAL`，保证读操作不被写阻塞。
 - **外键约束**：`PRAGMA foreign_keys = ON;` 已开启，但当前 schema 暂不明确声明 `FOREIGN KEY`（SQLite 允许无外键声明运行，后续需要强一致性时可追加）。
-- **UPSERT 语义**：`save_instance` 和 `save_scene` 采用 `INSERT OR REPLACE`（或等价的 UPSERT），保证幂等覆盖。
-- **snapshot 字段映射**：`save_instance` 接收的 `snapshot: dict` 必须包含与 schema 对应的键：`model_name`、`model_version`、`attributes`、`state`、`variables`、`links`、`memory`、`audit`、`lifecycle_state`、`updated_at`。`SQLiteStore` 负责将 JSON 字段序列化后写入对应列。
+- **UPSERT 语义**：`save_instance` 和 `save_scene` 采用 SQLite `ON CONFLICT DO UPDATE`（SQLite 3.24+ 支持，Python 3.11+ 自带版本已满足），保证幂等覆盖且不会丢失未参与 INSERT 的列（如未来可能增加的 `created_at`）。
+- **snapshot 字段映射**：`save_instance` 接收的 `snapshot: dict` 必须包含与 schema 对应的键：`model_name`（必选）、`model_version`（可选，可为 `None`）、`attributes`、`state`、`variables`、`links`、`memory`、`audit`、`lifecycle_state`、`updated_at`。`SQLiteStore` 负责将 JSON 字段序列化后写入对应列；`model_version` 为 `None` 时写入 SQL NULL。
 - **Model 对象不持久化**：完整的 `Instance.model` dict 不序列化到 DB；仅保存 `model_name` 和 `model_version`，恢复时通过 `ModelLoader` 重新加载完整 `model`。
 
 ### 4.3 表结构
@@ -84,6 +85,8 @@ CREATE TABLE IF NOT EXISTS scenes (
     mode TEXT NOT NULL,
     refs TEXT NOT NULL,
     local_instances TEXT NOT NULL,
+    last_event_id TEXT,
+    checkpointed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (project_id, scene_id)
@@ -162,7 +165,7 @@ class ProjectRegistry:
 ```
 
 - `create_project()` 创建文件夹、`project.yaml`、`runtime.db`。
-- `load_project()` 初始化 `SQLiteStore`（同时作为 Project/Scene/Instance/EventLog Store）、`EventBusRegistry`（管理 per-project `EventBus` 生命周期）、`InstanceManager`、`SceneManager`、`StateManager`，返回运行时 bundle。
+- `load_project()` 初始化 `SQLiteStore`（同时作为 Project/Scene/Instance/EventLog Store）、`EventBusRegistry`（已存在于 `src/runtime/event_bus.py`，负责按 `project_id` 创建/销毁 `EventBus`）、`InstanceManager`、`SceneManager`、`StateManager`，返回运行时 bundle。
 - `unload_project()` 关闭 SQLite 连接、清空内存实例、释放 EventBus。
 
 ## 6. StateManager
@@ -191,9 +194,18 @@ class StateManager:
 - 在一个 SQLite 事务中原子写入：实例快照 + `lastEventId` 到 `project_state` 表。
 - `project_state` 表以 `project_id` 为唯一主键，**仅保留最新的 checkpoint 元数据**，不保留历史版本。
 - 若事务失败（如磁盘满、DB 锁定），`checkpoint_project()` 抛出 `RuntimeError`（或自定义 `PersistenceError`），且内存状态保持不变。
-- 显式 checkpoint 由业务层在关键状态迁移后调用；同时 `StateManager` 内部维护一个 `loaded_projects: set[str]`，并启动一个轻量后台线程，每 30 秒对该集合的**快照**执行自动 checkpoint。
+- 显式 checkpoint 由业务层在关键状态迁移后调用；同时 `StateManager` 内部维护一个 `loaded_projects: set[str]`（受 `threading.Lock()` 保护），并启动一个轻量后台线程，每 30 秒对该集合的快照执行自动 checkpoint。
+- 后台线程在对某个 Project 执行 checkpoint 前，先尝试获取该 Project 的 per-project 锁；若获取失败（说明正在 unload），则跳过。
 - `unload_project()` 必须在释放资源前先将 `project_id` 从 `loaded_projects` 中移除，再调用 `StateManager.shutdown()` 优雅停止后台线程，防止对正在卸载的 Project 执行 auto-checkpoint。
-- `MetricStore` 在 `ProjectRegistry.load_project()` 时注入到 `StateManager`，用于 metric 回填。
+- `MetricStore` 由 `ProjectRegistry.load_project()` 在构造 `StateManager(metric_store=...)` 时注入，用于 metric 回填。`load_project()` 的伪代码如下：
+  ```python
+  store = SQLiteStore(project_dir)
+  bus_reg = EventBusRegistry()
+  im = InstanceManager(bus_reg, instance_store=store)
+  metric_store = metric_store_factory(project_id) if metric_store_factory else None
+  state_mgr = StateManager(im, scene_mgr, store, store, store, metric_store=metric_store)
+  scene_mgr = SceneManager(im, bus_reg, scene_store=store, state_manager=state_mgr)
+  ```
 
 ### 6.3 Scene Checkpoint 语义
 
@@ -211,10 +223,11 @@ class StateManager:
 ## 7. InstanceManager 改造
 
 - 构造函数注入可选的 `instance_store`。
-- `create()` / `remove()` / `copy_for_scene()` 在内存操作成功后自动同步到 `instance_store`（同步的字段包括 `attributes`、`state`、`variables`、`links`、`memory`、`audit` 等完整快照）。
+- `create()` / `copy_for_scene()` 在内存操作成功后自动同步到 `instance_store`（同步的字段包括 `attributes`、`state`、`variables`、`links`、`memory`、`audit` 等完整快照；空 `attributes` 序列化为 `{}`）。
+- `remove()` 从内存中删除实例，并调用 `instance_store.delete_instance()` 物理删除 DB 记录。生命周期中的 `purged` 状态由 `transition_lifecycle()` 显式设置并写入 tombstone 快照后，再由调用方决定是否调用 `remove()` 物理删除。
 - 新增 `transition_lifecycle(project_id, instance_id, new_state)`：
   - 更新内存中的 `lifecycle_state`。
-  - 同步写入 DB。
+  - 同步写入 DB（写入完整快照，非 tombstone）。
   - 若新状态为 `archived`，立即从内存中卸载。
 - `get()` 增加懒加载机制：当内存中未命中且配置了 `instance_store` 时，尝试从 DB 读取快照并重新水合为 `Instance` 对象（`model` 字段通过 `ModelLoader` 重新加载）。
 
