@@ -189,66 +189,83 @@ scene_copy_of_ladle_001.state.current = "maintenance"
 # Project 实例不受影响
 ```
 
-## 8. 实例间通信：单一 EventBus
+## 8. 实例间通信：Project 级 EventBus
 
-### 7.1 设计原则
+### 8.1 设计原则
 
-- **只有一个 `EventBus`**，所有实例（Project 和 Scene）都注册在同一总线上。
-- **通过 `scope` 字段隔离路由**，而不是通过多个总线。
+- **每个 Project 拥有独立的 `EventBus`**，运行时通过 `EventBusRegistry` 统一管理。
+- **Scene 和 Project 实例不共享跨 Project 的总线**，确保故障隔离和资源独立回收。
+- **通过 `scope` 字段隔离 Project 内部的路由**（全局 vs Scene 隔离）。
 - **DSL 中不暴露内部消息对象**（如 `AgentMessage`），脚本层只用简单的 `dispatch(type, payload)` 语法。
 
-### 7.2 EventBus 核心实现
+### 8.2 EventBus 核心实现
 
-运行时可以承载**多个 Project**，因此 EventBus 虽然是单一对象，但内部按 `project_id` 分区隔离。同一 Project 内的实例才能互相通信。
+每个 `EventBus` 实例只服务一个 Project，内部通过 `scope` 隔离 Scene：
 
 ```python
 class EventBus:
     def __init__(self):
-        # project_id -> {event_type -> [(instance_id, handler), ...]}
-        self._subscribers: dict[str, dict[str, list[tuple[str, callable]]]] = {}
-        # (project_id, instance_id) -> scope
-        self._registry: dict[tuple[str, str], str] = {}
+        # event_type -> [(instance_id, handler), ...]
+        self._subscribers: dict[str, list[tuple[str, callable]]] = {}
+        # instance_id -> scope
+        self._registry: dict[str, str] = {}
         self._lock = threading.RLock()
 
-    def register(self, project_id: str, instance_id: str,
-                 scope: str, handler: callable):
+    def register(self, instance_id: str, scope: str, handler: callable):
         with self._lock:
-            self._registry[(project_id, instance_id)] = scope
-            proj = self._subscribers.setdefault(project_id, {})
-            proj.setdefault(event_type, []).append((instance_id, handler))
+            self._registry[instance_id] = scope
+            self._subscribers.setdefault(event_type, []).append((instance_id, handler))
 
-    def unregister(self, project_id: str, instance_id: str):
+    def unregister(self, instance_id: str):
         with self._lock:
-            self._registry.pop((project_id, instance_id), None)
-            proj = self._subscribers.get(project_id, {})
-            for event_type, handlers in proj.items():
-                proj[event_type] = [
+            self._registry.pop(instance_id, None)
+            for event_type, handlers in self._subscribers.items():
+                self._subscribers[event_type] = [
                     (iid, h) for iid, h in handlers if iid != instance_id
                 ]
 
-    def publish(self, project_id: str, event_type: str, payload: dict,
+    def publish(self, event_type: str, payload: dict,
                 source: str, scope: str, target: str | None = None):
         with self._lock:
-            handlers = list(self._subscribers.get(project_id, {}).get(event_type, []))
+            handlers = list(self._subscribers.get(event_type, []))
 
         for instance_id, handler in handlers:
             if target and instance_id != target:
                 continue
-            if not self._scope_matches(scope, project_id, instance_id):
+            if not self._scope_matches(scope, instance_id):
                 continue
             handler(event_type, payload, source)
 
-    def _scope_matches(self, msg_scope: str, project_id: str, instance_id: str) -> bool:
-        inst_scope = self._registry.get((project_id, instance_id), "project")
+    def _scope_matches(self, msg_scope: str, instance_id: str) -> bool:
+        inst_scope = self._registry.get(instance_id, "project")
         if msg_scope == "project":
             return True  # project 消息在该 project 内全局可达
         return msg_scope == inst_scope  # scene 消息只匹配同 scope
 ```
 
+运行时通过 `EventBusRegistry` 按 `project_id` 创建、查找和销毁 Bus：
+
+```python
+class EventBusRegistry:
+    def __init__(self):
+        self._buses: dict[str, EventBus] = {}
+        self._lock = threading.Lock()
+
+    def get_or_create(self, project_id: str) -> EventBus:
+        with self._lock:
+            if project_id not in self._buses:
+                self._buses[project_id] = EventBus()
+            return self._buses[project_id]
+
+    def destroy(self, project_id: str):
+        with self._lock:
+            self._buses.pop(project_id, None)   # 整个 Bus 丢弃，GC 自然回收
+```
+
 **说明**：
 - `handler` 是由 `InstanceManager` 绑定的实例级闭包，签名统一为 `(event_type, payload, source)`。
 - 注册/注销使用 `RLock` 保证并发安全；`publish` 时复制 handler 列表，避免遍历过程中被修改。
-- `InstanceManager` 在实例创建时调用 `register()`，在实例销毁或 Scene 关闭时调用 `unregister()`。
+- `InstanceManager` 通过 `EventBusRegistry.get_or_create(project_id)` 获取 Bus，然后在实例创建时调用 `bus.register()`，在实例销毁或 Scene 关闭时调用 `bus.unregister()`；Project 整体销毁时调用 `EventBusRegistry.destroy(project_id)` 丢弃整个 Bus。
 
 **路由规则只有两条**：
 1. `scope == "project"` 的消息 → **同一 Project 内的所有实例都能收到**。
@@ -256,7 +273,7 @@ class EventBus:
 
 不同 Project 的实例天然隔离，绝不会跨 Project 路由。
 
-### 7.3 DSL 语法简化
+### 8.3 DSL 语法简化
 
 #### 发送事件
 脚本层只暴露一个函数，**不暴露任何内部消息对象**：
@@ -275,8 +292,8 @@ dispatch("ladleLoaded", {
 ```python
 def dispatch(event_type: str, payload: dict, target: str | None = None):
     scope = _resolve_scope(current_instance)
-    event_bus.publish(
-        project_id=current_instance.project_id,
+    bus = event_bus_registry.get_or_create(current_instance.project_id)
+    bus.publish(
         event_type=event_type,
         payload=payload,
         source=current_instance.id,
@@ -325,13 +342,13 @@ def on_event(instance, event_type, payload, source):
                 })
 ```
 
-### 7.4 外部系统入口
+### 8.4 外部系统入口
 
-外部系统发送事件时，必须指定 `project_id`，默认进 `project` scope：
+外部系统发送事件时，通过 `EventBusRegistry` 获取目标 Project 的 Bus，默认进 `project` scope：
 
 ```python
-event_bus.publish(
-    project_id="steel-plant-01",
+bus = event_bus_registry.get_or_create("steel-plant-01")
+bus.publish(
     event_type="beginLoad",
     payload={"source": "MES", "converterId": "C01"},
     source="__external__",
@@ -340,9 +357,9 @@ event_bus.publish(
 )
 ```
 
-若外部系统需向 isolated Scene 发消息，必须通过 Scene 专属 API（如 `POST /scenes/{sceneId}/events`），由 `SceneController` 将 scope 设为 `"scene:{sceneId}"`。
+若外部系统需向 isolated Scene 发消息，必须通过 Scene 专属 API（如 `POST /scenes/{sceneId}/events`），由 `SceneController` 获取对应 Project 的 Bus，并将 scope 设为 `"scene:{sceneId}"`。
 
-### 7.5 消息边界总结
+### 8.5 消息边界总结
 
 | 场景 | Scope | 影响范围 |
 |---|---|---|
