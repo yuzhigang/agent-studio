@@ -1,0 +1,150 @@
+onEnterFullSetStatus:
+  title: 进入满包更新业务状态
+  trigger:
+    type: stateEnter
+    state: full
+  priority: 10
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.processStatus = 'awaiting_transport'
+onEnterReceivingNotify:
+  title: 进入接钢中发布状态变化
+  trigger:
+    type: stateEnter
+    state: receiving
+  priority: 20
+  after: onEnterReceivingSetStatus
+  actions:
+  - type: triggerEvent
+    name: ladleStatusChanged
+    payload:
+      ladleId: this.id
+      state: receiving
+captureAssignedDestination:
+  title: 接收外部派工目标
+  trigger:
+    type: event
+    name: dispatchAssigned
+    when: payload.destinationId != null
+  priority: 1
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: 'this.variables.targetLocation = f"{payload.destinationType}_{payload.destinationId}"
+
+      this.variables.processStatus = ''task_assigned'''
+onTransitionEmptyToReceivingLog:
+  title: 空包转接钢时记录审计日志
+  trigger:
+    type: transition
+    transition: emptyToReceiving
+  priority: 30
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: 'print(f''[Transition] 钢包 {this.id} 收到开始接钢指令，来源: {payload.source}'')'
+onEnterMaintenanceMark:
+  title: 进入维护中记录维护时间
+  trigger:
+    type: stateEnter
+    state: maintenance
+  priority: 10
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.processStatus = 'maintenance'\nimport datetime\nthis.variables.lastMaintenanceTime
+      = datetime.datetime.now().isoformat()
+onExitMaintenanceResetUsage:
+  title: 退出维护时重置使用次数
+  trigger:
+    type: stateExit
+    state: maintenance
+  priority: 20
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.usageCount = 0
+onEnterPouringSetStatus:
+  title: 进入倾倒中更新业务状态
+  trigger:
+    type: stateEnter
+    state: pouring
+  priority: 10
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.processStatus = 'pouring'
+onEnterFullNotifyLoaded:
+  title: 进入满包发布接钢完成
+  trigger:
+    type: stateEnter
+    state: full
+  priority: 20
+  after: onEnterFullSetStatus
+  actions:
+  - type: triggerEvent
+    name: ladleLoaded
+    payload:
+      ladleId: this.id
+      steelAmount: this.variables.steelAmount
+      steelGrade: this.variables.steelGrade
+      temperature: this.variables.temperature
+onEnterEmptyNotify:
+  title: 进入空包后发布状态变化
+  trigger:
+    type: stateEnter
+    state: empty
+  priority: 20
+  after: onEnterEmptyReset
+  actions:
+  - type: triggerEvent
+    name: ladleStatusChanged
+    payload:
+      ladleId: this.id
+      state: empty
+      timestamp: datetime.now().isoformat()
+onEnterReceivingSetStatus:
+  title: 进入接钢中更新业务状态
+  trigger:
+    type: stateEnter
+    state: receiving
+  priority: 10
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.processStatus = 'receiving'
+onExitPouringNotifyEmptied:
+  title: 退出倾倒中发布倾倒完成
+  trigger:
+    type: stateExit
+    state: pouring
+  priority: 20
+  actions:
+  - type: triggerEvent
+    name: ladleEmptied
+    payload:
+      ladleId: this.id
+      usageCount: this.variables.usageCount
+onEnterEmptyReset:
+  title: 进入空包时重置载荷变量
+  trigger:
+    type: stateEnter
+    state: empty
+  priority: 10
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade
+      = ''\nthis.variables.carbonContent = 0\nthis.variables.processStatus = 'empty'
+captureConverterTarget:
+  title: 记录转炉目标位置
+  trigger:
+    type: event
+    name: beginLoad
+    when: payload.converterId != null
+  priority: 1
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: this.variables.targetLocation = f'converter_{payload.converterId}'

@@ -1,0 +1,13 @@
+deliveryAdjustment:
+  title: 配送调整计划
+  description: 当运输路径、目标工位或时效出现冲突时，由 cortex 生成的结构化动作计划。
+  stepSchema:
+    service:
+      type: string
+    args:
+      type: object
+  allowedServices:
+  - assignTargetLocation
+  - moveTo
+  successCondition: this.variables.targetLocation == '' || this.variables.currentLocation
+    == this.variables.targetLocation

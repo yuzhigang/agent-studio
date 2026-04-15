@@ -1,0 +1,20 @@
+currentAssignment:
+  type: object
+  title: 当前任务
+  description: 当前运输或倾倒任务摘要。
+  schema:
+    taskId:
+      type: string
+    destination:
+      type: string
+    deadline:
+      type: string
+recentAbnormalEvents:
+  type: array
+  title: 最近异常事件
+  description: 用于 cortex 判断是否需要接管的异常记录。
+  maxItems: 20
+lastDecision:
+  type: object
+  title: 最近一次决策
+  description: 最近一次 cortex 决策摘要与原因。

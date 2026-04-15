@@ -1,0 +1,24 @@
+defaultOperationalMode:
+  title: 默认运行模式
+  preferredMode: reflex
+  goals:
+  - safeHandling
+  - timelyDelivery
+  escalateWhen:
+  - type: goalConflict
+    goals:
+    - safeHandling
+    - timelyDelivery
+  - type: event
+    name: routeConflictDetected
+  - type: event
+    name: deliveryDelayDetected
+  memorySlots:
+  - currentAssignment
+  - recentAbnormalEvents
+  - lastDecision
+  plan: deliveryAdjustment
+  constraints:
+  - rules
+  - permissions
+  - stateMachine

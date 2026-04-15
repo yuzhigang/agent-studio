@@ -1,0 +1,50 @@
+calculateLoad:
+  title: 计算可装载量
+  type: script
+  scriptEngine: python
+  script: 'capacity_remaining = this.attributes.capacity - this.variables.steelAmount
+
+    requested = args.weight
+
+    actual = min(requested, capacity_remaining)
+
+    return {''requested'': requested, ''actual'': actual, ''capacityRemaining'': capacity_remaining}'
+  description: 计算可装载量（纯计算，不修改状态）
+  parameters:
+    weight:
+      type: number
+      description: 请求装载的钢水重量
+  returns:
+    requested:
+      type: number
+    actual:
+      type: number
+    capacityRemaining:
+      type: number
+calculateTemperatureDrop:
+  title: 计算温度下降
+  type: script
+  scriptEngine: python
+  script: 'elapsed_minutes = args.get(''elapsedMinutes'', 0)
+
+    temp_drop_rate = args.get(''tempDropRate'', 1.5)
+
+    current_temp = max(25, this.variables.temperature - elapsed_minutes * temp_drop_rate)
+
+    return {''temperatureDrop'': elapsed_minutes * temp_drop_rate, ''currentTemp'':
+    current_temp, ''elapsedMinutes'': elapsed_minutes}'
+  description: 基于输入时间窗口推算温降，不修改运行态。
+  parameters:
+    elapsedMinutes:
+      type: number
+      description: 距离上次测温的分钟数
+    tempDropRate:
+      type: number
+      description: 温降速率
+  returns:
+    temperatureDrop:
+      type: number
+    currentTemp:
+      type: number
+    elapsedMinutes:
+      type: number

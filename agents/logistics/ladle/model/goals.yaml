@@ -1,0 +1,12 @@
+safeHandling:
+  title: 安全承载
+  description: 在任何运输和倾倒动作中优先满足安全边界。
+  priority: 100
+  successCondition: this.variables.steelAmount <= this.attributes.capacity && this.variables.temperature
+    <= this.attributes.maxTemperature
+timelyDelivery:
+  title: 按时送达工位
+  description: 尽量降低运输等待时间，在不违反安全边界的前提下按计划送达目标工位。
+  priority: 80
+  successCondition: this.variables.targetLocation == '' || this.variables.currentLocation
+    == this.variables.targetLocation

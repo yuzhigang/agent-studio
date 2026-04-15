@@ -1,0 +1,23 @@
+checkTemperature:
+  name: checkTemperature
+  title: 定期检查钢水温度
+  cron: '*/5 * * * *'
+  condition: this.variables.steelAmount > 0
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: "if this.variables.steelAmount > 0:\n    print(f'[Schedule] 钢包 {this.id}\
+      \ 温度检查: {this.variables.temperature}℃')"
+  onFailure:
+  - type: triggerAlarm
+    alarm: temperatureTooLow.warning
+checkRefractoryLife:
+  name: checkRefractoryLife
+  title: 检查耐材寿命
+  cron: 0 */1 * * *
+  actions:
+  - type: runScript
+    scriptEngine: python
+    script: "remaining_life = this.attributes.refractoryLife - this.variables.usageCount\n\
+      if remaining_life <= 10:\n    print(f'[Schedule:Warning] 钢包 {this.id} 耐材剩余寿命:\
+      \ {remaining_life} 次')"
