@@ -49,12 +49,13 @@ class SceneStore(ABC):
 class InstanceStore(ABC):
     def save_instance(self, project_id: str, instance_id: str, scope: str, snapshot: dict) -> None: ...
     def load_instance(self, project_id: str, instance_id: str, scope: str) -> dict | None: ...
-    def list_instances(self, project_id: str, scope: str | None = None) -> list[dict]: ...
+    def list_instances(self, project_id: str, scope: str | None = None, lifecycle_state: str | None = None) -> list[dict]: ...
     def delete_instance(self, project_id: str, instance_id: str, scope: str) -> bool: ...
 
 class EventLogStore(ABC):
     def append(self, project_id: str, event_id: str, event_type: str, payload: dict, source: str, scope: str) -> None: ...
     def replay_after(self, project_id: str, last_event_id: str | None) -> list[dict]: ...
+    """返回按 timestamp ASC 排序的事件列表。"""
 ```
 
 ### 4.2 SQLiteStore 实现
@@ -62,7 +63,8 @@ class EventLogStore(ABC):
 - **按 Project 实例化**：`SQLiteStore(project_dir)` 只操作该目录下的 `runtime.db`。
 - **单连接 + `threading.Lock()`**：同一个 Project 内的并发写入由 Python 锁保护。
 - **WAL 模式**：开启 `PRAGMA journal_mode=WAL`，保证读操作不被写阻塞。
-- **外键约束**：连接初始化时执行 `PRAGMA foreign_keys = ON;`。
+- **外键约束**：`PRAGMA foreign_keys = ON;` 已开启，但当前 schema 暂不明确声明 `FOREIGN KEY`（SQLite 允许无外键声明运行，后续需要强一致性时可追加）。
+- **UPSERT 语义**：`save_instance` 和 `save_scene` 采用 `INSERT OR REPLACE`（或等价的 UPSERT），保证幂等覆盖。
 - **Model 字段不持久化**：`Instance.model` 在恢复时通过 `ModelLoader` 重新加载，不写入 `instances` 表。
 
 ### 4.3 表结构
@@ -160,9 +162,12 @@ class StateManager:
 ### 6.1 Checkpoint
 
 - 遍历该 Project 下所有 `active` 和 `completed` 实例。
-- 在一个 SQLite 事务中原子写入：实例快照 + `lastEventId`。
+- 在一个 SQLite 事务中原子写入：实例快照 + `lastEventId` 到 `project_state` 表。
+- `project_state` 表以 `project_id` 为唯一主键，**仅保留最新的 checkpoint 元数据**，不保留历史版本。
+- 若事务失败（如磁盘满、DB 锁定），`checkpoint_project()` 抛出 `RuntimeError`（或自定义 `PersistenceError`），且内存状态保持不变。
 - 显式 checkpoint 由业务层在关键状态迁移后调用；同时 `StateManager` 内部启动一个轻量后台线程，每 30 秒自动 checkpoint 所有已加载的 Project。
 - `StateManager.shutdown()` 负责优雅停止后台线程；`ProjectRegistry.unload_project()` 在释放资源前必须调用它。
+- `MetricStore` 在 `ProjectRegistry.load_project()` 时注入到 `StateManager`，用于 metric 回填。
 
 ### 6.2 Restore
 
@@ -187,6 +192,7 @@ class StateManager:
 - 类名和文件名统一改为 `SceneManager`。
 - 构造函数注入可选的 `scene_store` 和 `state_manager`。
 - `start()` 成功后调用 `scene_store.save_scene()`，持久化的是**运行时 Scene 状态**（`mode`、`refs`、`local_instances` 等）；静态 Scene 定义模板仍保留在 `scenes/` 目录下的 YAML 文件中。
+- `scenes` 表中存在一行即代表该 Scene 在最后一次保存时处于运行状态，schema 中不设额外的 `status` 列。
 - `stop()` 成功后调用 `scene_store.delete_scene()`，仅删除运行时状态，不影响 `scenes/` 下的静态定义。
 - 新增 `list_by_project(project_id)` 查询该 Project 下所有运行时 Scene 状态。
 
