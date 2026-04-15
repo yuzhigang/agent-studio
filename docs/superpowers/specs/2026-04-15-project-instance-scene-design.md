@@ -16,7 +16,7 @@
 | 概念 | 定义 |
 |---|---|
 | **Model** | Agent 的静态配置模板，由 `ModelLoader` 从 `model/` 目录或 `model.yaml` 加载。 |
-| **Instance** | Model 的运行时实体，具有全局唯一 `instanceId`。 |
+| **Instance** | Model 的运行时实体，`instanceId` 在所属 **Project 内唯一**，运行时通过 `(project_id, instance_id)` 联合标识。 |
 | **Project** | 一个完整工厂/产线的数字化镜像，包含全局实例池、全局配置、Scene 集合。 |
 | **Scene** | Project 内的一个**运行视图或仿真上下文**，可引用 Project 实例，也可挂载私有临时实例。 |
 
@@ -56,6 +56,24 @@
   ```
 - **禁止**为每类细微差异都新建一个 Model 目录，避免 `agents/` 目录爆炸。
 
+### 4.1 动态实例生命周期与销毁策略
+
+动态实例（如板坯）需要明确的生命周期状态，防止实例池无限膨胀：
+
+```yaml
+lifecycleStates:
+  - active      # 正常运行中
+  - completed   # 任务完成，保留热数据
+  - archived    # 迁移到冷存储，主库只保留元数据
+  - purged      # 完全删除，仅审计日志可追溯
+```
+
+- **`active` → `completed`**：由业务事件（如浇铸完成）自动触发。
+- **`completed` → `archived`**：超过保留期限（如 7 天）后由后台任务批量迁移。
+- **`archived` → `purged`**：超过合规存储期限（如 90 天）后物理删除。
+
+`InstanceManager` 负责定期执行清理任务，确保 DB 和时序库中过期实例被安全回收。
+
 ---
 
 ## 5. Scene 模式：Shared vs Isolated（CoW）
@@ -68,7 +86,7 @@
 - **适用场景**：监控面板、多视角观察真实产线。
 
 ### 5.2 `isolated` 模式（Copy-on-Write）
-- Scene 启动时，对引用的 Project 实例做**内存快照（shallow copy）**。
+- Scene 启动时，对引用的 Project 实例做**深度拷贝（deep copy）**，至少包括 `state`、`variables`、`links`、`memory`。
 - Scene 内的读写只操作副本，不影响 Project 全局状态。
 - **适用场景**：仿真、培训、what-if 分析。
 
@@ -117,7 +135,17 @@ audit:
   lastEventId: "evt-uuid-789"
 ```
 
-### 6.2 Isolated Scene 的 Metric 回填
+### 6.2 审计一致性语义
+
+`audit.lastEventId` 与事件日志采用**至少一次（at-least-once）**语义：
+
+1. 每次持久化 checkpoint 时，将 `lastEventId` 与实例状态一起原子写入 DB。
+2. 故障恢复时，读取 DB checkpoint 中的 `lastEventId`。
+3. 从事件日志中重放 `lastEventId` 之后的所有事件，幂等处理重复事件。
+
+这保证了：即使 checkpoint 和事件日志的写入存在微小时间差，也不会丢失状态变更。
+
+### 6.3 Isolated Scene 的 Metric 回填
 
 当 `isolated` 模式 Scene 启动时：
 1. 从 DB 加载 Project 实例的 `state` 类变量快照。
@@ -132,8 +160,8 @@ audit:
 
 1. **引用完整性校验**
    - 对每个 `references` 中的实例，检查其 `links` 指向的目标是否也在本 Scene 中。
-   - 缺失的目标若存在于 Project 全局池中，**自动拉入** `references`。
-   - 若 Project 池中也不存在，抛出 `SceneConfigError`。
+   - 缺失的目标若存在于 Project 全局池中，可按策略**自动拉入** `references`，但级联深度不得超过 **2 层，避免把整个 Project 拖入 Scene。
+   - 超过深度限制或 Project 池中不存在的 link，在 Scene 内暂时置为 `null`，不阻塞启动。
 
 2. **CoW 快照复制**
    - 复制 Project 实例的内存状态到 Scene 私有空间。
@@ -144,8 +172,8 @@ audit:
 4. **创建 Local Instances**
    - 加载对应 Model，按提供的参数初始化 Scene 私有实例。
 
-5. **Property Reconciliation**
-   - 对所有实例（引用 + local）重算 `derivedProperties`。
+5. **Metric 回填优先于 Property Reconciliation**
+   - 必须在所有 `metric` 类变量从时序库回填**完成后**，再对所有实例（引用 + local）执行 Property Reconciliation，防止 rules/behaviors 读到缺省值（如 `temperature` 的 `default: 25.0`）。
 
 6. **启动 Scene 事件总线**
    - 隔离模式下，事件总线**仅连接 Scene 内部实例**。
@@ -161,7 +189,7 @@ scene_copy_of_ladle_001.state.current = "maintenance"
 # Project 实例不受影响
 ```
 
-## 7. 实例间通信：单一 EventBus
+## 8. 实例间通信：单一 EventBus
 
 ### 7.1 设计原则
 
@@ -180,16 +208,30 @@ class EventBus:
         self._subscribers: dict[str, dict[str, list[tuple[str, callable]]]] = {}
         # (project_id, instance_id) -> scope
         self._registry: dict[tuple[str, str], str] = {}
+        self._lock = threading.RLock()
 
     def register(self, project_id: str, instance_id: str,
                  scope: str, handler: callable):
-        self._registry[(project_id, instance_id)] = scope
-        proj = self._subscribers.setdefault(project_id, {})
-        # handler 绑定到该实例
+        with self._lock:
+            self._registry[(project_id, instance_id)] = scope
+            proj = self._subscribers.setdefault(project_id, {})
+            proj.setdefault(event_type, []).append((instance_id, handler))
+
+    def unregister(self, project_id: str, instance_id: str):
+        with self._lock:
+            self._registry.pop((project_id, instance_id), None)
+            proj = self._subscribers.get(project_id, {})
+            for event_type, handlers in proj.items():
+                proj[event_type] = [
+                    (iid, h) for iid, h in handlers if iid != instance_id
+                ]
 
     def publish(self, project_id: str, event_type: str, payload: dict,
                 source: str, scope: str, target: str | None = None):
-        for instance_id, handler in self._find_subscribers(project_id, event_type):
+        with self._lock:
+            handlers = list(self._subscribers.get(project_id, {}).get(event_type, []))
+
+        for instance_id, handler in handlers:
             if target and instance_id != target:
                 continue
             if not self._scope_matches(scope, project_id, instance_id):
@@ -202,6 +244,11 @@ class EventBus:
             return True  # project 消息在该 project 内全局可达
         return msg_scope == inst_scope  # scene 消息只匹配同 scope
 ```
+
+**说明**：
+- `handler` 是由 `InstanceManager` 绑定的实例级闭包，签名统一为 `(event_type, payload, source)`。
+- 注册/注销使用 `RLock` 保证并发安全；`publish` 时复制 handler 列表，避免遍历过程中被修改。
+- `InstanceManager` 在实例创建时调用 `register()`，在实例销毁或 Scene 关闭时调用 `unregister()`。
 
 **路由规则只有两条**：
 1. `scope == "project"` 的消息 → **同一 Project 内的所有实例都能收到**。
@@ -311,19 +358,19 @@ event_bus.publish(
 
 ---
 
-## 8. 与现有 Model 抽象的对接
+## 9. 与现有 Model 抽象的对接
 
 | 现有模块 | 职责 | 是否需要修改 |
 |---|---|---|
 | `ModelLoader` | 加载静态 Model 定义 | **否**，继续负责纯定义加载 |
 | `LibRegistry` | 扫描 `libs/` 并注册脚本函数 | **否**，实例通过 `modelName` 解析到 `agents/` 下的 `libs/` |
-| `SandboxExecutor` | 沙箱执行脚本 | **未来可能需要扩展**，传入 `sceneContext` 让脚本感知自身作用域 |
-| **新增 `InstanceManager`** | 管理 Project/Scene 的实例生命周期、CoW、持久化 | **新增** |
+| `SandboxExecutor` | 沙箱执行脚本 | **否**，脚本层通过 `dispatch()` 自动推导 scope，无需感知 `sceneContext` |
+| **新增 `InstanceManager`** | 管理 Project/Scene 的实例生命周期、CoW、持久化；持有 `ModelLoader` 输出的定义，用于解析 `x-category` 并指导差异化持久化 | **新增** |
 | **新增 `SceneController`** | 负责 Scene 启动、校验、事件边界、清理 | **新增** |
 
 ---
 
-## 9. 设计决策记录
+## 10. 设计决策记录
 
 ### 决策 1：去掉 Fleets 层
 - **原因**：在当前复杂度下，Fleet 只是实例的逻辑分组，可以用标签或查询条件替代，无需作为一级概念引入。若未来实例数量达到管理瓶颈，再考虑引入。
@@ -339,7 +386,7 @@ event_bus.publish(
 
 ---
 
-## 10. 后续待设计事项
+## 11. 后续待设计事项
 
 - `InstanceManager` 和 `SceneController` 的接口契约与 Python 类设计。
 - `metric` 变量到时序数据库的写入频率和聚合策略（秒级、分钟级、变化阈值触发）。
