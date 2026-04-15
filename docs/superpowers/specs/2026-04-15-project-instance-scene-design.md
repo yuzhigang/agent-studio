@@ -171,35 +171,43 @@ scene_copy_of_ladle_001.state.current = "maintenance"
 
 ### 7.2 EventBus 核心实现
 
+运行时可以承载**多个 Project**，因此 EventBus 虽然是单一对象，但内部按 `project_id` 分区隔离。同一 Project 内的实例才能互相通信。
+
 ```python
 class EventBus:
     def __init__(self):
-        self._subscribers: dict[str, list[callable]] = {}   # event_type -> handlers
-        self._registry: dict[str, str] = {}                  # instance_id -> scope
+        # project_id -> {event_type -> [(instance_id, handler), ...]}
+        self._subscribers: dict[str, dict[str, list[tuple[str, callable]]]] = {}
+        # (project_id, instance_id) -> scope
+        self._registry: dict[tuple[str, str], str] = {}
 
-    def register(self, instance_id: str, scope: str, handler: callable):
-        self._registry[instance_id] = scope
+    def register(self, project_id: str, instance_id: str,
+                 scope: str, handler: callable):
+        self._registry[(project_id, instance_id)] = scope
+        proj = self._subscribers.setdefault(project_id, {})
         # handler 绑定到该实例
 
-    def publish(self, event_type: str, payload: dict,
+    def publish(self, project_id: str, event_type: str, payload: dict,
                 source: str, scope: str, target: str | None = None):
-        for instance_id, handler in self._find_subscribers(event_type):
+        for instance_id, handler in self._find_subscribers(project_id, event_type):
             if target and instance_id != target:
                 continue
-            if not self._scope_matches(scope, instance_id):
+            if not self._scope_matches(scope, project_id, instance_id):
                 continue
             handler(event_type, payload, source)
 
-    def _scope_matches(self, msg_scope: str, instance_id: str) -> bool:
-        inst_scope = self._registry.get(instance_id, "project")
+    def _scope_matches(self, msg_scope: str, project_id: str, instance_id: str) -> bool:
+        inst_scope = self._registry.get((project_id, instance_id), "project")
         if msg_scope == "project":
-            return True  # project 消息全局可达
+            return True  # project 消息在该 project 内全局可达
         return msg_scope == inst_scope  # scene 消息只匹配同 scope
 ```
 
 **路由规则只有两条**：
-1. `scope == "project"` 的消息 → **所有实例都能收到**。
-2. `scope == "scene:<id>"` 的消息 → **只有同 scope 的实例能收到**。
+1. `scope == "project"` 的消息 → **同一 Project 内的所有实例都能收到**。
+2. `scope == "scene:<id>"` 的消息 → **同一 Project 且同 Scene 的实例才能收到**。
+
+不同 Project 的实例天然隔离，绝不会跨 Project 路由。
 
 ### 7.3 DSL 语法简化
 
@@ -221,6 +229,7 @@ dispatch("ladleLoaded", {
 def dispatch(event_type: str, payload: dict, target: str | None = None):
     scope = _resolve_scope(current_instance)
     event_bus.publish(
+        project_id=current_instance.project_id,
         event_type=event_type,
         payload=payload,
         source=current_instance.id,
@@ -271,10 +280,11 @@ def on_event(instance, event_type, payload, source):
 
 ### 7.4 外部系统入口
 
-外部系统发送事件时，默认进 `project` scope：
+外部系统发送事件时，必须指定 `project_id`，默认进 `project` scope：
 
 ```python
 event_bus.publish(
+    project_id="steel-plant-01",
     event_type="beginLoad",
     payload={"source": "MES", "converterId": "C01"},
     source="__external__",
