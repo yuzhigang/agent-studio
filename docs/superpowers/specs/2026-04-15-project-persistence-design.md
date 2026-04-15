@@ -26,8 +26,8 @@ projects/
     └── resources/               # 外部资源、导入文件、附件
 ```
 
-- `project.yaml`：包含 `project_id`、`name`、`description`、`config` 等全局配置。
-- `runtime.db`：统一存储 `scenes`、`instances`、`event_log`。
+- `project.yaml`：静态源文件，包含 `project_id`、`name`、`description`、`config` 等全局配置。`ProjectRegistry` 加载时从 `project.yaml` 读取，并镜像写入 `runtime.db` 的 `projects` 表作为运行时缓存。
+- `runtime.db`：统一存储 `scenes`（运行时状态）、`instances`、`event_log`、`project_state`。
 - 整个文件夹可复制到任意环境直接加载运行。
 
 ## 4. Store 抽象层
@@ -54,7 +54,7 @@ class InstanceStore(ABC):
 
 class EventLogStore(ABC):
     def append(self, project_id: str, event_id: str, event_type: str, payload: dict, source: str, scope: str) -> None: ...
-    def replay_after(self, project_id: str, last_event_id: str) -> list[dict]: ...
+    def replay_after(self, project_id: str, last_event_id: str | None) -> list[dict]: ...
 ```
 
 ### 4.2 SQLiteStore 实现
@@ -62,6 +62,8 @@ class EventLogStore(ABC):
 - **按 Project 实例化**：`SQLiteStore(project_dir)` 只操作该目录下的 `runtime.db`。
 - **单连接 + `threading.Lock()`**：同一个 Project 内的并发写入由 Python 锁保护。
 - **WAL 模式**：开启 `PRAGMA journal_mode=WAL`，保证读操作不被写阻塞。
+- **外键约束**：连接初始化时执行 `PRAGMA foreign_keys = ON;`。
+- **Model 字段不持久化**：`Instance.model` 在恢复时通过 `ModelLoader` 重新加载，不写入 `instances` 表。
 
 ### 4.3 表结构
 
@@ -77,7 +79,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     project_id TEXT NOT NULL,
     scene_id TEXT NOT NULL,
     mode TEXT NOT NULL,
-    references TEXT NOT NULL,
+    refs TEXT NOT NULL,
     local_instances TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -90,6 +92,7 @@ CREATE TABLE IF NOT EXISTS instances (
     scope TEXT NOT NULL,
     model_name TEXT NOT NULL,
     model_version TEXT,
+    attributes TEXT NOT NULL,
     state TEXT NOT NULL,
     variables TEXT NOT NULL,
     links TEXT NOT NULL,
@@ -110,7 +113,21 @@ CREATE TABLE IF NOT EXISTS event_log (
     timestamp TEXT NOT NULL,
     PRIMARY KEY (project_id, event_id)
 );
+
+CREATE TABLE IF NOT EXISTS project_state (
+    project_id TEXT PRIMARY KEY,
+    last_event_id TEXT,
+    checkpointed_at TEXT NOT NULL
+);
 ```
+
+### 4.4 EventBus 事件持久化机制
+
+`EventBus.publish()` 本身不直接写 `event_log`，以避免 I/O 阻塞高频消息。事件持久化由调用方显式完成：
+
+- 当业务层或 `InstanceManager._on_event()` 处理一个需要审计或恢复的事件时，显式调用 `EventLogStore.append()`。
+- `StateManager.checkpoint_project()` 在写入实例快照前，先确保最近一批事件已落盘（可选由调用方保证）。
+- 外部系统入口（如 REST API 发送事件）在调用 `bus.publish()` 之后，同步调用 `EventLogStore.append()`。
 
 ## 5. ProjectRegistry
 
@@ -137,6 +154,7 @@ class StateManager:
     def restore_project(self, project_id: str) -> bool: ...
     def checkpoint_scene(self, project_id: str, scene_id: str) -> None: ...
     def restore_scene(self, project_id: str, scene_id: str) -> dict | None: ...
+    def shutdown(self) -> None: ...
 ```
 
 ### 6.1 Checkpoint
@@ -144,11 +162,12 @@ class StateManager:
 - 遍历该 Project 下所有 `active` 和 `completed` 实例。
 - 在一个 SQLite 事务中原子写入：实例快照 + `lastEventId`。
 - 显式 checkpoint 由业务层在关键状态迁移后调用；同时 `StateManager` 内部启动一个轻量后台线程，每 30 秒自动 checkpoint 所有已加载的 Project。
+- `StateManager.shutdown()` 负责优雅停止后台线程；`ProjectRegistry.unload_project()` 在释放资源前必须调用它。
 
 ### 6.2 Restore
 
-1. 从 `InstanceStore` 读取实例快照到内存。
-2. 读取 `lastEventId`。
+1. 从 `InstanceStore` 读取 `active` / `completed` 实例快照到内存（`archived` 实例按需懒加载）。
+2. 从 `project_state` 表读取 `lastEventId`。
 3. 从 `EventLogStore` 重放后续事件（幂等处理）。
 4. 对 `metric` 变量执行时序库回填（如果 `MetricStore` 可用）。
 5. 执行 Property Reconciliation。
@@ -160,24 +179,27 @@ class StateManager:
 - 新增 `transition_lifecycle(project_id, instance_id, new_state)`：
   - 更新内存中的 `lifecycle_state`。
   - 同步写入 DB。
-  - 若新状态为 `archived`，立即从内存中卸载（下次需要时从 DB 懒加载）。
+  - 若新状态为 `archived`，立即从内存中卸载。
+- `get()` 增加懒加载机制：当内存中未命中且配置了 `instance_store` 时，尝试从 DB 读取快照并重新水合为 `Instance` 对象（`model` 字段通过 `ModelLoader` 重新加载）。
 
 ## 8. SceneController → SceneManager
 
 - 类名和文件名统一改为 `SceneManager`。
 - 构造函数注入可选的 `scene_store` 和 `state_manager`。
-- `start()` 成功后调用 `scene_store.save_scene()`。
-- `stop()` 成功后调用 `scene_store.delete_scene()`。
-- 新增 `list_by_project(project_id)` 查询该 Project 下所有 Scene。
+- `start()` 成功后调用 `scene_store.save_scene()`，持久化的是**运行时 Scene 状态**（`mode`、`refs`、`local_instances` 等）；静态 Scene 定义模板仍保留在 `scenes/` 目录下的 YAML 文件中。
+- `stop()` 成功后调用 `scene_store.delete_scene()`，仅删除运行时状态，不影响 `scenes/` 下的静态定义。
+- 新增 `list_by_project(project_id)` 查询该 Project 下所有运行时 Scene 状态。
 
 ## 9. MetricStore
 
 保留现有 stub 语义，新增正式基类：
 
 ```python
+from typing import Any
+
 class MetricStore(ABC):
     def write(self, project_id: str, instance_id: str, variable: str, value, timestamp: datetime) -> None: ...
-    def latest(self, project_id: str, instance_id: str, variable: str): ...
+    def latest(self, project_id: str, instance_id: str, variable: str) -> Any | None: ...
 ```
 
 同时提供 `MemoryMetricStore` 用于测试环境。
