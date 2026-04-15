@@ -16,6 +16,11 @@ def test_instance_creation():
     assert inst.model_name == "ladle"
     assert inst.scope == "project"
     assert inst.variables["steelAmount"] == 180
+    assert inst.attributes["capacity"] == 200
+    assert inst.links["assignedCaster"] == "caster-03"
+    assert inst.memory == {}
+    assert inst.state == {"current": None, "enteredAt": None}
+    assert inst.audit == {"version": 0, "updatedAt": None, "lastEventId": None}
 
 
 def test_instance_deep_copy_isolation():
@@ -28,6 +33,10 @@ def test_instance_deep_copy_isolation():
         model={"geometry": {"radius": 5}, "material": "steel"},
     )
     clone = inst.deep_copy()
+    assert clone.instance_id == inst.instance_id
+    assert clone.model_name == inst.model_name
+    assert clone.project_id == inst.project_id
+    assert clone.scope == inst.scope
     clone.variables["steelAmount"] = 0
     clone.variables["nested"]["a"] = 99
     clone.model["geometry"]["radius"] = 10

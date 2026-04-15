@@ -21,16 +21,4 @@ class Instance:
         return self.instance_id
 
     def deep_copy(self) -> "Instance":
-        return Instance(
-            instance_id=self.instance_id,
-            model_name=self.model_name,
-            project_id=self.project_id,
-            scope=self.scope,
-            attributes=copy.deepcopy(self.attributes),
-            variables=copy.deepcopy(self.variables),
-            links=copy.deepcopy(self.links),
-            memory=copy.deepcopy(self.memory),
-            state=copy.deepcopy(self.state),
-            audit=copy.deepcopy(self.audit),
-            model=copy.deepcopy(self.model),
-        )
+        return copy.deepcopy(self)
