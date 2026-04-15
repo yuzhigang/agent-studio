@@ -1,5 +1,5 @@
 import pytest
-from src.runtime.scene_controller import SceneController
+from src.runtime.scene_manager import SceneManager
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.event_bus import EventBusRegistry
 
@@ -8,7 +8,7 @@ def test_start_shared_scene_references_project_instances():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
     scene = ctrl.start(
         project_id="proj-01",
         scene_id="monitor",
@@ -24,7 +24,7 @@ def test_start_isolated_scene_creates_cow_copy():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project", variables={"steelAmount": 180})
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
     ctrl.start(project_id="proj-01", scene_id="drill", mode="isolated", references=["ladle-001"])
     # Both project and scene copies exist; get isolates by scope
     assert im.get("proj-01", "ladle-001", scope="project").scope == "project"
@@ -41,7 +41,7 @@ def test_isolated_scene_with_local_instances():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
     scene = ctrl.start(
         project_id="proj-01",
         scene_id="drill",
@@ -64,7 +64,7 @@ def test_stop_scene_removes_local_and_cow_instances():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
     ctrl.start(project_id="proj-01", scene_id="drill", mode="isolated", references=["ladle-001"])
     assert len(im.list_by_scope("proj-01", "scene:drill")) == 1
     assert ctrl.stop("proj-01", "drill") is True
@@ -94,9 +94,59 @@ def test_isolated_scene_backfills_metrics():
             }
         },
     )
-    ctrl = SceneController(im, bus_reg, metric_store=FakeMetricStore())
+    ctrl = SceneManager(im, bus_reg, metric_store=FakeMetricStore())
     ctrl.start(project_id="proj-01", scene_id="drill", mode="isolated", references=["ladle-001"])
     cow = im.get("proj-01", "ladle-001", scope="scene:drill")
     assert cow.variables["temperature"] == 1250.0
     # state variable should not be touched by metric backfill
     assert cow.variables.get("steelAmount", 0.0) == 0.0
+
+
+def test_list_by_project():
+    bus_reg = EventBusRegistry()
+    im = InstanceManager(bus_reg)
+    ctrl = SceneManager(im, bus_reg)
+    ctrl.start(project_id="proj-01", scene_id="monitor", mode="shared")
+    ctrl.start(project_id="proj-01", scene_id="drill", mode="isolated")
+    ctrl.start(project_id="proj-02", scene_id="cast", mode="shared")
+    scenes = ctrl.list_by_project("proj-01")
+    assert len(scenes) == 2
+    assert {s["scene_id"] for s in scenes} == {"monitor", "drill"}
+
+
+def test_start_persists_scene_to_store():
+    class FakeStore:
+        def __init__(self):
+            self.saved = {}
+        def save_scene(self, project_id, scene_id, scene_data):
+            self.saved[(project_id, scene_id)] = scene_data
+
+    store = FakeStore()
+    bus_reg = EventBusRegistry()
+    im = InstanceManager(bus_reg)
+    im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
+    ctrl = SceneManager(im, bus_reg, scene_store=store)
+    ctrl.start(project_id="proj-01", scene_id="monitor", mode="shared", references=["ladle-001"])
+    assert ("proj-01", "monitor") in store.saved
+    assert store.saved[("proj-01", "monitor")]["mode"] == "shared"
+    assert store.saved[("proj-01", "monitor")]["refs"] == ["ladle-001"]
+
+
+def test_stop_deletes_scene_from_store():
+    class FakeStore:
+        def __init__(self):
+            self.saved = {}
+            self.deleted = []
+        def save_scene(self, project_id, scene_id, scene_data):
+            self.saved[(project_id, scene_id)] = scene_data
+        def delete_scene(self, project_id, scene_id):
+            self.deleted.append((project_id, scene_id))
+
+    store = FakeStore()
+    bus_reg = EventBusRegistry()
+    im = InstanceManager(bus_reg)
+    im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
+    ctrl = SceneManager(im, bus_reg, scene_store=store)
+    ctrl.start(project_id="proj-01", scene_id="drill", mode="isolated", references=["ladle-001"])
+    ctrl.stop("proj-01", "drill")
+    assert ("proj-01", "drill") in store.deleted

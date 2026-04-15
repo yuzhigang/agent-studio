@@ -1,13 +1,13 @@
 import pytest
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.event_bus import EventBusRegistry
-from src.runtime.scene_controller import SceneController
+from src.runtime.scene_manager import SceneManager
 
 
 def test_shared_scene_event_reaches_all_references():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
 
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
     im.create(project_id="proj-01", model_name="caster", instance_id="caster-03", scope="project")
@@ -27,7 +27,7 @@ def test_shared_scene_event_reaches_all_references():
 def test_isolated_scene_event_does_not_escape():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
 
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
     ctrl.start(project_id="proj-01", scene_id="drill", mode="isolated", references=["ladle-001"])
@@ -50,7 +50,7 @@ def test_isolated_scene_event_does_not_escape():
 def test_isolated_scene_with_local_instance_and_stop():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
 
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
     ctrl.start(
@@ -72,7 +72,7 @@ def test_isolated_scene_with_local_instance_and_stop():
 def test_linked_reference_auto_pull():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
-    ctrl = SceneController(im, bus_reg)
+    ctrl = SceneManager(im, bus_reg)
 
     im.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project", links={"caster": "caster-03"})
     im.create(project_id="proj-01", model_name="caster", instance_id="caster-03", scope="project", links={"slab": "slab-08921"})
@@ -94,7 +94,7 @@ def test_metric_backfill_and_reconciliation_do_not_crash():
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
     metric_store = FakeMetricStore(value=42.0)
-    ctrl = SceneController(im, bus_reg, metric_store=metric_store)
+    ctrl = SceneManager(im, bus_reg, metric_store=metric_store)
 
     model = {
         "variables": {

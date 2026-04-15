@@ -104,3 +104,84 @@ def test_copy_for_scene_duplicate_raises():
     mgr.copy_for_scene("proj-01", "ladle-001", "drill")
     with pytest.raises(ValueError, match="already exists"):
         mgr.copy_for_scene("proj-01", "ladle-001", "drill")
+
+
+def test_create_persists_to_store():
+    class FakeStore:
+        def __init__(self):
+            self.saved = {}
+        def save_instance(self, project_id, instance_id, scope, snapshot):
+            self.saved[(project_id, instance_id, scope)] = snapshot
+
+    store = FakeStore()
+    mgr = InstanceManager(instance_store=store)
+    mgr.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
+    assert ("proj-01", "ladle-001", "project") in store.saved
+    assert store.saved[("proj-01", "ladle-001", "project")]["model_name"] == "ladle"
+
+
+def test_lazy_load_from_store():
+    class FakeStore:
+        def load_instance(self, project_id, instance_id, scope):
+            return {
+                "project_id": project_id,
+                "instance_id": instance_id,
+                "scope": scope,
+                "model_name": "ladle",
+                "model_version": "1.0",
+                "attributes": {"capacity": 200},
+                "state": {"current": "idle"},
+                "variables": {"steelAmount": 180},
+                "links": {},
+                "memory": {},
+                "audit": {"version": 1},
+                "lifecycle_state": "active",
+                "updated_at": "2024-01-01T00:00:00+00:00",
+            }
+
+    store = FakeStore()
+    mgr = InstanceManager(instance_store=store)
+    inst = mgr.get("proj-01", "ladle-001", scope="project")
+    assert inst is not None
+    assert inst.model_name == "ladle"
+    assert inst.attributes["capacity"] == 200
+
+
+def test_remove_deletes_from_store():
+    class FakeStore:
+        def __init__(self):
+            self.deleted = []
+        def save_instance(self, project_id, instance_id, scope, snapshot):
+            pass
+        def delete_instance(self, project_id, instance_id, scope):
+            self.deleted.append((project_id, instance_id, scope))
+
+    store = FakeStore()
+    mgr = InstanceManager(instance_store=store)
+    mgr.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
+    mgr.remove("proj-01", "ladle-001", scope="project")
+    assert ("proj-01", "ladle-001", "project") in store.deleted
+
+
+def test_transition_lifecycle_updates_state_and_store():
+    class FakeStore:
+        def __init__(self):
+            self.saved = {}
+        def save_instance(self, project_id, instance_id, scope, snapshot):
+            self.saved[(project_id, instance_id, scope)] = snapshot
+        def load_instance(self, project_id, instance_id, scope):
+            return None
+
+    store = FakeStore()
+    mgr = InstanceManager(instance_store=store)
+    mgr.create(project_id="proj-01", model_name="ladle", instance_id="ladle-001", scope="project")
+    assert mgr.transition_lifecycle("proj-01", "ladle-001", "completed", scope="project") is True
+    assert store.saved[("proj-01", "ladle-001", "project")]["lifecycle_state"] == "completed"
+    # archived should evict from memory
+    assert mgr.transition_lifecycle("proj-01", "ladle-001", "archived", scope="project") is True
+    assert mgr.get("proj-01", "ladle-001", scope="project") is None
+
+
+def test_transition_lifecycle_returns_false_for_missing_instance():
+    mgr = InstanceManager()
+    assert mgr.transition_lifecycle("proj-01", "ladle-001", "archived") is False

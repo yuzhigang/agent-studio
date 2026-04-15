@@ -8,12 +8,14 @@ class Instance:
     model_name: str
     project_id: str
     scope: str
+    model_version: str | None = field(default=None)
     attributes: dict = field(default_factory=dict)
     variables: dict = field(default_factory=dict)
     links: dict = field(default_factory=dict)
     memory: dict = field(default_factory=dict)
     state: dict = field(default_factory=lambda: {"current": None, "enteredAt": None})
     audit: dict = field(default_factory=lambda: {"version": 0, "updatedAt": None, "lastEventId": None})
+    lifecycle_state: str = field(default="active")
     model: dict | None = field(default=None, repr=False)
 
     @property
