@@ -92,12 +92,12 @@ class InstanceManager:
 
     def list_by_project(self, project_id: str) -> list[Instance]:
         with self._lock:
-            return [copy.copy(inst) for (pid, _), inst in self._instances.items() if pid == project_id]
+            return [copy.deepcopy(inst) for (pid, _), inst in self._instances.items() if pid == project_id]
 
     def list_by_scope(self, project_id: str, scope: str) -> list[Instance]:
         with self._lock:
             return [
-                copy.copy(inst) for (pid, _), inst in self._instances.items()
+                copy.deepcopy(inst) for (pid, _), inst in self._instances.items()
                 if pid == project_id and inst.scope == scope
             ]
 
