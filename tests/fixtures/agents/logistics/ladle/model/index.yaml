@@ -1,0 +1,282 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  version: '2.0'
+  name: ladle
+  title: 钢包智能体
+  tags:
+  - logistics
+  - steelmaking
+  group: logistics
+  creator: 张三
+  createdAt: '2024-06-01T10:00:00Z'
+  updatedAt: '2026-04-13T00:00:00Z'
+  description: 钢包实体智能体（按 PRD v2 对齐：状态/迁移无副作用，副作用统一归入 behaviors）。
+attributes:
+  capacity:
+    type: number
+    title: 容量
+    description: 钢包最大容量
+    x-audit: true
+    x-unit: ton
+    default: 200.0
+    minimum: 0
+    maximum: 500
+  maxTemperature:
+    type: number
+    title: 最高耐温
+    description: 钢包能承受的最高温度
+    x-audit: true
+    x-unit: ℃
+    default: 1800.0
+    minimum: 0
+    maximum: 2000
+  insulationDuration:
+    type: number
+    title: 保温时间
+    description: 钢水最大保温时长
+    x-audit: true
+    x-unit: min
+    nullable: true
+    default: 120.0
+    minimum: 0
+    maximum: 300
+  refractoryLife:
+    type: number
+    title: 耐材寿命
+    description: 耐材允许的最大使用次数
+    x-audit: true
+    x-unit: times
+    default: 80
+    minimum: 1
+    maximum: 500
+variables:
+  steelAmount:
+    type: number
+    title: 钢水量
+    description: 当前钢包内钢水重量
+    x-audit: true
+    x-unit: ton
+    default: 0.0
+    minimum: 0
+    maximum: 500
+    x-rules:
+      pre:
+      - rule: capacityLimit
+  temperature:
+    type: number
+    title: 钢水温度
+    description: 当前钢水温度
+    x-audit: true
+    x-unit: ℃
+    default: 25.0
+    minimum: -50
+    maximum: 2000
+    x-rules:
+      pre:
+      - rule: temperatureSafetyRange
+      post:
+      - rule: temperatureNotRisingNaturally
+  carbonContent:
+    type: number
+    title: 碳含量
+    description: 钢水中碳元素百分比
+    x-audit: true
+    x-unit: '%'
+    default: 0.0
+    minimum: 0
+    maximum: 2.0
+  steelGrade:
+    type: string
+    title: 钢种
+    description: 当前钢水的钢种牌号
+    x-audit: true
+    default: ''
+  currentLocation:
+    type: string
+    title: 当前位置
+    description: 钢包当前所在位置
+    x-audit: true
+    default: standby_area
+  targetLocation:
+    type: string
+    title: 目标位置
+    description: 钢包下一站计划目标位置
+    x-audit: true
+    nullable: true
+    default: ''
+  processStatus:
+    type: string
+    title: 业务状态
+    description: 面向外部业务观察的状态标签，不等同于实例 state。
+    x-audit: true
+    default: idle
+  usageCount:
+    type: number
+    title: 使用次数
+    description: 当前耐材累计使用次数
+    x-audit: true
+    default: 0
+    minimum: 0
+    maximum: 1000
+  lastMaintenanceTime:
+    type: string
+    title: 上次维护时间
+    description: 上次完成维护的时间
+    x-audit: true
+    nullable: true
+    default: null
+  tiltAngle:
+    type: number
+    title: 倾角
+    description: 钢包当前倾角
+    x-audit: true
+    x-unit: degree
+    default: 0
+    minimum: -90
+    maximum: 90
+  isLidClosed:
+    type: boolean
+    title: 包盖闭合
+    description: 移动前用于门禁检查的状态量
+    x-audit: true
+    default: true
+  locationX:
+    type: number
+    title: X 坐标
+    description: 钢包当前位置 X 坐标
+    x-audit: true
+    x-unit: m
+    default: 0
+  locationY:
+    type: number
+    title: Y 坐标
+    description: 钢包当前位置 Y 坐标
+    x-audit: true
+    x-unit: m
+    default: 0
+derivedProperties:
+  fillRate:
+    type: number
+    title: 填充率
+    description: 钢包填充百分比
+    x-audit: true
+    x-unit: '%'
+    x-formula: this.variables.steelAmount / this.attributes.capacity * 100
+    x-dependOn:
+    - steelAmount
+    - capacity
+  remainingCapacity:
+    type: number
+    title: 剩余容量
+    description: 还可装载的钢水量
+    x-audit: true
+    x-unit: ton
+    x-formula: this.attributes.capacity - this.variables.steelAmount
+    x-dependOn:
+    - steelAmount
+    - capacity
+  remainingRefractoryLife:
+    type: number
+    title: 剩余耐材寿命
+    description: 耐材剩余可用次数
+    x-audit: true
+    x-formula: this.attributes.refractoryLife - this.variables.usageCount
+    x-dependOn:
+    - usageCount
+    - refractoryLife
+states:
+  empty:
+    title: 空包
+    description: 钢包为空，等待接钢
+    group: loadState
+    initialState: true
+  receiving:
+    title: 接钢中
+    description: 正在接收钢水
+    group: loadState
+  full:
+    title: 满包
+    description: 钢包已满，等待运输
+    group: loadState
+  pouring:
+    title: 倾倒中
+    description: 正在倾倒钢水
+    group: processState
+  maintenance:
+    title: 维护中
+    description: 钢包正在维护或更换耐材
+    group: maintenanceState
+transitions:
+  emptyToReceiving:
+    title: 空包转接钢
+    from: empty
+    to: receiving
+    trigger:
+      type: event
+      name: beginLoad
+  receivingToFull:
+    title: 接钢转满包
+    from: receiving
+    to: full
+    trigger:
+      type: timeout
+      delay: 3000
+  fullToPouring:
+    title: 满包转倾倒
+    from: full
+    to: pouring
+    priority: 1
+    trigger:
+      type: event
+      name: beginPour
+  receivingToPouring:
+    title: 接钢中直接倾倒
+    from: receiving
+    to: pouring
+    priority: 2
+    trigger:
+      type: event
+      name: beginPour
+      when: payload.steelAmount > 0
+  pouringToEmpty:
+    title: 倾倒转空包
+    from: pouring
+    to: empty
+    trigger:
+      type: condition
+      window:
+        type: time-sliding
+        duration: 300
+      condition: this.variables.steelAmount <= 0
+  emptyToMaintenance:
+    title: 空包转维护
+    from: empty
+    to: maintenance
+    trigger:
+      type: condition
+      window:
+        type: time-sliding
+        duration: 86400
+      condition: this.variables.usageCount >= this.attributes.refractoryLife
+  maintenanceToEmpty:
+    title: 维护转空包
+    from: maintenance
+    to: empty
+    trigger:
+      type: event
+      name: maintenanceComplete
+links:
+  assignedCaster:
+    title: 绑定铸机
+    targetType: ContinuousCaster
+    cardinality: 0..1
+    nullable: true
+  transportCrane:
+    title: 当前运输天车
+    targetType: Crane
+    cardinality: 0..1
+    nullable: true
+  currentHeat:
+    title: 当前炉次记录
+    targetType: HeatRecord
+    cardinality: 0..1

@@ -1,0 +1,39 @@
+highFillRate.high:
+  category: highFillRate
+  title: 高装载率预警
+  trigger:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 300
+    condition: this.variables.steelAmount >= this.attributes.capacity * 0.95
+  clear:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 300
+    condition: this.variables.steelAmount < this.attributes.capacity * 0.95
+  severity: warning
+  level: 1
+  triggerMessage: 钢包装载率达到 {fillRate}% ，移动和倾倒时请谨慎操作
+  clearMessage: 钢包装载率已恢复到安全范围
+temperatureTooLow.warning:
+  category: temperatureTooLow
+  title: 钢水温度偏低预警
+  trigger:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 300
+    condition: this.variables.steelAmount > 0 && this.variables.temperature < 1500
+  clear:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 300
+    condition: this.variables.temperature >= 1500 || this.variables.steelAmount <=
+      0
+  severity: warning
+  level: 2
+  triggerMessage: 当前温度 {temperature}℃ 低于建议运输下限
+  clearMessage: 温度已恢复到建议运输范围

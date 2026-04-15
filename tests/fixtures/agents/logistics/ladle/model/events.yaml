@@ -1,0 +1,75 @@
+beginLoad:
+  title: 开始接钢
+  payload:
+    source:
+      type: string
+      description: 指令来源
+    converterId:
+      type: string
+      description: 转炉编号
+beginPour:
+  title: 开始倾倒
+  payload:
+    steelAmount:
+      type: number
+      description: 允许倾倒的钢水量
+maintenanceComplete:
+  title: 维护完成
+  payload:
+    operator:
+      type: string
+      description: 维护完成确认人
+dispatchAssigned:
+  title: 派工目标已下发
+  payload:
+    destinationType:
+      type: string
+      description: 目标类型，如 converter 或 caster
+    destinationId:
+      type: string
+      description: 目标编号
+    taskId:
+      type: string
+      description: 任务标识
+routeConflictDetected:
+  title: 运输冲突被发现
+  payload:
+    conflictId:
+      type: string
+    severity:
+      type: string
+deliveryDelayDetected:
+  title: 配送延迟被发现
+  payload:
+    minutesLate:
+      type: number
+ladleStatusChanged:
+  title: 钢包 reflex 状态发生变化
+  payload:
+    ladleId:
+      type: string
+      description: 钢包 ID
+    state:
+      type: string
+      description: 新的 reflex 状态
+    timestamp:
+      type: string
+      description: ISO 8601 时间戳
+ladleLoaded:
+  title: 钢包接钢完成
+  payload:
+    ladleId:
+      type: string
+    steelAmount:
+      type: number
+    steelGrade:
+      type: string
+    temperature:
+      type: number
+ladleEmptied:
+  title: 钢包倾倒完成
+  payload:
+    ladleId:
+      type: string
+    usageCount:
+      type: number

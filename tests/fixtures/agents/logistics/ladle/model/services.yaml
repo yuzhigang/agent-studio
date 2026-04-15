@@ -1,0 +1,139 @@
+assignTargetLocation:
+  title: 设置目标位置
+  type: script
+  scriptEngine: python
+  script: 'this.variables.targetLocation = args.targetLocation
+
+    this.variables.processStatus = ''task_assigned''
+
+    return {''success'': True, ''targetLocation'': this.variables.targetLocation,
+    ''reason'': args.get(''reason'', ''manual'')}'
+  parameters:
+    targetLocation:
+      type: string
+      description: 目标位置
+    reason:
+      type: string
+      description: 设置原因
+  returns:
+    success:
+      type: boolean
+    targetLocation:
+      type: string
+    reason:
+      type: string
+loadSteel:
+  title: 向钢包装载钢水
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+    - rule: refractoryLifeCheck
+    - rule: capacityLimit
+    post: []
+  script: "capacity_remaining = this.attributes.capacity - this.variables.steelAmount\n\
+    if capacity_remaining <= 0:\n    return {'success': False, 'message': '钢包已满',\
+    \ 'loadedAmount': 0}\nloaded_amount = min(args.weight, capacity_remaining)\nthis.variables.steelAmount\
+    \ += loaded_amount\nthis.variables.temperature = args.temperature\nthis.variables.steelGrade\
+    \ = args.steelGrade\nthis.variables.carbonContent = args.get('carbonContent',\
+    \ 0)\nthis.variables.processStatus = 'receiving_complete'\nreturn {'success':\
+    \ True, 'message': '装载成功', 'loadedAmount': loaded_amount, 'totalAmount': this.variables.steelAmount}"
+  parameters:
+    weight:
+      type: number
+      description: 装载钢水重量
+    temperature:
+      type: number
+      description: 钢水温度
+    steelGrade:
+      type: string
+      description: 钢种牌号
+    carbonContent:
+      type: number
+      description: 碳含量百分比
+  returns:
+    success:
+      type: boolean
+    message:
+      type: string
+    loadedAmount:
+      type: number
+    totalAmount:
+      type: number
+  permissions:
+    roles:
+    - converter_operator
+    - system
+    description: 转炉操作员或系统可执行装载操作
+pour:
+  title: 倾倒钢水
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+    - rule: hasSteelBeforePour
+    - rule: minPourTemperature
+    post: []
+  script: "if this.variables.steelAmount <= 0:\n    return {'success': False, 'message':\
+    \ '没有钢水可供倾倒', 'pouredAmount': 0}\npoured_amount = this.variables.steelAmount\n\
+    this.variables.steelAmount = 0\nthis.variables.temperature = 25\nthis.variables.steelGrade\
+    \ = ''\nthis.variables.carbonContent = 0\nthis.variables.usageCount += 1\nthis.variables.processStatus\
+    \ = 'poured'\nreturn {'success': True, 'message': '倾倒成功', 'pouredAmount': poured_amount,\
+    \ 'location': this.variables.currentLocation}"
+  parameters: {}
+  returns:
+    success:
+      type: boolean
+    message:
+      type: string
+    pouredAmount:
+      type: number
+    location:
+      type: string
+  permissions:
+    roles:
+    - caster_operator
+    - system
+    description: 连铸操作员或系统可执行倾倒操作
+moveTo:
+  title: 移动钢包到指定位置
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+    - rule: highLoadMoveWarning
+      parameters:
+        threshold: 90
+    - rule: lidClosedBeforeMove
+    post: []
+  script: 'from_location = this.variables.currentLocation
+
+    to_location = args.targetLocation
+
+    this.variables.currentLocation = to_location
+
+    this.variables.targetLocation = ''''
+
+    this.variables.processStatus = ''in_transit''
+
+    return {''success'': True, ''from'': from_location, ''to'': to_location}'
+  parameters:
+    targetLocation:
+      type: string
+      description: 目标位置
+    emergency:
+      type: boolean
+      description: 是否紧急移动
+  returns:
+    success:
+      type: boolean
+    from:
+      type: string
+    to:
+      type: string
+  permissions:
+    roles:
+    - logistics_operator
+    - crane_driver
+    - system
+    description: 物流操作员、天车司机或系统可执行移动操作

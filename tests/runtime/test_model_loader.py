@@ -32,3 +32,12 @@ def test_missing_model_raises():
 def test_invalid_yaml_raises():
     with pytest.raises(ModelConfigError, match="YAML parse error"):
         ModelLoader.load(os.path.join(FIXTURES, "bad_yaml_agent"))
+
+def test_load_ladle_split_model():
+    result = ModelLoader.load(os.path.join(FIXTURES, "logistics", "ladle"))
+    assert result["metadata"]["name"] == "ladle"
+    assert "capacityLimit" in result["rules"]
+    assert "onEnterFullSetStatus" in result["behaviors"]
+    assert "beginLoad" in result["events"]
+    assert "loadSteel" in result["services"]
+    assert "calculateLoad" in result["functions"]
