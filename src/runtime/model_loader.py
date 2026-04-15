@@ -45,4 +45,27 @@ class ModelLoader:
 
     @staticmethod
     def _load_directory(model_dir: Path) -> dict:
-        raise NotImplementedError("Directory mode coming in next task")
+        index_file = model_dir / "index.yaml"
+        if not index_file.exists():
+            raise ModelConfigError(str(model_dir), "Directory mode requires index.yaml")
+
+        base = ModelLoader._load_yaml_file(index_file)
+        known_keys = {
+            "$schema", "metadata", "attributes", "variables", "derivedProperties",
+            "links", "rules", "functions", "services", "states", "transitions",
+            "behaviors", "events", "alarms", "schedules", "goals",
+            "decisionPolicies", "memory", "plans",
+        }
+
+        for yaml_file in sorted(model_dir.glob("*.yaml"), key=lambda p: p.name.lower()):
+            if yaml_file.name == "index.yaml":
+                continue
+            key = yaml_file.stem
+            data = ModelLoader._load_yaml_file(yaml_file)
+            if key in base:
+                logger.warning("Key '%s' from %s overwrites existing key in index.yaml", key, yaml_file)
+            if key not in known_keys:
+                logger.warning("Unknown model key '%s' from file %s", key, yaml_file)
+            base[key] = data
+
+        return base

@@ -1,0 +1,6 @@
+onEnterFull:
+  title: On Enter Full
+  trigger:
+    type: stateEnter
+    state: full
+  actions: []

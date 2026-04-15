@@ -1,0 +1,3 @@
+capacityLimit:
+  name: capacityLimit
+  condition: "this.variables.steelAmount <= this.attributes.capacity"

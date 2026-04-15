@@ -1,0 +1,15 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: split_agent
+  title: Split Agent
+attributes:
+  maxSpeed:
+    type: number
+    default: 100
+variables:
+  speed:
+    type: number
+    default: 10
+states:
+  idle:
+    title: Idle
