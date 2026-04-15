@@ -161,22 +161,143 @@ scene_copy_of_ladle_001.state.current = "maintenance"
 # Project 实例不受影响
 ```
 
-### 7.3 消息/事件边界
+## 7. 实例间通信：单一 EventBus
 
-隔离模式 Scene 有严格的消息边界：
+### 7.1 设计原则
+
+- **只有一个 `EventBus`**，所有实例（Project 和 Scene）都注册在同一总线上。
+- **通过 `scope` 字段隔离路由**，而不是通过多个总线。
+- **DSL 中不暴露内部消息对象**（如 `AgentMessage`），脚本层只用简单的 `dispatch(type, payload)` 语法。
+
+### 7.2 EventBus 核心实现
 
 ```python
-def publish_event(scene, event):
-    if scene.mode == "isolated" and event.target not in scene.instances:
-        raise SceneBoundaryError(
-            f"Isolated scene cannot send event to external instance: {event.target}"
-        )
-    # 继续路由...
+class EventBus:
+    def __init__(self):
+        self._subscribers: dict[str, list[callable]] = {}   # event_type -> handlers
+        self._registry: dict[str, str] = {}                  # instance_id -> scope
+
+    def register(self, instance_id: str, scope: str, handler: callable):
+        self._registry[instance_id] = scope
+        # handler 绑定到该实例
+
+    def publish(self, event_type: str, payload: dict,
+                source: str, scope: str, target: str | None = None):
+        for instance_id, handler in self._find_subscribers(event_type):
+            if target and instance_id != target:
+                continue
+            if not self._scope_matches(scope, instance_id):
+                continue
+            handler(event_type, payload, source)
+
+    def _scope_matches(self, msg_scope: str, instance_id: str) -> bool:
+        inst_scope = self._registry.get(instance_id, "project")
+        if msg_scope == "project":
+            return True  # project 消息全局可达
+        return msg_scope == inst_scope  # scene 消息只匹配同 scope
 ```
+
+**路由规则只有两条**：
+1. `scope == "project"` 的消息 → **所有实例都能收到**。
+2. `scope == "scene:<id>"` 的消息 → **只有同 scope 的实例能收到**。
+
+### 7.3 DSL 语法简化
+
+#### 发送事件
+脚本层只暴露一个函数，**不暴露任何内部消息对象**：
+
+```python
+# 在 behaviors 的 runScript 或 service 脚本中
+dispatch("ladleLoaded", {
+    "ladleId": this.id,
+    "steelAmount": this.variables.steelAmount,
+    "steelGrade": this.variables.steelGrade,
+})
+```
+
+`dispatch()` 的运行时实现：
+
+```python
+def dispatch(event_type: str, payload: dict, target: str | None = None):
+    scope = _resolve_scope(current_instance)
+    event_bus.publish(
+        event_type=event_type,
+        payload=payload,
+        source=current_instance.id,
+        scope=scope,
+        target=target,
+    )
+```
+
+`scope` 由运行时**自动推导**，脚本作者无需关心：
+
+| 实例类型 | 所在上下文 | dispatch 自动推导的 scope |
+|---|---|---|
+| `ladle-001` (project) | Project | `"project"` |
+| `ladle-001` (project) | shared Scene | `"project"`（不隔离） |
+| `ladle-001` (CoW) | isolated Scene `drill` | `"scene:drill"`（强制改写） |
+| `temp-inspector-01` | isolated Scene `drill` | `"scene:drill"` |
+
+#### 接收事件
+行为触发端也无需感知消息对象，直接把 `payload` 注入为脚本局部变量：
+
+```yaml
+behaviors:
+  captureAssignedDestination:
+    trigger:
+      type: event
+      name: dispatchAssigned
+      when: payload.destinationId != null
+    actions:
+    - type: runScript
+      script: |
+        this.variables.targetLocation = f"{payload.destinationType}_{payload.destinationId}"
+        this.variables.processStatus = 'task_assigned'
+```
+
+运行时回调伪代码：
+
+```python
+def on_event(instance, event_type, payload, source):
+    for behavior in instance.model.behaviors.values():
+        if behavior.trigger.type == "event" and behavior.trigger.name == event_type:
+            if _eval_when(instance, behavior.trigger.when, payload):
+                execute_script(behavior.actions[0].script, {
+                    "this": instance,
+                    "payload": payload,
+                    "source": source,
+                })
+```
+
+### 7.4 外部系统入口
+
+外部系统发送事件时，默认进 `project` scope：
+
+```python
+event_bus.publish(
+    event_type="beginLoad",
+    payload={"source": "MES", "converterId": "C01"},
+    source="__external__",
+    scope="project",
+    target="ladle-001"
+)
+```
+
+若外部系统需向 isolated Scene 发消息，必须通过 Scene 专属 API（如 `POST /scenes/{sceneId}/events`），由 `SceneController` 将 scope 设为 `"scene:{sceneId}"`。
+
+### 7.5 消息边界总结
+
+| 场景 | Scope | 影响范围 |
+|---|---|---|
+| Project 实例之间通信 | `project` | 全局所有实例 |
+| Shared Scene 实例通信 | `project` | 全局所有实例（透传） |
+| Isolated Scene 的 local 实例通信 | `scene:<id>` | 仅该 Scene 内部 |
+| Isolated Scene 的 reference 实例通信 | `scene:<id>`（强制改写） | 仅该 Scene 内部 |
+| 外部系统 → Project 实例 | `project` | 指定的 Project 实例 |
 
 这意味着：
 - `local` 实例的行为副作用**不会逃逸**到 Project 或其他 Scene。
-- Scene 关闭时，只需销毁内部事件总线和 CoW 副本即可，无需清理外部状态。
+- Scene 关闭时，只需注销该 scope 下的实例订阅，CoW 副本自然不可达。
 
 ---
 
