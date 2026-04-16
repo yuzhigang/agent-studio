@@ -1,5 +1,5 @@
 import pytest
-from src.runtime.server.supervisor_gateway import SupervisorGateway
+from src.supervisor.gateway import SupervisorGateway
 
 
 @pytest.fixture

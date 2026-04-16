@@ -1,7 +1,7 @@
 import os
 import tempfile
 from src.runtime.project_registry import ProjectRegistry
-from src.runtime.cli.run_inline import _load_projects
+from src.worker.cli.run_inline import _load_projects
 
 
 def test_load_projects_inline():
