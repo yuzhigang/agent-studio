@@ -1,0 +1,318 @@
+# Project 运行时与隔离架构设计文档
+
+## 1. 背景与目标
+
+当前 `agent-studio` 的 `ProjectRegistry` 在同一个 Python 进程中加载所有 Project，实例间通过独立的 `EventBus`、`InstanceManager` 和脚本 `SandboxExecutor` 实现逻辑隔离。然而：
+
+- 一个 Project 的脚本死循环、内存泄漏或 C 扩展崩溃可能拖垮整个进程。
+- 数字孪生类应用需要长期稳定运行，与外部系统（RabbitMQ、OPC-UA 等）保持持久连接。
+- 仿真类应用需要频繁启停，对启动速度和资源开销敏感。
+
+本设计目标是：
+
+1. 为需要长期稳定运行的 Project 提供**进程级隔离**。
+2. 为临时仿真类 Project 保留**轻量进程内隔离**。
+3. 定义统一的通信协议，使 Supervisor、Worker、浏览器客户端使用同一套交互方式。
+4. 支持 Worker 在边缘侧**脱离 Supervisor 独立运行**。
+
+---
+
+## 2. 核心概念定义
+
+| 概念 | 定义 |
+|---|---|
+| **Supervisor** | 可选的管理平面 + WebSocket 网关，负责 `worker` Project 的进程生命周期管理和 `interactive` Project 的进程内托管。 |
+| **ProjectWorker** | 承载单个 `worker` 类型 Project 的独立 OS 子进程，具备自举能力。 |
+| **worker** | Project 的运行时类型之一，长期运行，不可随意停止，享有进程级隔离。 |
+| **interactive** | Project 的运行时类型之二，临时运行，按需启停，在 Supervisor 进程内加载。 |
+
+---
+
+## 3. Project 生命周期类型
+
+每个 Project 在 `project.yaml` 中声明 `runtimeType` 字段：
+
+```yaml
+project_id: steel-plant-01
+runtimeType: worker   # 或 interactive
+```
+
+### 3.1 `worker` 类型
+
+- **运行特征**：随系统启动而启动，长期运行，与外部系统持续同步（RabbitMQ、变量数据源）。
+- **隔离级别**：**进程级隔离**，每个 `worker` Project 运行在一个独立的 `ProjectWorker` OS 子进程中。
+- **停止方式**：仅能通过 Supervisor RPC 或向 Worker 进程发送 SIGTERM 进行优雅停止。
+- **适用场景**：数字孪生、与现场产线实时同步的 Project。
+
+### 3.2 `interactive` 类型
+
+- **运行特征**：由用户或 API 按需启动，用于仿真、what-if 分析、培训等场景。
+- **隔离级别**：**进程内隔离**，在同一个 Supervisor 进程内通过 `ProjectRegistry` 加载，依赖 Scene/Instance 级逻辑隔离。
+- **停止方式**：通过 API 显式调用卸载，停止速度快。
+- **适用场景**：临时仿真、快速验证。
+
+---
+
+## 4. 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Supervisor Process (可选)                    │
+│  ┌────────────────┐  ┌────────────────┐  ┌──────────────────┐  │
+│  │  interactive   │  │  interactive   │  │   WebSocket      │  │
+│  │    Project     │  │    Project     │  │   Gateway/Router │  │
+│  │   (in-proc)    │  │   (in-proc)    │  │                  │  │
+│  └────────────────┘  └────────────────┘  └────────┬─────────┘  │
+│                                                   │             │
+│                                                   │ WebSocket   │
+└───────────────────────────────────────────────────┼─────────────┘
+                                                    │
+                                                    │ spawn
+                                                    ▼
+                                    ┌─────────────────────────────┐
+                                    │      ProjectWorker          │
+                                    │       (worker)              │
+                                    │  ┌───────────────────────┐  │
+                                    │  │  ProjectRegistry      │  │
+                                    │  │  InstanceManager      │  │
+                                    │  │  SceneManager         │  │
+                                    │  │  StateManager         │  │
+                                    │  │  SQLiteStore          │  │
+                                    │  │  RabbitMQ Consumer    │  │
+                                    │  │  Variable Adapter     │  │
+                                    │  └───────────────────────┘  │
+                                    └─────────────────────────────┘
+```
+
+- **worker**：Supervisor 仅作为可选的管理平面和网关。Worker 崩溃不影响其他 Project；Supervisor 崩溃也不影响已运行的 Worker。
+- **interactive**：直接嵌入调用进程（Supervisor 或本地 CLI），毫秒级启动，适合频繁启停的仿真。
+
+---
+
+## 5. Scene 与 Project 的生命周期关系
+
+| Scene 模式 | 生命周期绑定关系 | 启停方式 |
+|---|---|---|
+| **`shared`** | **随 Project 一起启动、一起停止** | 自动，不可单独手动启停 |
+| **`isolated`** | **依赖 Project 处于运行状态，但可独立启停** | 用户/API 显式控制 |
+
+### 5.1 `shared` Scene
+
+- 是 Project 的"实时视图"，直接引用 Project 全局实例的内存状态。
+- `worker` Project 启动时，Worker 自动从 `scenes` 表恢复并启动所有 `shared` Scene。
+- `interactive` Project 加载时，由调用方决定是否自动恢复 `shared` Scene（默认自动恢复）。
+- Project 停止时，所有 `shared` Scene 必须先停止。
+
+### 5.2 `isolated` Scene
+
+- 是独立的仿真上下文，基于 Project 实例快照创建 CoW 副本。
+- 启动 `isolated` Scene 的前提条件：对应 Project 必须已被加载（`interactive`）或 Worker 进程已启动（`worker`）。
+- `isolated` Scene 的启停不影响 Project 本身。
+
+---
+
+## 6. 通信协议：统一 WebSocket + JSON-RPC 2.0
+
+所有通信（Supervisor ↔ Worker、Supervisor ↔ 浏览器客户端）统一使用 **WebSocket + JSON-RPC 2.0**。
+
+### 6.1 连接拓扑
+
+- **Supervisor** 作为统一的 WebSocket 网关。
+  - `interactive` Project：Supervisor 直接本地处理 JSON-RPC 请求。
+  - `worker` Project：Supervisor 将请求通过独立的 WebSocket 转发给对应的 ProjectWorker。
+- **浏览器/客户端**：只连接到 Supervisor，由 Supervisor 按 `project_id` 路由。
+
+### 6.2 控制面方法（Request → Response）
+
+| 方法 | 方向 | 说明 |
+|---|---|---|
+| `project.start` | Supervisor → Worker | 启动 ProjectWorker 进程并加载 project |
+| `project.stop` | Supervisor → Worker | 优雅停止，触发 checkpoint 后退出 |
+| `project.checkpoint` | Supervisor → Worker | 立即执行一次全量 checkpoint |
+| `project.getStatus` | Supervisor → Worker | 返回 Worker 健康状态和实例摘要 |
+| `scene.start` | Supervisor → Worker / 本地 | 启动指定 Scene |
+| `scene.stop` | Supervisor → Worker / 本地 | 停止指定 Scene |
+
+### 6.3 数据面通知（Notification / One-way）
+
+| 方法 | 方向 | 说明 |
+|---|---|---|
+| `notify.heartbeat` | Worker → Supervisor | 每 5 秒发送，包含 `project_id`、负载、运行状态 |
+| `notify.stateChanged` | Worker → Supervisor/Client | 实例状态变化事件 |
+| `notify.eventPublished` | Worker → Supervisor/Client | EventBus 上的业务事件透传 |
+| `notify.error` | Worker → Supervisor | Worker 内部异常告警 |
+
+### 6.4 路由规则
+
+Supervisor 收到客户端 WebSocket 消息后，按 `params.project_id` 决定：
+
+1. 若是 `interactive` 且已加载 → 本地 `ProjectRegistry` 调用。
+2. 若是 `worker` → 查找对应的 Worker WebSocket 连接并透传。
+3. 若 Worker 未连接 → 返回错误 `{"code": -32000, "message": "worker offline"}`。
+
+客户端订阅实时状态时，Supervisor 将对应 Worker 的 `notify.*` 通知**广播**给所有订阅该 `project_id` 的 WebSocket 连接。
+
+---
+
+## 7. ProjectWorker 进程模型
+
+### 7.1 启动命令
+
+通过 `pyproject.toml` 注册自定义 CLI：
+
+```toml
+[project.scripts]
+agent-studio-worker = "src.runtime.worker.cli:main"
+```
+
+使用示例：
+
+```bash
+# 独立运行
+agent-studio-worker --project-dir=projects/steel-plant-01
+
+# 带 Supervisor
+agent-studio-worker --project-dir=projects/steel-plant-01 \
+                    --supervisor-ws=ws://localhost:8001/workers
+```
+
+### 7.2 启动顺序
+
+1. **解析 CLI 参数**：读取 `--project-dir`、`--supervisor-ws`（可选）。
+2. **连接 Supervisor WebSocket**（若提供）：发送 `notify.workerOnline`，携带 `project_id`。
+3. **加载 Project**：调用 `ProjectRegistry.load_project(project_id)`。
+4. **恢复状态**：`StateManager.restore_project()` → 加载实例快照 + 重放事件日志。
+5. **自动启动 `shared` Scenes**：遍历 `scenes` 表中记录的运行时 `shared` Scene，调用 `SceneManager.start(..., mode="shared")`。
+6. **启动外部适配器**：
+   - RabbitMQ Consumer 开始监听该 Project 的业务事件队列。
+   - Variable Adapter 按配置连接 OPC-UA / MQTT / REST 等数据源。
+7. **进入主循环**：处理 WebSocket RPC 请求、消费 RabbitMQ 消息、向 Supervisor 发心跳。
+
+### 7.3 优雅停止顺序
+
+1. 收到 `project.stop` RPC 或 **SIGTERM**。
+2. 停止外部适配器：关闭 RabbitMQ 连接和数据源订阅。
+3. 停止 `isolated` Scenes：如果有正在运行的 `isolated` Scene：
+   - 默认策略：先停止它们再关闭 Project。
+   - 若配置为 `force_stop_on_shutdown: false`，则拒绝停止请求。
+4. 停止 `shared` Scenes。
+5. 执行最终 checkpoint：`StateManager.checkpoint_project()`。
+6. 卸载 Project：`ProjectRegistry.unload_project(project_id)`。
+7. 发送 `notify.workerOffline`，断开 WebSocket。
+8. 进程退出。
+
+### 7.4 异常退出与恢复
+
+如果 ProjectWorker 因异常崩溃，Supervisor 在心跳超时（默认 15 秒）后检测到失联，根据配置策略执行：
+
+- **自动重启**（默认）：重新启动 ProjectWorker 进程，依赖 `StateManager.restore_project()` 恢复状态。
+- **告警但不重启**：等待人工介入。
+
+---
+
+## 8. 独立运行与边缘部署
+
+ProjectWorker 是**自包含**的，可以脱离 Supervisor 独立运行。
+
+### 8.1 无 Supervisor 模式
+
+未提供 `--supervisor-ws` 时：
+
+- `SupervisorClient` 不被实例化。
+- 控制指令通过 **SIGTERM** 触发优雅停止 + 最终 checkpoint。
+- 状态通过本地日志输出，不发送心跳。
+- 可选开启本地 WebSocket 端口（如 `--ws-port=9001`）供浏览器直接连接。
+
+### 8.2 边缘侧最小文件清单
+
+```
+/opt/agent-studio/
+├── agent_studio/              # Python 包
+│   ├── runtime/
+│   │   ├── worker/            # Worker 专属模块
+│   │   │   ├── __init__.py
+│   │   │   ├── cli.py         # 命令行入口
+│   │   │   ├── runtime.py     # WorkerRuntime
+│   │   │   └── supervisor_client.py  # 可选 SupervisorClient
+│   │   ├── event_bus.py
+│   │   ├── instance.py
+│   │   ├── instance_manager.py
+│   │   ├── scene_manager.py
+│   │   ├── state_manager.py
+│   │   ├── project_registry.py
+│   │   ├── persistent_event_bus.py
+│   │   ├── model_loader.py
+│   │   ├── metric_store.py
+│   │   ├── stores/
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py
+│   │   │   └── sqlite_store.py
+│   │   ├── lib/
+│   │   │   ├── __init__.py
+│   │   │   ├── registry.py
+│   │   │   ├── sandbox.py
+│   │   │   ├── proxy.py
+│   │   │   ├── decorator.py
+│   │   │   ├── watcher.py
+│   │   │   └── exceptions.py
+│   │   └── adapters/          # 数据源适配器（新增）
+│   │       ├── __init__.py
+│   │       ├── base.py
+│   │       ├── mqtt_adapter.py
+│   │       ├── opcua_adapter.py
+│   │       └── rest_adapter.py
+│   └── __init__.py
+├── projects/<project-id>/     # 项目数据目录
+│   ├── project.yaml
+│   ├── runtime.db
+│   ├── scenes/
+│   └── resources/
+├── agents/                    # Agent 静态模型定义
+│   └── ...
+├── pyproject.toml
+└── requirements.txt
+```
+
+边缘启动示例：
+
+```bash
+agent-studio-worker \
+  --project-dir=/opt/agent-studio/projects/steel-plant-01 \
+  --agents-dir=/opt/agent-studio/agents
+```
+
+---
+
+## 9. 与现有代码的兼容性
+
+- `ProjectRegistry`、`InstanceManager`、`SceneManager`、`StateManager`、`SQLiteStore` 等核心代码**直接复用**。
+- `SandboxExecutor` 继续作为脚本安全层生效；进程级隔离提供额外的故障隔离。
+- 新增模块主要集中在 `src/runtime/worker/`（Worker 运行时）和 `src/runtime/adapters/`（外部数据源适配器）。
+
+---
+
+## 10. 设计决策记录
+
+### 决策 1：worker / interactive 双类型设计
+- **原因**：数字孪生需要长期稳定运行和强隔离，而仿真需要快速启停和低资源开销。一种运行时模型无法同时满足两种诉求。
+
+### 决策 2：统一 WebSocket + JSON-RPC 2.0 协议
+- **原因**：客户端（浏览器、移动端、第三方系统）对 WebSocket 和 JSON 的原生支持最好，不需要引入 gRPC 的 protobuf 依赖。
+
+### 决策 3：Worker 支持自举运行
+- **原因**：开发调试时需要快速启动单个 Project；边缘部署时不宜强制依赖 Supervisor。
+
+### 决策 4：shared Scene 随 Project 一起启停
+- **原因**：`shared` Scene 直接引用 Project 全局实例的内存状态，没有独立的生命周期意义。Project 停止后，shared Scene 自然失效。
+
+### 决策 5：isolated Scene 手动启停但依赖 Project 已加载
+- **原因**：`isolated` Scene 使用 CoW 副本，需要基于 Project 实例池创建，但仿真上下文本身具有独立的管理需求（如用户手动开始/结束一次演练）。
+
+---
+
+## 11. 后续待设计事项
+
+- `src/runtime/worker/` 的详细类接口设计（`WorkerRuntime`、`SupervisorClient`、`CLI`）。
+- `src/runtime/adapters/` 的适配器基类与数据源配置 schema。
+- Supervisor 的 HTTP/WebSocket 网关接口与客户端 SDK 设计。
+- Worker 进程健康检查、自动重启策略的详细配置。
