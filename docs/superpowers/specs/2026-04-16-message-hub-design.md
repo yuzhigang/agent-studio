@@ -70,7 +70,7 @@
 │  └─────────────────┘                                                      │
 │                                                                             │
 │  ┌─────────────────┐                                                       │
-│  │  InboxHandler   │     处理 MessageHub push 或 sync 拉取的消息           │
+│  │ InboxProcessor  │     处理 MessageHub push 或 sync 拉取的消息           │
 │  │                 │     调用 EventRouter.publish() 注入内部 EventBus      │
 │  └─────────────────┘                                                       │
 │                                                                             │
@@ -240,12 +240,12 @@ class OutboxProcessor:
 4. 未 ack 的记录等待下次重试，错误计数递增。
 5. 超过 `max_retries`（默认 10 次）的记录不再自动重试，保留在 outbox 中供运维排查，或后续通过死信队列（DLQ）机制处理。
 
-### 6.3 Runtime 侧：`InboxHandler`
+### 6.3 Runtime 侧：`InboxProcessor`
 
 处理来自 MessageHub 的外部事件推送：
 
 ```python
-class InboxHandler:
+class InboxProcessor:
     def __init__(self, event_router: EventRouter):
         self._router = event_router
         self._last_delivered_sequence = 0
@@ -346,7 +346,7 @@ class MessageAdapter(ABC):
 **正常在线场景（Push 模式）**：
 
 ```
-RabbitMQ ──► MessageHub ──► inbox 表 ──► notify.externalEvent ──► Runtime InboxHandler
+RabbitMQ ──► MessageHub ──► inbox 表 ──► notify.externalEvent ──► Runtime InboxProcessor
                                                               │
                                                               ▼
                                                     EventRouter.publish(..., persist=False)
@@ -392,7 +392,7 @@ MessageHub 查询 inbox.sequence > 123
 
 ### 8.4 消息循环防护
 
-`InboxHandler` 调用 `EventRouter.publish(..., persist=False)`，确保外部事件注入内部后**不会再次写入 outbox**。
+`InboxProcessor` 调用 `EventRouter.publish(..., persist=False)`，确保外部事件注入内部后**不会再次写入 outbox**。
 
 ### 8.5 预留错误码
 
@@ -428,13 +428,14 @@ MessageHub 查询 inbox.sequence > 123
 |---|---|
 | `src/runtime/event_router.py` | `EventRouter`：统一 publish 入口，代理 EventBus + 写日志 + 写 outbox |
 | `src/runtime/outbox_processor.py` | `OutboxProcessor`：扫描 outbox 并批量推送到 MessageHub |
-| `src/runtime/inbox_handler.py` | `InboxHandler`：处理 MessageHub 推送的外部事件 |
+| `src/runtime/inbox_processor.py` | `InboxProcessor`：处理 MessageHub 推送的外部事件 |
 | `src/runtime/stores/message_store.py` | `MessageStore`：操作 `messagebox.db`（inbox/outbox/sequence） |
 | `src/runtime/adapters/base.py` | `MessageAdapter` 抽象基类 |
 | `src/runtime/adapters/rabbitmq_adapter.py` | `RabbitMQAdapter`：RabbitMQ 收发的第一个实现 |
 | `src/runtime/server/message_hub.py` | `MessageHub`：Supervisor 内置的消息网关核心 |
 | `tests/runtime/test_event_router.py` | EventRouter 单元测试 |
 | `tests/runtime/test_outbox_processor.py` | OutboxProcessor 单元测试 |
+| `tests/runtime/test_inbox_processor.py` | InboxProcessor 单元测试 |
 | `tests/runtime/stores/test_message_store.py` | MessageStore 单元测试 |
 | `tests/runtime/adapters/test_rabbitmq_adapter.py` | RabbitMQAdapter 单元测试 |
 | `tests/runtime/server/test_message_hub.py` | MessageHub 单元测试 |
