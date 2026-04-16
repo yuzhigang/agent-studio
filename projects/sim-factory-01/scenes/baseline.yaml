@@ -1,0 +1,8 @@
+scene_id: baseline
+mode: shared
+description: 基线场景：白班标准产线配置
+references:
+- assembly-line-a
+- robot-arm-01
+- robot-arm-02
+local_instances: {}

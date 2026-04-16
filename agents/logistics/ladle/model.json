@@ -185,6 +185,24 @@
       "x-audit": true,
       "x-unit": "m",
       "default": 0
+    },
+    "compatibleGrades": {
+      "type": "array",
+      "title": "兼容钢种列表",
+      "description": "该钢包可装载的钢种牌号列表，供调度器匹配用",
+      "x-audit": true,
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "lastSteelGrade": {
+      "type": "string",
+      "title": "上炉钢种",
+      "description": "上一次装载的钢种牌号，用于调度清洗成本计算",
+      "x-audit": true,
+      "nullable": true,
+      "default": ""
     }
   },
   "derivedProperties": {

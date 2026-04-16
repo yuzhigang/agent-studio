@@ -1,5 +1,6 @@
 import ast
 import importlib
+import types
 
 from src.runtime.lib.exceptions import ScriptExecutionError, ImmutableContextError
 
@@ -30,16 +31,37 @@ PRELOADED_MODULES = {
 }
 
 
-def _make_import_hook(allowed: set[str]):
+def _make_import_hook(allowed: set[str], extra_modules: dict | None = None):
+    extra = extra_modules or {}
+
     def _import(name, globals=None, locals=None, fromlist=(), level=0):
         base = name.split(".")[0]
+        if base in extra:
+            return extra[base]
         if base not in allowed:
             raise ImportError(f"Import of '{name}' is not allowed in this sandbox")
         return __import__(name, globals, locals, fromlist, level)
+
     return _import
 
 
 class SandboxExecutor:
+    def __init__(self, registry=None):
+        self.registry = registry
+
+    @staticmethod
+    def _build_shared_modules(registry):
+        modules = {}
+        for key, func in registry._data.items():
+            parts = key.split(".")
+            if len(parts) != 3 or parts[0] != "shared":
+                continue
+            _, mod_name, func_name = parts
+            if mod_name not in modules:
+                modules[mod_name] = types.ModuleType(mod_name)
+            setattr(modules[mod_name], func_name, func)
+        return modules
+
     def execute(self, script: str, context: dict):
         try:
             tree = ast.parse(script, mode="exec")
@@ -51,7 +73,17 @@ class SandboxExecutor:
             for name in SAFE_BUILTINS
             if name in __builtins__ and name not in FORBIDDEN_BUILTINS
         }
-        safe_builtins["__import__"] = _make_import_hook(PRELOADED_MODULES)
+
+        allowed_imports = set(PRELOADED_MODULES)
+        extra_modules = {}
+        if self.registry is not None:
+            shared_modules = self._build_shared_modules(self.registry)
+            allowed_imports.update(shared_modules.keys())
+            extra_modules.update(shared_modules)
+        else:
+            shared_modules = {}
+
+        safe_builtins["__import__"] = _make_import_hook(allowed_imports, extra_modules)
 
         preloaded = {}
         for mod_name in PRELOADED_MODULES:
@@ -59,6 +91,8 @@ class SandboxExecutor:
                 preloaded[mod_name] = importlib.import_module(mod_name)
             except ImportError:
                 pass
+
+        preloaded.update(shared_modules)
 
         globals_dict = {"__builtins__": safe_builtins, **preloaded, **context}
 

@@ -1,0 +1,12 @@
+scene_id: speed-test
+mode: isolated
+description: 提速仿真：对比不同速度下的运行状态
+references:
+- blast-furnace-01
+- conveyor-01
+local_instances:
+  virtual-sensor-01:
+    model_name: TemperatureSensor
+    variables:
+      reading: 1500.0
+      unit: °C

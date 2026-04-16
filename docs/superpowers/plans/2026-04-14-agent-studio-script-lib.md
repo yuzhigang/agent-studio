@@ -4,7 +4,7 @@
 
 **Goal:** Build the `lib` script library system: `@lib_function` decorator, `LibRegistry` scanner, `LibProxy` DSL object, and `SandboxExecutor` with a restricted builtins whitelist.
 
-**Architecture:** A registry-based module discovery system that scans `agents/<model>/scripts/` and `agents/shared/scripts/`, collecting `@lib_function`-decorated functions into a namespaced registry. A chainable `LibProxy` resolves DSL calls like `lib.ladle.dispatcher.getCandidates(args)` at runtime. The `SandboxExecutor` runs JSON-embedded Python scripts via `exec()` with a filtered `__builtins__` whitelist.
+**Architecture:** A registry-based module discovery system that scans `agents/<model>/libs/` and `agents/shared/libs/`, collecting `@lib_function`-decorated functions into a namespaced registry. A chainable `LibProxy` resolves DSL calls like `lib.ladle.dispatcher.getCandidates(args)` at runtime. The `SandboxExecutor` runs JSON-embedded Python libs via `exec()` with a filtered `__builtins__` whitelist.
 
 **Tech Stack:** Python 3.11+, pytest, watchdog (for hot reload), standard library only for core.
 
@@ -195,7 +195,7 @@ git commit -m "feat: add @lib_function decorator"
 **Files:**
 - Create: `src/runtime/lib/registry.py`
 - Test: `tests/runtime/lib/test_registry.py`
-- Create sample fixture: `tests/fixtures/agents/ladle/scripts/dispatcher.py`
+- Create sample fixture: `tests/fixtures/agents/ladle/libs/dispatcher.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -226,7 +226,7 @@ def test_registry_namespace_mismatch_raises():
         reg.scan(agents_dir)
 ```
 
-Create `tests/fixtures/agents/ladle/scripts/dispatcher.py`:
+Create `tests/fixtures/agents/ladle/libs/dispatcher.py`:
 
 ```python
 from src.runtime.lib.decorator import lib_function
@@ -236,7 +236,7 @@ def get_candidates(args: dict) -> dict:
     return {"candidates": []}
 ```
 
-Create `tests/fixtures/agents_bad_namespace/converter/scripts/planner.py`:
+Create `tests/fixtures/agents_bad_namespace/converter/libs/planner.py`:
 
 ```python
 from src.runtime.lib.decorator import lib_function
@@ -330,11 +330,11 @@ class LibRegistry:
             for namespace_dir in agents_path.iterdir():
                 if not namespace_dir.is_dir():
                     continue
-                scripts_dir = namespace_dir / "scripts"
-                if not scripts_dir.exists():
+                libs_dir = namespace_dir / "libs"
+                if not libs_dir.exists():
                     continue
                 namespace = namespace_dir.name
-                for py_file in scripts_dir.glob("*.py"):
+                for py_file in libs_dir.glob("*.py"):
                     self._load_module(namespace, py_file)
 
     def _exec_module(self, namespace: str, py_file: Path):
@@ -378,7 +378,7 @@ class LibRegistry:
         except ValueError:
             return
         parts = rel.parts
-        if len(parts) < 3 or parts[1] != "scripts":
+        if len(parts) < 3 or parts[1] != "libs":
             return
         namespace = parts[0]
 
@@ -733,7 +733,7 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 
 def test_watcher_detects_file_change():
     with tempfile.TemporaryDirectory() as tmpdir:
-        ns_dir = os.path.join(tmpdir, "ladle", "scripts")
+        ns_dir = os.path.join(tmpdir, "ladle", "libs")
         os.makedirs(ns_dir)
         py_path = os.path.join(ns_dir, "demo.py")
         with open(py_path, "w", encoding="utf-8") as f:
@@ -842,7 +842,7 @@ git commit -m "feat: add LibWatcher for hot reload"
 
 - [ ] **Step 1: Write the failing test**
 
-First create `tests/fixtures/agents/converter/scripts/planner.py`:
+First create `tests/fixtures/agents/converter/libs/planner.py`:
 
 ```python
 from src.runtime.lib.decorator import lib_function
@@ -907,7 +907,7 @@ Expected: 2 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/runtime/lib/test_integration.py tests/fixtures/agents/converter/scripts/planner.py
+git add tests/runtime/lib/test_integration.py tests/fixtures/agents/converter/libs/planner.py
 git commit -m "test: end-to-end lib proxy + sandbox integration"
 ```
 
@@ -944,8 +944,8 @@ result = executor.execute("result = lib.hello(args)", {"args": {"name": "Alice"}
 
 ## Directory Layout
 
-- `agents/<model>/scripts/` → `lib.<model>.<module>.<function>`
-- `agents/shared/scripts/` → `lib.shared.<module>.<function>`
+- `agents/<model>/libs/` → `lib.<model>.<module>.<function>`
+- `agents/shared/libs/` → `lib.shared.<module>.<function>`
 ```
 
 - [ ] **Step 2: Commit**

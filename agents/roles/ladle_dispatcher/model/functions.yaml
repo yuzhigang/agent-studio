@@ -1,0 +1,67 @@
+estimateArrivalTime:
+  type: script
+  scriptEngine: python
+  script: |-
+    eta_sec = max(0, args.get('baseTravelSec', 0) + args.get('queueDelaySec', 0))
+    return {'etaSec': eta_sec}
+  parameters:
+    baseTravelSec:
+      type: number
+    queueDelaySec:
+      type: number
+  returns:
+    etaSec:
+      type: number
+scoreCandidate:
+  type: script
+  scriptEngine: python
+  script: |-
+    eta = args.get('etaScore', 0)
+    temp = args.get('tempScore', 0)
+    grade = args.get('gradeScore', 0)
+    conflict = args.get('conflictPenalty', 0)
+    total = 0.4 * eta + 0.3 * temp + 0.2 * grade - 0.1 * conflict
+    return {'totalScore': total}
+  parameters:
+    etaScore:
+      type: number
+    tempScore:
+      type: number
+    gradeScore:
+      type: number
+    conflictPenalty:
+      type: number
+  returns:
+    totalScore:
+      type: number
+getCandidateLadles:
+  type: script
+  scriptEngine: python
+  script: |-
+    result = lib.ladle.getCandidates(args)
+    return result
+  description: 调用本地 ladle_dispatcher lib 获取候选钢包列表。
+  parameters:
+    requestId:
+      type: string
+    converterId:
+      type: string
+    steelGrade:
+      type: string
+    requiredByTime:
+      type: string
+    priority:
+      type: number
+    minRequiredTemp:
+      type: number
+    requiredWeight:
+      type: number
+    availableLadles:
+      type: array
+      description: 可选，用于测试或外部注入钢包列表
+  returns:
+    candidates:
+      type: array
+      description: 候选钢包列表，含预计算得分
+    candidateCount:
+      type: number

@@ -1,0 +1,8 @@
+scene_id: live-view
+mode: shared
+description: 实时监控视图：高炉、传送带、温度传感器
+references:
+- blast-furnace-01
+- conveyor-01
+- temp-sensor-01
+local_instances: {}

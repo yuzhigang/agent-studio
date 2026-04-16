@@ -185,3 +185,135 @@ def test_transition_lifecycle_updates_state_and_store():
 def test_transition_lifecycle_returns_false_for_missing_instance():
     mgr = InstanceManager()
     assert mgr.transition_lifecycle("proj-01", "ladle-001", "archived") is False
+
+
+def test_on_event_runs_script_action():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        project_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="project",
+        variables={"targetLocation": ""},
+        model={
+            "behaviors": {
+                "captureAssigned": {
+                    "trigger": {"type": "event", "name": "dispatchAssigned"},
+                    "actions": [
+                        {
+                            "type": "runScript",
+                            "scriptEngine": "python",
+                            "script": "this.variables.targetLocation = payload.get('destinationId', '')",
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    bus = bus_reg.get_or_create("proj-01")
+    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="project")
+    assert inst.variables["targetLocation"] == "C03"
+
+
+def test_on_event_when_condition_filters_behavior():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        project_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="project",
+        variables={"targetLocation": ""},
+        model={
+            "behaviors": {
+                "captureOnlyNonNull": {
+                    "trigger": {
+                        "type": "event",
+                        "name": "dispatchAssigned",
+                        "when": "payload.destinationId != null",
+                    },
+                    "actions": [
+                        {
+                            "type": "runScript",
+                            "scriptEngine": "python",
+                            "script": "this.variables.targetLocation = 'matched'",
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    bus = bus_reg.get_or_create("proj-01")
+    # when condition should skip this
+    bus.publish("dispatchAssigned", {"destinationId": None}, source="external", scope="project")
+    assert inst.variables["targetLocation"] == ""
+    # when condition should match this
+    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="project")
+    assert inst.variables["targetLocation"] == "matched"
+
+
+def test_on_event_trigger_event_action():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    mgr.create(
+        project_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="project",
+        variables={"steelAmount": 180},
+        model={
+            "behaviors": {
+                "notifyLoaded": {
+                    "trigger": {"type": "event", "name": "beginLoad"},
+                    "actions": [
+                        {
+                            "type": "triggerEvent",
+                            "name": "ladleLoaded",
+                            "payload": {
+                                "ladleId": "this.id",
+                                "steelAmount": "this.variables.steelAmount",
+                            },
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    bus = bus_reg.get_or_create("proj-01")
+    received = []
+    bus.register("observer", "project", "ladleLoaded", lambda t, p, s: received.append((t, p, s)))
+    bus.publish("beginLoad", {}, source="external", scope="project")
+    assert len(received) == 1
+    assert received[0][0] == "ladleLoaded"
+    assert received[0][1] == {"ladleId": "ladle-001", "steelAmount": 180}
+    assert received[0][2] == "ladle-001"
+
+
+def test_on_event_ignores_non_event_trigger():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        project_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="project",
+        variables={"targetLocation": ""},
+        model={
+            "behaviors": {
+                "stateEnterBehavior": {
+                    "trigger": {"type": "stateEnter", "state": "full"},
+                    "actions": [
+                        {
+                            "type": "runScript",
+                            "scriptEngine": "python",
+                            "script": "this.variables.targetLocation = 'should_not_run'",
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    bus = bus_reg.get_or_create("proj-01")
+    bus.publish("someEvent", {}, source="external", scope="project")
+    assert inst.variables["targetLocation"] == ""

@@ -1,0 +1,32 @@
+noCandidateAvailable.critical:
+  category: dispatchFailure
+  severity: critical
+  level: 1
+  trigger:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 60
+    condition: "this.variables.processStatus == 'request_queued' && this.variables.candidateRanking == []"
+  clear:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 60
+    condition: "this.variables.candidateRanking != []"
+frequentReplan.warning:
+  category: dispatchStability
+  severity: warning
+  level: 2
+  trigger:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 300
+    condition: "this.variables.replanCounter >= this.attributes.maxReplanTimes"
+  clear:
+    type: condition
+    window:
+      type: time-sliding
+      duration: 300
+    condition: "this.variables.replanCounter < this.attributes.maxReplanTimes"

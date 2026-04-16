@@ -1,0 +1,114 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  version: "2.0"
+  name: ladle_dispatcher
+  title: 钢包调度员智能体
+  group: scheduling
+  description: 用于转炉配包的调度型智能体。
+attributes:
+  maxDispatchWindowSec:
+    type: number
+    default: 90
+  temperatureSafetyMargin:
+    type: number
+    default: 20
+  dispatchTimeoutSec:
+    type: number
+    default: 240
+  maxReplanTimes:
+    type: number
+    default: 3
+variables:
+  dispatchMode:
+    type: string
+    default: normal
+    x-audit: true
+  processStatus:
+    type: string
+    default: idle
+    x-audit: true
+  pendingRequests:
+    type: array
+    default: []
+    x-audit: true
+  candidateRanking:
+    type: array
+    default: []
+    x-audit: true
+  activeAssignments:
+    type: object
+    default: {}
+    x-audit: true
+  resourceLocks:
+    type: object
+    default: {}
+    x-audit: true
+  replanCounter:
+    type: number
+    default: 0
+    x-audit: true
+  lastError:
+    type: string
+    default: ""
+    x-audit: true
+derivedProperties: {}
+links:
+  monitoredLadles:
+    title: 受控钢包列表
+    targetType: ladle
+    cardinality: 0..*
+    description: 当前调度员负责监控的所有钢包实体实例
+states:
+  idle:
+    title: 空闲
+    group: dispatchState
+    initialState: true
+  evaluating:
+    title: 评估中
+    group: dispatchState
+  assigning:
+    title: 下发中
+    group: dispatchState
+  monitoring:
+    title: 监控中
+    group: dispatchState
+  replanning:
+    title: 重调度
+    group: dispatchState
+transitions:
+  idleToEvaluating:
+    from: idle
+    to: evaluating
+    trigger:
+      type: event
+      name: converterNeedLadle
+  evaluatingToAssigning:
+    from: evaluating
+    to: assigning
+    trigger:
+      type: event
+      name: candidateSelected
+  assigningToMonitoring:
+    from: assigning
+    to: monitoring
+    trigger:
+      type: event
+      name: ladleAssigned
+  monitoringToReplanning:
+    from: monitoring
+    to: replanning
+    trigger:
+      type: event
+      name: dispatchTimeoutDetected
+  replanningToAssigning:
+    from: replanning
+    to: assigning
+    trigger:
+      type: event
+      name: replanningCandidateSelected
+  monitoringToIdle:
+    from: monitoring
+    to: idle
+    trigger:
+      type: event
+      name: assignmentCompleted

@@ -1,0 +1,20 @@
+defaultOperationalMode:
+  preferredMode: reflex
+  goals:
+    - safetyFirst
+    - onTimeDelivery
+    - replanMinimization
+  escalateWhen:
+    - type: event
+      name: dispatchTimeoutDetected
+    - type: event
+      name: assignmentFailed
+  memorySlots:
+    - lastNAssignments
+    - abnormalPatterns
+    - lastDecisionRationale
+  plan: ladleAssignmentPlan
+  constraints:
+    - rules
+    - permissions
+    - stateMachine

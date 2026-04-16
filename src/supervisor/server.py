@@ -1,10 +1,35 @@
 import asyncio
 import json
+import shutil
 import subprocess
 import sys
 
 from aiohttp import web
-from src.runtime.server.supervisor_gateway import SupervisorGateway
+from src.supervisor.gateway import SupervisorGateway
+
+
+def _build_runtime_cmd(project_dir: str, supervisor_ws: str) -> list[str]:
+    """Build the command to spawn a runtime process.
+
+    Prefer the installed 'agent-studio' CLI entrypoint to keep supervisor
+    decoupled from runtime internals. Fallback to invoking the module
+    directly when running from source without the script on PATH.
+    """
+    if shutil.which("agent-studio"):
+        return [
+            "agent-studio",
+            "run",
+            f"--project-dir={project_dir}",
+            f"--supervisor-ws={supervisor_ws}",
+        ]
+    return [
+        sys.executable,
+        "-m",
+        "src.runtime.cli.main",
+        "run",
+        f"--project-dir={project_dir}",
+        f"--supervisor-ws={supervisor_ws}",
+    ]
 
 
 def run_supervisor(base_dir="projects", ws_port=8001, http_port=8080):
@@ -34,14 +59,7 @@ async def _handle_start(request: web.Request):
     # Spawn local subprocess
     project_dir = f"{gateway._base_dir}/{project_id}"
     supervisor_ws = f"ws://localhost:{ws_port}/workers"
-    cmd = [
-        sys.executable,
-        "-m",
-        "src.runtime.cli.main",
-        "run",
-        f"--project-dir={project_dir}",
-        f"--supervisor-ws={supervisor_ws}",
-    ]
+    cmd = _build_runtime_cmd(project_dir, supervisor_ws)
     subprocess.Popen(cmd)
     return web.json_response({"status": "starting"})
 

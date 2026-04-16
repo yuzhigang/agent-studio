@@ -1,0 +1,8 @@
+lastNAssignments:
+  type: array
+  maxItems: 100
+abnormalPatterns:
+  type: array
+  maxItems: 50
+lastDecisionRationale:
+  type: object

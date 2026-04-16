@@ -1,0 +1,19 @@
+scene_id: what-if-overtime
+mode: isolated
+description: what-if 仿真：增加额外机械臂的加班场景
+references:
+- assembly-line-a
+- robot-arm-01
+local_instances:
+  extra-robot:
+    model_name: RobotArm
+    variables:
+      cycleTime: 3.8
+      jointPositions:
+      - 0
+      - 90
+      - 45
+      - 0
+      - 0
+      - 0
+      active: true

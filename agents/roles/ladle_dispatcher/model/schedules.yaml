@@ -1,0 +1,8 @@
+scanDispatchTimeouts:
+  name: scanDispatchTimeouts
+  cron: "*/30 * * * * *"
+  actions:
+    - type: runScript
+      scriptEngine: python
+      script: |-
+        print(f"[Schedule] active={len(this.variables.activeAssignments)}")

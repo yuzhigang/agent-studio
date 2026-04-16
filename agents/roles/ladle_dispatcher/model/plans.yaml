@@ -1,0 +1,12 @@
+ladleAssignmentPlan:
+  stepSchema:
+    service:
+      type: string
+    args:
+      type: object
+  allowedServices:
+    - createDispatchTask
+    - lockLadle
+    - assignLadleToConverter
+    - triggerReplan
+  successCondition: "this.variables.lastError == ''"

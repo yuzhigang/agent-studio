@@ -1,0 +1,9 @@
+safetyFirst:
+  priority: 100
+  successCondition: "this.variables.lastError != 'safety_violation'"
+onTimeDelivery:
+  priority: 90
+  successCondition: "this.variables.lastError != 'dispatch_timeout'"
+replanMinimization:
+  priority: 70
+  successCondition: "this.variables.replanCounter < this.attributes.maxReplanTimes"

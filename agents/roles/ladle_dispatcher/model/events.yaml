@@ -1,0 +1,130 @@
+converterNeedLadle:
+  payload:
+    requestId:
+      type: string
+    taskId:
+      type: string
+    converterId:
+      type: string
+    steelGrade:
+      type: string
+    requiredByTime:
+      type: string
+dispatchRequestQueued:
+  payload:
+    taskId:
+      type: string
+    requestId:
+      type: string
+    converterId:
+      type: string
+candidateSnapshotRequested:
+  payload:
+    taskId:
+      type: string
+    requestId:
+      type: string
+    converterId:
+      type: string
+candidateSnapshotReady:
+  payload:
+    taskId:
+      type: string
+    requestId:
+      type: string
+    converterId:
+      type: string
+    candidateCount:
+      type: number
+    primary:
+      type: object
+candidateSelected:
+  payload:
+    taskId:
+      type: string
+    requestId:
+      type: string
+    ladleId:
+      type: string
+    converterId:
+      type: string
+    totalScore:
+      type: number
+ladleAssigned:
+  payload:
+    taskId:
+      type: string
+    ladleId:
+      type: string
+    converterId:
+      type: string
+assignmentCompleted:
+  payload:
+    taskId:
+      type: string
+assignmentFailed:
+  payload:
+    taskId:
+      type: string
+    reason:
+      type: string
+dispatchTimeoutDetected:
+  payload:
+    taskId:
+      type: string
+replanningCandidateSelected:
+  payload:
+    taskId:
+      type: string
+    ladleId:
+      type: string
+    converterId:
+      type: string
+dispatchAssigned:
+  payload:
+    destinationType:
+      type: string
+    destinationId:
+      type: string
+    taskId:
+      type: string
+    ladleId:
+      type: string
+routeConflictDetected:
+  payload:
+    taskId:
+      type: string
+    conflictId:
+      type: string
+    libSeverity:
+      type: string
+ladleStatusChanged:
+  payload:
+    ladleId:
+      type: string
+    state:
+      type: string
+    timestamp:
+      type: string
+ladleLoaded:
+  payload:
+    ladleId:
+      type: string
+    steelAmount:
+      type: number
+    steelGrade:
+      type: string
+    temperature:
+      type: number
+ladleEmptied:
+  payload:
+    ladleId:
+      type: string
+    usageCount:
+      type: number
+deliveryDelayDetected:
+  payload:
+    taskId:
+      type: string
+    minutesLate:
+      type: number

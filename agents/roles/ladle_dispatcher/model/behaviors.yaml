@@ -1,0 +1,180 @@
+onNeedLadleQueue:
+  trigger:
+    type: event
+    name: converterNeedLadle
+    when: "payload.requestId != null"
+  priority: 1
+  actions:
+    - type: runScript
+      scriptEngine: python
+      script: |-
+        if not isinstance(this.variables.pendingRequests, list):
+            this.variables.pendingRequests = []
+        this.variables.pendingRequests.append({'requestId': payload.requestId, 'taskId': payload.taskId if getattr(payload, 'taskId', None) else f"TASK-{payload.requestId}", 'converterId': payload.converterId, 'steelGrade': payload.steelGrade, 'requiredByTime': payload.requiredByTime})
+        this.variables.processStatus = 'request_queued'
+    - type: triggerEvent
+      name: dispatchRequestQueued
+      payload:
+        taskId: "payload.taskId != null ? payload.taskId : 'TASK-' + payload.requestId"
+        requestId: payload.requestId
+        converterId: payload.converterId
+onLadleEmptiedCompleteAssignment:
+  trigger:
+    type: event
+    name: ladleEmptied
+  priority: 8
+  actions:
+    - type: runScript
+      scriptEngine: python
+      script: |-
+        task_id = ''
+        if isinstance(this.variables.activeAssignments, dict):
+            for k,v in this.variables.activeAssignments.items():
+                if v.get('ladleId') == payload.ladleId and v.get('status') == 'assigned':
+                    task_id = k
+                    break
+        if task_id != '':
+            this.variables.activeAssignments[task_id]['status'] = 'completed'
+        if isinstance(this.variables.activeAssignments, dict):
+            active = [x for x in this.variables.activeAssignments.values() if x.get('status') == 'assigned']
+            this.variables.processStatus = 'idle' if len(active) == 0 else this.variables.processStatus
+emitDispatchAssignedToLadle:
+  trigger:
+    type: event
+    name: candidateSelected
+  priority: 5
+  actions:
+    - type: triggerEvent
+      name: dispatchAssigned
+      payload:
+        destinationType: "'converter'"
+        destinationId: payload.converterId
+        taskId: payload.taskId
+        ladleId: payload.ladleId
+    - type: triggerEvent
+      name: ladleAssigned
+      payload:
+        taskId: payload.taskId
+        ladleId: payload.ladleId
+        converterId: payload.converterId
+onLadleLoadedSync:
+  trigger:
+    type: event
+    name: ladleLoaded
+  priority: 7
+  actions:
+    - type: runScript
+      scriptEngine: python
+      script: |-
+        this.variables.lastError = ''
+        this.variables.processStatus = 'ladle_loaded'
+onCandidateReadySelect:
+  trigger:
+    type: event
+    name: candidateSnapshotReady
+    when: "payload.candidateCount > 0"
+  priority: 3
+  actions:
+    - type: triggerEvent
+      name: candidateSelected
+      payload:
+        taskId: payload.taskId
+        requestId: payload.requestId
+        converterId: payload.converterId
+        ladleId: payload.primary.ladleId
+        totalScore: payload.primary.totalScore
+onLadleStatusChangedSync:
+  trigger:
+    type: event
+    name: ladleStatusChanged
+  priority: 6
+  actions:
+    - type: runScript
+      scriptEngine: python
+      script: |-
+        this.variables.processStatus = f'ladle_{payload.state}' if getattr(payload,'state',None) else this.variables.processStatus
+requestCandidateSnapshot:
+  trigger:
+    type: event
+    name: dispatchRequestQueued
+  priority: 2
+  actions:
+    - type: triggerEvent
+      name: candidateSnapshotRequested
+      payload:
+        taskId: payload.taskId
+        requestId: payload.requestId
+        converterId: payload.converterId
+resolveCandidateSnapshot:
+  trigger:
+    type: event
+    name: candidateSnapshotRequested
+  priority: 2
+  actions:
+    - type: runScript
+      scriptEngine: python
+      script: |-
+        request = None
+        for req in this.variables.pendingRequests:
+            if req.get('taskId') == payload.taskId:
+                request = req
+                break
+        args = request if request else {}
+        args['converterId'] = payload.converterId
+        args['requestId'] = payload.requestId
+
+        # 尝试从受控钢包 links 组装实时列表（运行时支持 agent 查询后替换为真实实例读取）
+        monitored = []
+        try:
+            monitored = this.links.monitoredLadles or []
+        except Exception:
+            pass
+        if len(monitored) > 0:
+            # TODO: 接入 runtime.get_agent(ladle_id) 后替换为真实属性读取
+            print(f'[resolveCandidateSnapshot] monitored ladles: {monitored}')
+
+        result = this.functions.getCandidateLadles(args)
+        this.variables.candidateSnapshotResult = {
+            'taskId': payload.taskId,
+            'requestId': payload.requestId,
+            'converterId': payload.converterId,
+            'candidateCount': result['candidateCount'],
+            'primary': None
+        }
+        if result['candidateCount'] > 0:
+            ranked = []
+            for c in result['candidates']:
+                score_res = this.functions.scoreCandidate({
+                    'etaScore': c['etaScore'],
+                    'tempScore': c['tempScore'],
+                    'gradeScore': c['gradeScore'],
+                    'conflictPenalty': c['conflictPenalty']
+                })
+                ranked.append({**c, 'totalScore': score_res['totalScore']})
+            ranked.sort(key=lambda x: x['totalScore'], reverse=True)
+            this.variables.candidateSnapshotResult['primary'] = ranked[0]
+            this.variables.candidateRanking = ranked
+        else:
+            this.variables.candidateRanking = []
+    - type: triggerEvent
+      name: candidateSnapshotReady
+      payload:
+        taskId: this.variables.candidateSnapshotResult.taskId
+        requestId: this.variables.candidateSnapshotResult.requestId
+        converterId: this.variables.candidateSnapshotResult.converterId
+        candidateCount: this.variables.candidateSnapshotResult.candidateCount
+        primary: this.variables.candidateSnapshotResult.primary
+onNoCandidate:
+  trigger:
+    type: event
+    name: candidateSnapshotReady
+    when: "payload.candidateCount == 0"
+  priority: 4
+  actions:
+    - type: triggerAlarm
+      alarm: noCandidateAvailable.critical
+    - type: triggerEvent
+      name: assignmentFailed
+      payload:
+        taskId: payload.taskId
+        reason: "'no_candidate'"

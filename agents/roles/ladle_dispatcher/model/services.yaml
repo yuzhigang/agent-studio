@@ -1,0 +1,130 @@
+createDispatchTask:
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+      - rule: requestPayloadValid
+    post: []
+  script: |-
+    if not isinstance(this.variables.pendingRequests, list):
+        this.variables.pendingRequests = []
+    req = {'requestId': args.requestId, 'taskId': args.get('taskId', f"TASK-{args.requestId}"), 'converterId': args.converterId, 'steelGrade': args.steelGrade, 'requiredByTime': args.requiredByTime, 'priority': args.get('priority', 50)}
+    this.variables.pendingRequests.append(req)
+    this.variables.processStatus = 'request_queued'
+    return {'success': True, 'taskId': req['taskId']}
+  parameters:
+    requestId:
+      type: string
+    taskId:
+      type: string
+    converterId:
+      type: string
+    steelGrade:
+      type: string
+    requiredByTime:
+      type: string
+    priority:
+      type: number
+  returns:
+    success:
+      type: boolean
+    taskId:
+      type: string
+  permissions:
+    roles:
+      - dispatcher_operator
+      - mes_system
+      - system
+lockLadle:
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+      - rule: ladleNotLocked
+    post: []
+  script: |-
+    if not isinstance(this.variables.resourceLocks, dict):
+        this.variables.resourceLocks = {}
+    this.variables.resourceLocks[args.ladleId] = {'taskId': args.taskId}
+    return {'success': True}
+  parameters:
+    ladleId:
+      type: string
+    taskId:
+      type: string
+    isLocked:
+      type: boolean
+  returns:
+    success:
+      type: boolean
+  permissions:
+    roles:
+      - dispatcher_operator
+      - cortex
+      - system
+assignLadleToConverter:
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+      - rule: gradeCompatible
+      - rule: temperatureSufficient
+    post: []
+  script: |-
+    if not isinstance(this.variables.activeAssignments, dict):
+        this.variables.activeAssignments = {}
+    this.variables.activeAssignments[args.taskId] = {'taskId': args.taskId, 'ladleId': args.ladleId, 'converterId': args.converterId, 'steelGrade': args.steelGrade, 'totalScore': args.get('totalScore', 0), 'status': 'assigned'}
+    this.variables.processStatus = 'assignment_committed'
+    return {'success': True}
+  parameters:
+    taskId:
+      type: string
+    ladleId:
+      type: string
+    converterId:
+      type: string
+    steelGrade:
+      type: string
+    gradeCompatible:
+      type: boolean
+    estimatedArrivalTemp:
+      type: number
+    minRequiredTemp:
+      type: number
+    totalScore:
+      type: number
+  returns:
+    success:
+      type: boolean
+  permissions:
+    roles:
+      - dispatcher_operator
+      - cortex
+      - system
+triggerReplan:
+  type: script
+  scriptEngine: python
+  rules:
+    pre:
+      - rule: replanWithinLimit
+    post: []
+  script: |-
+    this.variables.replanCounter = this.variables.replanCounter + 1
+    this.variables.processStatus = 'replanning'
+    this.variables.lastError = args.get('reason', 'replan_triggered')
+    return {'success': True, 'replanCounter': this.variables.replanCounter}
+  parameters:
+    taskId:
+      type: string
+    reason:
+      type: string
+  returns:
+    success:
+      type: boolean
+    replanCounter:
+      type: number
+  permissions:
+    roles:
+      - dispatcher_operator
+      - cortex
+      - system

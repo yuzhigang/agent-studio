@@ -71,12 +71,8 @@ def _run_inline_command(args):
 
 
 def _supervisor_command(args):
-    from src.runtime.cli.supervisor_command import run_supervisor
-    return run_supervisor(
-        base_dir=args.base_dir,
-        ws_port=args.ws_port,
-        http_port=args.http_port,
-    )
+    from src.supervisor.cli import supervisor_main
+    return supervisor_main(args)
 
 
 if __name__ == "__main__":

@@ -114,6 +114,7 @@ agent-studio supervisor \
 - **Unix**：`fcntl.flock` 是进程绑定的建议锁，进程崩溃后锁自动释放。`.lock` 文件残留不会阻塞后续启动，启动时直接覆盖即可。
 - **Windows**：启动逻辑应读取锁文件中的 `pid`，检查该 PID 是否仍在运行。若 PID 已不存在，允许覆盖并获取锁；若仍在运行，则报错。为降低 PID 复用导致的误判风险，可补充进程启动时间比对等启发式校验，或直接使用 `filelock` / `fasteners` 等基于操作系统原语的库来避免手动 PID 检查。
 - **推荐实现**：封装跨平台 `ProjectLock` 工具类，优先使用 `fasteners` 或 `filelock` 等成熟库。
+- **Windows 特殊处理**：`fasteners` 的 `InterProcessLock` 会直接锁定文件句柄，导致无法同时向该文件写入 JSON 元数据。实现上采用**双文件方案**：`.lockfile` 作为 OS 级互斥锁的载体，`.lock` 仅用于存储 JSON 元数据（`pid`、`started_at`），这样 Windows 下既能获得进程级排他锁，又能保留可读的诊断信息。
 
 ---
 
@@ -300,12 +301,69 @@ agent-studio supervisor \
 
 ---
 
+### 8.4 Project 内部事件驱动与行为执行模型
+
+Project 加载后，其业务逻辑的**核心动力源**是 `EventBus` 上的事件分发。
+
+#### 8.4.1 事件总线与实例订阅
+
+每个 Project 拥有独立的 `EventBus`。当 `InstanceManager.create()` 创建一个 `Instance` 时，会自动解析该实例 `model.behaviors` 中所有 `trigger.type == "event"` 的行为，将实例注册为对应事件类型的订阅者：
+
+```python
+bus.register(instance_id, scope, event_type, handler)
+```
+
+当外部适配器（OPC-UA / MQTT / REST）或内部逻辑调用 `bus.publish(event_type, payload, source, scope)` 时，EventBus 会把事件路由到所有匹配的实例，触发 `InstanceManager._on_event(instance, event_type, payload, source)`。
+
+#### 8.4.2 行为匹配与条件过滤
+
+`_on_event` 内部遍历实例的 `behaviors`，按以下规则匹配：
+
+1. **`trigger.type` 必须为 `"event"`**（`stateEnter`、`transition` 等触发器由其他生命周期钩子处理，不响应普通事件）。
+2. **`trigger.name` 必须与当前 `event_type` 相等**。
+3. **若存在 `when` 表达式**，则通过 `SandboxExecutor` 在行为上下文中求值；只有结果为 `True` 时才继续执行。
+
+`when` 表达式示例：`payload.destinationId != null`
+
+#### 8.4.3 行为上下文（Context）
+
+行为执行时的沙箱上下文包含：
+
+| 变量 | 说明 |
+|---|---|
+| `this` | 当前实例的代理对象，支持属性级读写 |
+| `payload` | 当前事件载荷的代理对象 |
+| `source` | 事件来源标识 |
+| `dispatch(event_type, payload, target=None)` | 向 EventBus 发布新事件的辅助函数 |
+
+为了让 behavior 脚本中的 `this.variables.xxx = value` 能直接写回原始 `Instance`，实现层使用 `_DictProxy` 对 `Instance` 及其内部 dict 字段做包装：属性访问自动映射到 dict 键读写，同时保留 `payload.get('key')`、`__getitem__` 等常用操作。
+
+#### 8.4.4 Action 执行
+
+匹配成功的 behavior，按顺序执行其 `actions` 列表。当前支持两种 action 类型：
+
+| Action 类型 | 说明 |
+|---|---|
+| `runScript` | 在 `SandboxExecutor` 中执行 Python 脚本，可直接修改 `this.variables`、`this.attributes`、`this.memory` 等 |
+| `triggerEvent` | 发布新事件到 EventBus；`payload` 字段支持字符串表达式（如 `this.id`、`this.variables.steelAmount`），会被沙箱求值后发送 |
+
+脚本执行错误会被**静默捕获**（swallow），防止单个实例的行为异常拖垮整个 EventBus 的事件分发。
+
+#### 8.4.5 状态恢复时的事件重放
+
+`StateManager.restore_project()` 在加载实例后，会重放自上次 checkpoint 以来持久化的事件日志到 EventBus。这意味着：
+
+- **事件不仅是实时驱动源**，也是**历史恢复机制**。
+- 所有事件驱动的 behavior 在进程重启后可以通过重放恢复正确的业务状态。
+
+---
+
 ## 9. Supervisor 进程模型
 
 ### 9.1 职责边界
 
 - **不执行任何 Project 业务逻辑**。
-- **本地 spawn**：同机部署时，可直接 `subprocess.Popen("agent-studio run ...")` 启动子进程。
+- **本地 spawn**：同机部署时，可直接 `subprocess.Popen("agent-studio run ...")` 启动子进程。实现层优先查找 `PATH` 上的 `agent-studio` 可执行文件，以保持 Supervisor 与 runtime 内部模块的解耦；仅在源码未安装时 fallback 到 `python -m src.runtime.cli.main`。
 - **反向注册管理**：接收来自边缘/本地 `agent-studio run` 的 WebSocket 连接，维护 `project_id → WebSocket` 映射。
 - **请求路由**：把客户端的 `scene.start`、`project.checkpoint` 等请求转发到对应的 runtime。
 - **状态聚合**：收集各 runtime 的心跳和通知，广播给订阅的客户端。
@@ -326,7 +384,11 @@ agent-studio supervisor \
 
 - `ProjectRegistry`、`InstanceManager`、`SceneManager`、`StateManager`、`SQLiteStore` 等核心代码**逻辑直接复用**，仅需在 `ProjectRegistry.load_project()` 和 `unload_project()` 中增加 `.lock` 文件锁的获取与释放逻辑。
 - `SandboxExecutor` 继续作为脚本安全层生效；进程级隔离提供额外的故障隔离层。
-- 新增模块主要集中在 CLI 入口、`runtime/locks/`（跨平台文件锁）和 `runtime/adapters/`（外部数据源适配器）。
+- 新增模块按职责拆分为两个顶层包：
+  - **`src/runtime/`**：运行时逻辑。包含 `cli/main.py`（统一 CLI 入口）、`cli/run_command.py`、`cli/run_inline.py`、`locks/project_lock.py`（跨平台文件锁）、`server/jsonrpc_ws.py`（通用 JSON-RPC 协议层）。
+  - **`src/supervisor/`**：管理平面逻辑。包含 `cli.py`（supervisor 子命令执行）、`gateway.py`（运行时映射与状态广播）、`server.py`（aiohttp HTTP/WebSocket 服务）。
+  - `runtime/cli/main.py` 负责 argparse 统一分发，但 supervisor 的实际执行逻辑委托给 `src.supervisor.cli`，确保两边代码边界清晰。
+- `InstanceManager._on_event` 已完成与 `SandboxExecutor` 的接线，支持 `runScript` 和 `triggerEvent` 两种 action；`_DictProxy` 实现了 behavior 脚本中对 `this.variables.xxx` 的属性级读写。
 
 ---
 
@@ -350,12 +412,26 @@ agent-studio supervisor \
 ### 决策 6：运行时排他锁
 - **原因**：多个 `ProjectRuntime` 进程（或同一个 `run-inline` 和另一个 `run`）并发打开同一个 `runtime.db` 会导致数据损坏。文件锁是最简单且跨平台生效的防御手段。
 
----
+### 决策 7：EventBus 作为业务逻辑的唯一驱动源
+- **原因**：实例的 behavior 统一通过 EventBus 事件触发，可以使实时运行、状态恢复（事件重放）、分布式通知使用同一套语义。所有外部数据变化（OPC-UA / MQTT / REST）都转化为事件发布到 EventBus，再由 `_on_event` 驱动 behavior 执行，避免多入口导致的逻辑分叉。
 
-## 12. 后续待设计事项
+### 决策 8：脚本错误静默捕获
+- **原因**：`SandboxExecutor` 执行 behavior 脚本时可能因用户代码错误抛出异常。若将异常向上冒泡，会导致整个 EventBus 的 `publish` 中断，进而影响同 Project 内其他实例的事件处理。静默捕获并忽略脚本错误，是以"隔离故障"换取"系统整体可用性"的务实选择。
 
-- `agent-studio` CLI 的详细参数解析与入口分发。
-- `src/runtime/locks/` 跨平台文件锁实现（Windows / Linux）。
+### 决策 9：`_DictProxy` 属性代理
+- **原因**：Python dataclass 的字段存储在 `__dict__` 中，但 `Instance.variables` 等本身是嵌套 dict。Behavior 脚本习惯写成 `this.variables.steelAmount = 180` 而不是 `this.variables['steelAmount'] = 180`。`_DictProxy` 在不改变 `Instance` 数据结构的前提下，为沙箱上下文提供了属性级读写的自然语法，同时保证写操作穿透回原始 dict。
+
+## 12. 已实现与后续待设计事项
+
+### 已实现
+- `agent-studio` CLI 统一入口与参数解析（`run`、`run-inline`、`supervisor`）。
+- `src/runtime/locks/project_lock.py` 跨平台文件锁（Windows / Linux），含 Windows 双文件 workaround。
+- `src/runtime/server/jsonrpc_ws.py` 通用 JSON-RPC over WebSocket 协议层。
+- `src/supervisor/gateway.py` + `server.py` 的 Supervisor HTTP/WebSocket 网关基础实现。
+- `shared` Scene 自动恢复、`force_stop_on_shutdown` 策略、15 秒断连自毁等运行时细节。
+- `InstanceManager._on_event` 的行为执行（`runScript` / `triggerEvent` / `when` 条件过滤）与 `_DictProxy` 属性代理。
+
+### 后续待设计
 - `src/runtime/adapters/` 的适配器基类与数据源配置 schema。
-- Supervisor 的 HTTP/WebSocket 网关接口与客户端 SDK 设计。
 - Supervisor HTTP API 的 OpenAPI schema 设计。
+- 客户端 SDK 设计与浏览器端订阅/状态同步协议封装。

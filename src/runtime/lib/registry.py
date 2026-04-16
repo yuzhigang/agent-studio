@@ -1,5 +1,6 @@
 """LibRegistry: discovers and resolves @lib_function decorated libraries."""
 
+import inspect
 import sys
 import threading
 import types
@@ -87,19 +88,50 @@ class LibRegistry:
         return module
 
     def _register_functions(self, namespace: str, py_file: Path, module):
+        class_instances = {}
+
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
+
+            # 1) 模块级函数
             meta = getattr(obj, "_lib_meta", None)
-            if meta is None:
+            if meta is not None:
+                declared_ns = meta["namespace"]
+                if declared_ns != namespace:
+                    raise LibRegistrationError(
+                        f"{py_file}",
+                        details=f"namespace mismatch: declared '{declared_ns}' but file is under '{namespace}'"
+                    )
+                key = f"{namespace}.{py_file.stem}.{meta['name']}"
+                self._registry[key] = meta["func"]
                 continue
-            declared_ns = meta["namespace"]
-            if declared_ns != namespace:
-                raise LibRegistrationError(
-                    f"{py_file}",
-                    details=f"namespace mismatch: declared '{declared_ns}' but file is under '{namespace}'"
-                )
-            key = f"{namespace}.{py_file.stem}.{meta['name']}"
-            self._registry[key] = meta["func"]
+
+            # 2) 类方法
+            if inspect.isclass(obj):
+                for method_name in dir(obj):
+                    method = getattr(obj, method_name)
+                    meta = getattr(method, "_lib_meta", None)
+                    if meta is None:
+                        continue
+                    declared_ns = meta["namespace"]
+                    if declared_ns != namespace:
+                        raise LibRegistrationError(
+                            f"{py_file}",
+                            details=f"namespace mismatch: declared '{declared_ns}' but file is under '{namespace}'"
+                        )
+                    instance = class_instances.get(attr_name)
+                    if instance is None:
+                        try:
+                            instance = obj()
+                        except Exception as e:
+                            raise LibRegistrationError(
+                                f"{py_file}",
+                                details=f"failed to instantiate {attr_name}: {e}"
+                            )
+                        class_instances[attr_name] = instance
+                    bound = getattr(instance, method_name)
+                    key = f"{namespace}.{py_file.stem}.{meta['name']}"
+                    self._registry[key] = bound
 
     def _load_module(self, namespace: str, py_file: Path):
         module = self._exec_module(namespace, py_file)

@@ -1,0 +1,30 @@
+requestPayloadValid:
+  condition: "args.requestId != null && args.converterId != null && args.requiredByTime != null && args.steelGrade != null"
+  onViolation:
+    action: reject
+    error:
+      code: INVALID_REQUEST_PAYLOAD
+ladleNotLocked:
+  condition: "args.isLocked != true"
+  onViolation:
+    action: reject
+    error:
+      code: LADLE_ALREADY_LOCKED
+gradeCompatible:
+  condition: "args.gradeCompatible == true"
+  onViolation:
+    action: reject
+    error:
+      code: GRADE_NOT_COMPATIBLE
+temperatureSufficient:
+  condition: "args.estimatedArrivalTemp == null || args.minRequiredTemp == null || args.estimatedArrivalTemp >= args.minRequiredTemp + this.attributes.temperatureSafetyMargin"
+  onViolation:
+    action: reject
+    error:
+      code: ARRIVAL_TEMPERATURE_LOW
+replanWithinLimit:
+  condition: "this.variables.replanCounter < this.attributes.maxReplanTimes"
+  onViolation:
+    action: warn
+    warning:
+      code: REPLAN_LIMIT_REACHED
