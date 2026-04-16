@@ -1,6 +1,6 @@
 # MessageHub 外部消息统一网关设计文档
 
-> 版本：v2.0  
+> 版本：v2.1  
 > 日期：2026-04-16
 
 ---
@@ -45,7 +45,6 @@
 │  │  │  messagebox.db  │◄──►│ InboxProcessor  │    │ OutboxProc  │◄──┤   │
 │  │  │  - inbox        │    │  读取 inbox     │    │ 读取 outbox │   │   │
 │  │  │  - outbox       │    │  注入 EventBus  │    │ 调用 Channel│   │   │
-│  │  │  - sequences    │    │                 │    │             │   │   │
 │  │  └─────────────────┘    └─────────────────┘    └──────┬──────┘    │   │
 │  │                                                        │          │   │
 │  │  ┌─────────────────────────────────────────────────────▼─────┐    │   │
@@ -86,14 +85,13 @@
 -- 收件箱：外部消息进入后先落地
 CREATE TABLE inbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sequence INTEGER NOT NULL UNIQUE,
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     source TEXT,
     scope TEXT DEFAULT 'project',
     target TEXT,
     received_at TEXT NOT NULL,
-    delivered_at TEXT,
+    processed_at TEXT,
     acked_at TEXT
 );
 
@@ -103,7 +101,6 @@ CREATE TABLE inbox (
 -- 发件箱：需要外发的事件
 CREATE TABLE outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sequence INTEGER NOT NULL UNIQUE,
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     source TEXT NOT NULL,
@@ -116,44 +113,20 @@ CREATE TABLE outbox (
     last_error TEXT
 );
 
--- 序列号管理
-CREATE TABLE sequences (
-    name TEXT PRIMARY KEY,
-    value INTEGER DEFAULT 0
-);
-
--- 处理器状态：InboxProcessor / OutboxProcessor 的游标和配置
-CREATE TABLE processor_state (
-    processor TEXT PRIMARY KEY,
-    last_sequence INTEGER NOT NULL DEFAULT 0
-);
-
 -- 查询优化索引
-CREATE INDEX idx_inbox_sequence ON inbox(sequence);
-CREATE INDEX idx_outbox_sequence ON outbox(sequence);
-CREATE INDEX idx_outbox_published_at ON outbox(published_at, error_count);
+CREATE INDEX idx_inbox_processed_at ON inbox(processed_at);
+CREATE INDEX idx_outbox_published_at ON outbox(published_at, error_count, retry_after);
 ```
 
 > **路径与并发**：`messagebox.db` 默认位于 `<project_dir>/messagebox.db`，与 `runtime.db` 同目录但独立文件。它由本 Worker 内的 InboxProcessor 和 OutboxProcessor 读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout：`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 
-### 4.2 序列号生成逻辑
+### 4.2 消息语义
 
-```python
-def next_sequence(name: str) -> int:
-    with transaction():
-        cursor.execute(
-            "INSERT INTO sequences(name, value) VALUES(?, 1) "
-            "ON CONFLICT(name) DO UPDATE SET value = value + 1 "
-            "RETURNING value",
-            (name,)
-        )
-        return cursor.fetchone()[0]
-```
+本设计采用 **At-Least-Once** 语义：
 
-- `inbox` 和 `outbox` 使用独立的序列号空间。
-- **`RabbitMQChannel`** 使用 `name = 'inbox_rabbitmq'` 生成自己的单调序列号，**不使用 RabbitMQ delivery tag**（delivery tag 会随重连重置，无法保证唯一性）。
-- **`SupervisorChannel`** 的 `sequence` 由 Supervisor 在推送 `notify.externalEvent` 时生成并分配，Worker 直接透传使用，确保 Supervisor 侧缓存有序。
-- 序列号在 **单个 Worker 的 `messagebox.db` 范围内** 单调递增，用于本地幂等和断点续传。
+- **消息可能重复投递**：同一外部事件可能因 Channel 重连、Worker 重启等原因被多次写入 `inbox`，InboxProcessor 可能多次注入 EventBus。
+- **不保证全局严格顺序**：消息来源多样，无法保证跨 Channel 的严格时序。
+- **幂等性由业务脚本负责**：如果 behavior 对重复或乱序敏感，应在脚本内部通过状态/变量/时间戳自行去重和排序。
 
 ---
 
@@ -266,12 +239,11 @@ class MessageHub:
         """返回 Channel 是否已连接并可正常工作，供 Runtime 生命周期判断实例启动时机。"""
 
     def on_channel_message(
-        self, event_type: str, payload: dict, source: str, sequence: int,
+        self, event_type: str, payload: dict, source: str,
         scope: str = "project", target: str | None = None
     ) -> None:
         """Channel 收到外部消息后回调：先写 inbox，再可能被 InboxProcessor 消费。"""
         self._msg_store.inbox_enqueue(
-            sequence=sequence,
             event_type=event_type,
             payload=payload,
             source=source,
@@ -288,18 +260,16 @@ class MessageHub:
 class InboxProcessor:
     def __init__(self, message_hub: MessageHub):
         self._hub = message_hub
-        self._last_sequence = 0
 
     def start(self) -> None: ...
     def stop(self) -> None: ...
 ```
 
 处理流程：
-1. 启动时从 `processor_state` 表读取 `InboxProcessor` 上次处理到的 `last_sequence`（不存在则从 0 开始）。
-2. 每 1s（可配置）扫描 `inbox` 表，读取 `sequence > last_sequence` 的记录。
-3. 按 sequence 顺序调用 `MessageHub.publish(..., persist=False)` 注入内部 EventBus。
-4. 更新 `last_sequence` 并写回 `processor_state` 表，标记消息为已交付（可同步更新 `inbox.delivered_at`）。
-5. 幂等：若 `sequence <= last_sequence`，直接跳过。
+1. 每 1s（可配置）扫描 `inbox` 表，读取 `processed_at IS NULL` 的记录，按 `id` 升序处理。
+2. 对每条记录调用 `MessageHub.publish(..., persist=False)` 注入内部 EventBus。
+3. 更新该记录的 `processed_at = now`，标记为已处理。
+4. 幂等保证：如果 `publish()` 成功但更新 `processed_at` 前 Worker 崩溃，重启后会再次扫描到同一条记录并重新注入 EventBus。业务脚本需要自行保证幂等性（如通过状态版本号、时间戳去重）。
 
 > **注意**：`publish(..., persist=False)` 确保外部消息注入内部后**不会再次写入 outbox**，防止消息循环。
 
@@ -318,7 +288,7 @@ class OutboxProcessor:
 
 处理流程：
 1. 每 1s（可配置）扫描 `outbox` 表，读取 `published_at IS NULL AND error_count < max_retries AND (retry_after IS NULL OR retry_after <= now)` 的记录。
-2. 调用 `Channel.send(event_type, payload, source, scope, target, sequence)` 发送。
+2. 调用 `Channel.send(event_type, payload, source, scope, target)` 发送。
 3. `SendResult.SUCCESS`：删除对应记录（或标记 `published_at`）。
 4. `SendResult.RETRYABLE`：递增 `error_count`，更新 `retry_after` 为退避后的时间（如指数退避：2^error_count 秒，最大 30s），更新 `last_error`。
 5. `SendResult.PERMANENT`：立即停止重试，标记 `error_count = max_retries` 并记录 `last_error`，保留在 outbox 中供运维排查（或后续移入死信队列）。
@@ -336,11 +306,11 @@ class SendResult(Enum):
 
 class Channel(ABC):
     @abstractmethod
-    def start(self, inbound_callback: Callable[[str, dict, str, int, str, str | None], None]) -> None:
+    def start(self, inbound_callback: Callable[[str, dict, str, str, str | None], None]) -> None:
         """
         启动 Channel。
         inbound_callback 签名：
-        (event_type, payload, source, sequence, scope, target) -> None
+        (event_type, payload, source, scope, target) -> None
         """
         ...
 
@@ -352,7 +322,6 @@ class Channel(ABC):
         source: str,
         scope: str,
         target: str | None,
-        sequence: int,
     ) -> SendResult:
         """发送单条消息，返回发送结果。"""
         ...
@@ -363,7 +332,7 @@ class Channel(ABC):
 
 #### `RabbitMQChannel`
 
-- `start()`：启动 RabbitMQ Consumer，收到消息后回调 `inbound_callback`，并使用 `sequences` 表（`name = 'inbox_rabbitmq'`）生成单调递增的 `sequence`。不使用 RabbitMQ delivery tag，因为 delivery tag 会在重连后重置。
+- `start()`：启动 RabbitMQ Consumer，收到消息后回调 `inbound_callback`。收到消息即写入 inbox。
 - `send()`：调用 `basic_publish` 发送到 RabbitMQ exchange。
 - 断连时自动重连，inbound 消息由 RabbitMQ 队列持久化；outbound 消息由本地 outbox 缓存。
 
@@ -383,14 +352,14 @@ class Channel(ABC):
 
 | 方法 | 方向 | 参数 | 返回值 |
 |---|---|---|---|
-| `messageHub.publish` | Worker → Supervisor | `{project_id, sequence, event_type, payload, source, scope, target}` | `{acked: true}` |
-| `messageHub.publishBatch` | Worker → Supervisor | `{project_id, records}` | `{acked_sequences: [...]}` |
+| `messageHub.publish` | Worker → Supervisor | `{project_id, event_type, payload, source, scope, target}` | `{acked: true}` |
+| `messageHub.publishBatch` | Worker → Supervisor | `{project_id, records}` | `{acked_ids: [...]}` |
 
 ### 7.2 Notification（单向推送）
 
 | 方法 | 方向 | 说明 |
 |---|---|---|
-| `notify.externalEvent` | Supervisor → Worker | 推送外部消息，payload 包含 `sequence`, `event_type`, `payload`, `source`, `scope`, `target`。这是 best-effort notification；Worker 收到后先写 inbox，若写入失败（如磁盘满、DB 锁），消息仍可由 Supervisor 后端的持久化队列重试。 |
+| `notify.externalEvent` | Supervisor → Worker | 推送外部消息，payload 包含 `event_type`, `payload`, `source`, `scope`, `target`。这是 best-effort notification；Worker 收到后先写 inbox，若写入失败（如磁盘满、DB 锁），消息仍可由 Supervisor 后端的持久化队列重试。 |
 
 ### 7.3 通信时序示例
 
@@ -423,7 +392,7 @@ class Channel(ABC):
 ### 8.1 Worker 崩溃 / 重启
 
 1. `messagebox.db` 完整保留在 Project 目录中。
-2. Worker 重启后启动 `MessageHub`，`InboxProcessor` 从 `last_sequence` 继续消费 inbox 积压。
+2. Worker 重启后启动 `MessageHub`，`InboxProcessor` 扫描 `processed_at IS NULL` 的 inbox 记录继续消费。
 3. `OutboxProcessor` 从 outbox 中恢复未发送的消息，通过 Channel 继续发送。
 
 ### 8.2 Channel 断连（RabbitMQ 或 WebSocket）
@@ -450,9 +419,9 @@ class Channel(ABC):
 
 ### 9.1 单元测试
 
-- `MessageStore`：序列号单调性、幂等、事务边界。
+- `MessageStore`：inbox/outbox 读写、事务边界。
 - `MessageHub`：`external: true` 事件写 outbox，普通事件不写；`publish(..., persist=False)` 不写 outbox。
-- `InboxProcessor`：顺序消费、幂等（跳过已处理 sequence）、断点续传。
+- `InboxProcessor`：扫描 `processed_at IS NULL`、注入 EventBus、幂等性由业务保证。
 - `OutboxProcessor`：批量发送、失败重试、ack 删除。
 - `RabbitMQChannel`：publish/consume 基础行为。
 - `SupervisorChannel`：WebSocket 断连重试、JSON-RPC 调用封装。
