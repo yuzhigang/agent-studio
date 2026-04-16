@@ -1,29 +1,30 @@
 # MessageHub 外部消息统一网关设计文档
 
-> 版本：v1.0  
+> 版本：v2.0  
 > 日期：2026-04-16
 
 ---
 
 ## 1. 背景与目标
 
-当前 `agent-studio` 的 `EventBus` 负责 instance 之间的内部事件分发，但外部事件（来自 RabbitMQ、MQTT 等）的接入和 instance 产生的事件向外部系统的发送缺乏统一的抽象层。
+当前 `agent-studio` 的 `EventBus` 负责 instance 之间的内部事件分发，但外部事件（来自 RabbitMQ、MQTT 等）的接入以及 instance 产生的事件向外部系统的发送缺乏统一的抽象层。
 
 本设计目标：
 
-1. 建立一个统一的**外部消息网关（MessageHub）**，负责所有"跨边界"消息的可靠收发。
-2. 保留现有 `EventBus` 处理纯内部事件，两者通过清晰接口解耦。
-3. 为 Runtime 进程崩溃/重启场景提供消息持久化保障，不依赖特定 MQ 的重试机制。
-4. 第一批实现支持 **RabbitMQ**，其他协议通过 Adapter 接口预留扩展。
+1. 为每个 Worker 进程建立统一的 **MessageHub**，负责所有"跨边界"消息的可靠收发与本地持久化。
+2. Worker 不感知 MessageHub 的底层细节：业务代码只调用 `message_hub.publish()`，与内部事件完全一致的语义。
+3. 通过可插拔的 **Channel** 适配不同的部署环境（直连 RabbitMQ、Supervisor 中继等）。
+4. 第一批实现支持 **RabbitMQ Channel** 和 **Supervisor Channel**（JSON-RPC over WebSocket），其他协议通过 Channel 接口预留扩展。
 
 ---
 
 ## 2. 核心设计原则
 
-- **Runtime 不知道 MessageHub**：业务代码和 behavior 脚本只调用 `EventRouter.publish()`，与从前完全一致。
-- **MessageHub 不执行业务逻辑**：它只负责消息的可靠收发，不运行 behavior。
-- **`messagebox.db` 独立存储**：每个 Project 拥有独立的 `messagebox.db`，与 `runtime.db` 解耦，由 Supervisor（MessageHub）和 Runtime 分别访问，不受 `.lock` 文件锁影响。
-- **Push + Inbox 兜底**：Runtime 在线时消息实时推送；断连/崩溃时消息安全积压在 inbox，重连后通过 `syncInbox` 恢复。
+- **Worker 独立拥有 MessageHub**：每个 `agent-studio run` 进程自带 `MessageHub`、本地 `messagebox.db`、InboxProcessor 和 OutboxProcessor。Worker 崩溃/重启不影响其他 Worker。
+- **Channel 可插拔**：Worker 通过配置决定消息走哪个 Channel。可以是直连 RabbitMQ，也可以是通过 Supervisor 中转。
+- **Supervisor 只做中继（SupervisorChannel 模式下）**：Supervisor 本身不持有 `messagebox.db`，只负责把 Worker 的 JSON-RPC 消息桥接到外部系统（如浏览器、RabbitMQ）。
+- **统一入口**：`MessageHub` 是 Worker 内唯一的事件入口，封装了 `EventBus.publish()`、`EventLogStore.append()` 和 `MessageStore.outbox_enqueue()`。
+- **消息先落盘，后处理/发送**：外部消息进入后先写 `inbox`；需要外发的消息先写 `outbox`。Channel 断连时消息安全积压在本地 DB，恢复后自动续传。
 
 ---
 
@@ -31,57 +32,55 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Supervisor Process                                │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐     │
-│  │  HTTP API       │    │    MessageHub   │◄──►│  RabbitMQ Adapter   │     │
-│  │  (mgmt plane)   │    │                 │    │  (extensible)       │     │
-│  └────────┬────────┘    │  - inbox/outbox │    └─────────────────────┘     │
-│           │             │  - push/sync    │                                │
-│           ▼             │  - adapter mgmt │                                │
-│  ┌─────────────────┐    └────────┬────────┘                                │
-│  │  WebSocket GW   │             │                                         │
-│  │  (clients)      │             │                                         │
-│  └─────────────────┘             ▼                                         │
-│                        ┌─────────────────┐                                 │
-│                        │ messagebox.db   │  (per project, independent)    │
-│                        │  - inbox table  │                                │
-│                        │  - outbox table │                                │
-│                        └─────────────────┘                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-              ▲                              │
-              │ WebSocket JSON-RPC           │ WebSocket JSON-RPC
-              │                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         ProjectRuntime Process                              │
+│                           Worker Process                                    │
 │                                                                             │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐     │
-│  │  EventRouter    │───►│    EventBus     │◄──►│  InstanceManager    │     │
-│  │  (publish入口)   │    │  (内部订阅分发)  │    │  (instance行为执行)  │     │
-│  │                 │    └─────────────────┘    └─────────────────────┘     │
-│  │  - 写 event log │                                                        │
-│  │  - 写 outbox    │◄────────────────────────────────────────────┐         │
-│  │  - 内部 publish  │                                            │         │
-│  └─────────────────┘                                            │         │
-│           ▲                                                     │         │
-│           │ periodic sync / push                                │         │
-│  ┌─────────────────┐                                            │         │
-│  │ OutboxProcessor │────────────────────────────────────────────┘         │
-│  │  (轻量线程)      │     扫描 outbox → 批量 RPC 到 MessageHub → 收到 ack 删除│
-│  └─────────────────┘                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                          MessageHub                                 │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐   │   │
+│  │  │                      EventBus (内部)                         │   │   │
+│  │  │              纯内部订阅分发，供 InstanceManager 使用          │   │   │
+│  │  └─────────────────────────────────────────────────────────────┘   │   │
+│  │                                                                     │   │
+│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐    │   │
+│  │  │  messagebox.db  │◄──►│ InboxProcessor  │    │ OutboxProc  │◄──┤   │
+│  │  │  - inbox        │    │  读取 inbox     │    │ 读取 outbox │   │   │
+│  │  │  - outbox       │    │  注入 EventBus  │    │ 调用 Channel│   │   │
+│  │  │  - sequences    │    │                 │    │             │   │   │
+│  │  └─────────────────┘    └─────────────────┘    └──────┬──────┘    │   │
+│  │                                                        │          │   │
+│  │  ┌─────────────────────────────────────────────────────▼─────┐    │   │
+│  │  │                        Channel                              │    │   │
+│  │  │  ┌─────────────────┐      ┌─────────────────────────┐    │    │   │
+│  │  │  │ RabbitMQChannel │      │    SupervisorChannel    │    │    │   │
+│  │  │  │ 直连 RabbitMQ   │      │  WebSocket JSON-RPC     │    │    │   │
+│  │  │  └─────────────────┘      │  到 Supervisor          │    │    │   │
+│  │  │                           └─────────────────────────┘    │    │   │
+│  │  └──────────────────────────────────────────────────────────┘    │   │
+│  │                                                                     │   │
+│  │  publish() ──► EventBus + EventLog + outbox                         │   │
+│  │  register() ──► 代理给 EventBus                                     │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
-│  ┌─────────────────┐                                                       │
-│  │ InboxProcessor  │     处理 MessageHub push 或 sync 拉取的消息           │
-│  │                 │     调用 EventRouter.publish() 注入内部 EventBus      │
-│  └─────────────────┘                                                       │
+│  ┌─────────────────────┐                                                   │
+│  │  InstanceManager    │  调用 message_hub.register() / publish()         │
+│  └─────────────────────┘                                                   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
+                              │
+           RabbitMQChannel    │   SupervisorChannel
+               │              │          │
+               ▼              │          ▼
+        ┌────────────┐        │   ┌──────────────┐
+        │  RabbitMQ  │        │   │  Supervisor  │───► 浏览器 / 外部 RabbitMQ
+        └────────────┘        │   └──────────────┘
+                              │
 ```
 
 ---
 
 ## 4. 数据结构与存储 Schema
 
-### 4.1 `messagebox.db`（独立 SQLite）
+### 4.1 `messagebox.db`（独立 SQLite，每个 Worker 一份）
 
 ```sql
 -- 收件箱：外部消息进入后先落地
@@ -124,7 +123,7 @@ CREATE INDEX idx_outbox_sequence ON outbox(sequence);
 CREATE INDEX idx_outbox_published_at ON outbox(published_at, error_count);
 ```
 
-> **并发提示**：`messagebox.db` 由 Supervisor 和 Runtime 同时读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout，以避免写冲突。`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
+> **并发提示**：`messagebox.db` 由 InboxProcessor 和 OutboxProcessor 读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout：`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 
 ### 4.2 序列号生成逻辑
 
@@ -163,14 +162,13 @@ events:
 
 ### 5.2 `project.yaml`（部署配置）
 
-Project 部署层面配置"发到哪里"：
+Project 部署层面配置 Channel 类型和目标：
 
 ```yaml
 project_id: factory-01
-name: Factory 01
 config:
   message_hub:
-    adapter: rabbitmq
+    channel: rabbitmq
     rabbitmq:
       host: localhost
       port: 5672
@@ -178,27 +176,45 @@ config:
       routing_key: "#{event_type}"
 ```
 
-- Runtime 启动时读取 `message_hub` 配置，初始化 `OutboxProcessor`。
-- MessageHub 读取同一配置，启动 RabbitMQ Consumer 和 Producer。
+或 Supervisor 模式：
+
+```yaml
+project_id: factory-01
+config:
+  message_hub:
+    channel: supervisor
+    supervisor:
+      ws_url: "ws://localhost:8001/workers"
+```
+
+- Runtime 启动时读取 `message_hub.channel`，初始化对应的 Channel 实例。
+- `RabbitMQChannel` 直接连接 RabbitMQ；`SupervisorChannel` 通过现有 WebSocket JSON-RPC 与 Supervisor 通信。
 
 ---
 
 ## 6. 组件接口
 
-### 6.1 Runtime 侧：`EventRouter`
+### 6.1 `MessageHub`
 
-`EventRouter` 是 `EventBus` 的代理扩展层，接口保持与现有 `PersistentEventBus` 兼容：
+`MessageHub` 是 Worker 内唯一的事件入口和出口：
 
 ```python
-class EventRouter:
+class MessageHub:
     def __init__(
         self,
-        bus: EventBus,
+        event_bus: EventBus,
         event_log_store: EventLogStore | None,
         message_store: MessageStore,
+        channel: Channel,
         model_events: dict[str, dict],
     ):
-        ...
+        self._bus = event_bus
+        self._log_store = event_log_store
+        self._msg_store = message_store
+        self._channel = channel
+        self._model_events = model_events
+        self._inbox_processor = InboxProcessor(self)
+        self._outbox_processor = OutboxProcessor(self)
 
     def publish(
         self,
@@ -215,116 +231,126 @@ class EventRouter:
         # 2. 写审计日志
         if persist and self._log_store:
             self._log_store.append(...)
-        # 3. 外发到 outbox
+        # 3. 如果需要外发，写 outbox
         if self._is_external(event_type):
-            self._message_store.outbox_enqueue(...)
+            self._msg_store.outbox_enqueue(...)
+
+    def register(self, instance_id: str, scope: str, event_type: str, handler: callable):
+        """代理给 EventBus，供 InstanceManager 注册 behavior handler。"""
+        self._bus.register(instance_id, scope, event_type, handler)
+
+    def unregister(self, instance_id: str):
+        self._bus.unregister(instance_id)
+
+    def start(self) -> None:
+        """启动 Channel、InboxProcessor、OutboxProcessor。"""
+
+    def stop(self) -> None:
+        """优雅停止各处理器和 Channel。"""
+
+    def on_channel_message(
+        self, event_type: str, payload: dict, source: str, sequence: int,
+        scope: str = "project", target: str | None = None
+    ) -> None:
+        """Channel 收到外部消息后回调：先写 inbox，再可能被 InboxProcessor 消费。"""
+        self._msg_store.inbox_enqueue(
+            sequence=sequence,
+            event_type=event_type,
+            payload=payload,
+            source=source,
+            scope=scope,
+            target=target,
+        )
 ```
 
-### 6.2 Runtime 侧：`OutboxProcessor`
+### 6.2 `InboxProcessor`
 
-轻量守护线程，负责把 `outbox` 中的消息批量推送到 MessageHub：
+轻量守护线程，负责从 inbox 读取消息并注入内部 EventBus：
 
 ```python
-class OutboxProcessor:
-    def __init__(self, message_store: MessageStore, rpc_client: RuntimeRpcClient):
-        ...
+class InboxProcessor:
+    def __init__(self, message_hub: MessageHub):
+        self._hub = message_hub
+        self._last_sequence = 0
 
     def start(self) -> None: ...
     def stop(self) -> None: ...
 ```
 
 处理流程：
-1. 每 1s（可配置）扫描 `outbox` 表，读取未发送记录（`published_at IS NULL AND error_count < max_retries`）。
-2. 组装 `publishBatch` RPC 调用，发送到 MessageHub。
-3. 收到 ack 的 sequence 列表后，删除对应记录。
-4. 未 ack 的记录等待下次重试，错误计数递增。
-5. 超过 `max_retries`（默认 10 次）的记录不再自动重试，保留在 outbox 中供运维排查，或后续通过死信队列（DLQ）机制处理。
+1. 启动时从 `messagebox.db` 读取上次处理到的 `last_sequence`（或从 0 开始）。
+2. 每 1s（可配置）扫描 `inbox` 表，读取 `sequence > last_sequence` 的记录。
+3. 按 sequence 顺序调用 `MessageHub.publish(..., persist=False)` 注入内部 EventBus。
+4. 更新 `last_sequence`，标记消息为已交付。
+5. 幂等：若 `sequence <= last_sequence`，直接跳过。
 
-### 6.3 Runtime 侧：`InboxProcessor`
+> **注意**：`publish(..., persist=False)` 确保外部消息注入内部后**不会再次写入 outbox**，防止消息循环。
 
-处理来自 MessageHub 的外部事件推送：
+### 6.3 `OutboxProcessor`
+
+轻量守护线程，负责从 outbox 读取消息并通过 Channel 发送：
 
 ```python
-class InboxProcessor:
-    def __init__(self, event_router: EventRouter):
-        self._router = event_router
-        self._last_delivered_sequence = 0
+class OutboxProcessor:
+    def __init__(self, message_hub: MessageHub):
+        self._hub = message_hub
 
-    def on_external_event(
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+```
+
+处理流程：
+1. 每 1s（可配置）扫描 `outbox` 表，读取 `published_at IS NULL AND error_count < max_retries` 的记录。
+2. 调用 `Channel.send(event_type, payload, source, scope, target, sequence)` 发送。
+3. 收到 Channel 返回的成功 ack 后，删除对应记录（或标记 `published_at`）。
+4. 未 ack 的记录等待下次重试，错误计数递增。
+5. 超过 `max_retries`（默认 10 次）的记录不再自动重试，保留在 outbox 中供运维排查。
+
+### 6.4 `Channel` 抽象基类
+
+```python
+class Channel(ABC):
+    @abstractmethod
+    def start(self, inbound_callback: Callable[[str, dict, str, int, str, str | None], None]) -> None:
+        """
+        启动 Channel。
+        inbound_callback 签名：
+        (event_type, payload, source, sequence, scope, target) -> None
+        """
+        ...
+
+    @abstractmethod
+    def send(
         self,
         event_type: str,
         payload: dict,
         source: str,
+        scope: str,
+        target: str | None,
         sequence: int,
-        scope: str = "project",
-        target: str | None = None,
-    ):
-        if sequence <= self._last_delivered_sequence:
-            return  # 幂等：已处理过
-        self._router.publish(
-            event_type=event_type,
-            payload=payload,
-            source=source,
-            scope=scope,
-            target=target,
-            persist=False,  # 防止循环写入 outbox
-        )
-        self._last_delivered_sequence = sequence
-```
-
-### 6.4 Supervisor 侧：`MessageHub`
-
-Supervisor 进程内部模块，管理每个 Project 的消息收发：
-
-```python
-class MessageHub:
-    def __init__(self, base_dir: str, adapter_factory: AdapterFactory):
+    ) -> bool:
+        """发送单条消息，返回是否成功。"""
         ...
-
-    def register_project(self, project_id: str, config: dict) -> None:
-        """加载 messagebox.db，启动对应 adapter。"""
-
-    def unregister_project(self, project_id: str) -> None:
-        """关闭 adapter，释放资源。"""
-
-    def on_outbox_batch(
-        self, project_id: str, batch: list[OutboxRecord]
-    ) -> list[int]:
-        """Runtime 推送 outbox 批次，返回成功发送的 sequence 列表。"""
-
-    def sync_inbox(
-        self, project_id: str, last_sequence: int, limit: int
-    ) -> list[InboxRecord]:
-        """Runtime 拉取从 last_sequence 之后的 inbox 消息。"""
-```
-
-### 6.5 Adapter 抽象基类
-
-```python
-class MessageAdapter(ABC):
-    @abstractmethod
-    def start(
-        self,
-        inbound_callback: Callable[[str, dict, str, int], None],
-        config: dict,
-    ) -> None: ...
-
-    @abstractmethod
-    def publish(self, event_type: str, payload: dict, config: dict) -> bool: ...
 
     @abstractmethod
     def stop(self) -> None: ...
 ```
 
-- `inbound_callback` 的签名是 `(event_type, payload, source, sequence) -> None`。
-- `publish` 返回 `bool` 表示单条发送是否成功。在 `MessageHub.on_outbox_batch` 中，如果 `adapter.publish` 返回 `False`，则该批次中对应记录视为未 ack，由 `OutboxProcessor` 周期性重试。
+#### `RabbitMQChannel`
 
-- `RabbitMQAdapter` 作为第一个实现。
-- 未来可扩展 `MQTTAdapter`、`KafkaAdapter`、`WebhookAdapter` 等。
+- `start()`：启动 RabbitMQ Consumer，收到消息后回调 `inbound_callback`，并自行生成 `sequence`（或复用 RabbitMQ delivery tag）。
+- `send()`：调用 `basic_publish` 发送到 RabbitMQ exchange。
+- 断连时自动重连，inbound 消息由 RabbitMQ 队列持久化；outbound 消息由本地 outbox 缓存。
+
+#### `SupervisorChannel`
+
+- `start()`：建立 WebSocket 连接，注册 `notify.externalEvent` 处理器。收到 Supervisor 推送后回调 `inbound_callback`。
+- `send()`：通过 WebSocket JSON-RPC 发送 `messageHub.publishBatch` 或单条 `messageHub.publish` 请求，等待 ack。
+- 断连时 WebSocket 自动重连，inbound 消息由 Supervisor 侧的缓存队列（或 RabbitMQ）兜底；outbound 消息由本地 outbox 缓存。
 
 ---
 
-## 7. Runtime ↔ MessageHub 通信协议
+## 7. Runtime ↔ Supervisor 通信协议（SupervisorChannel 模式下）
 
 在现有 WebSocket JSON-RPC 2.0 通道上新增以下方法：
 
@@ -332,74 +358,64 @@ class MessageAdapter(ABC):
 
 | 方法 | 方向 | 参数 | 返回值 |
 |---|---|---|---|
-| `messageHub.publishBatch` | Runtime → MessageHub | `{project_id, records}` | `{acked_sequences: [...]}` |
-| `messageHub.syncInbox` | Runtime → MessageHub | `{project_id, last_sequence, limit}` | `{records: [...]}` |
+| `messageHub.publish` | Worker → Supervisor | `{project_id, sequence, event_type, payload, source, scope, target}` | `{acked: true}` |
+| `messageHub.publishBatch` | Worker → Supervisor | `{project_id, records}` | `{acked_sequences: [...]}` |
 
 ### 7.2 Notification（单向推送）
 
 | 方法 | 方向 | 说明 |
 |---|---|---|
-| `notify.externalEvent` | MessageHub → Runtime | 实时推送新到达的外部事件，payload 包含 `sequence`, `event_type`, `payload`, `source`, `scope`, `target` |
+| `notify.externalEvent` | Supervisor → Worker | 推送外部消息，payload 包含 `sequence`, `event_type`, `payload`, `source`, `scope`, `target` |
 
 ### 7.3 通信时序示例
 
-**正常在线场景（Push 模式）**：
+**SupervisorChannel 正常在线场景（Push 模式）**：
 
 ```
-RabbitMQ ──► MessageHub ──► inbox 表 ──► notify.externalEvent ──► Runtime InboxProcessor
-                                                              │
-                                                              ▼
-                                                    EventRouter.publish(..., persist=False)
+外部系统 ──► Supervisor ──► notify.externalEvent ──► Worker SupervisorChannel
+                                                       │
+                                                       ▼
+                                             MessageHub.on_channel_message
+                                                       │
+                                                       ▼
+                                               inbox 表（持久化）
+                                                       │
+                                                       ▼
+                                             InboxProcessor ──► EventBus
 ```
 
-**Runtime 离线后重连（Sync 兜底）**：
+**SupervisorChannel WebSocket 断连恢复**：
 
-```
-Runtime reconnect
-        │
-        ▼
-syncInbox(last_sequence=123)
-        │
-        ▼
-MessageHub 查询 inbox.sequence > 123
-        │
-        ▼
-返回积压消息 ──► Runtime 注入 EventBus
-        │
-        ▼
-后续恢复接收 notify.externalEvent
-```
+1. Worker 检测到 WebSocket 断开。
+2. OutboxProcessor 继续扫描 outbox，但 `send()` 返回 `False`，消息不删除。
+3. WebSocket 重连成功后，OutboxProcessor 自动恢复发送。
+4. Inbound 消息：Supervisor 在 Worker 离线期间可以缓存或让外部 MQ 重试；Worker 重连后继续接收 `notify.externalEvent`。
 
 ---
 
 ## 8. 错误处理与边界情况
 
-### 8.1 Runtime 崩溃 / 重启
+### 8.1 Worker 崩溃 / 重启
 
-1. RabbitMQ Consumer 不受影响，继续消费并写入 `inbox`。
-2. Runtime 重启后，先执行 `syncInbox(last_sequence)` 补齐离线期间消息。
-3. `OutboxProcessor` 扫描 `outbox` 未发送记录，继续推送。
+1. `messagebox.db` 完整保留在 Project 目录中。
+2. Worker 重启后启动 `MessageHub`，`InboxProcessor` 从 `last_sequence` 继续消费 inbox 积压。
+3. `OutboxProcessor` 从 outbox 中恢复未发送的消息，通过 Channel 继续发送。
 
-### 8.2 WebSocket 断连
+### 8.2 Channel 断连（RabbitMQ 或 WebSocket）
 
-- **Outbox**：`publishBatch` 失败时不删除记录，退避重试。
-- **Inbox**：`notify.externalEvent` 推送失败时消息留在 `inbox`，靠 `syncInbox` 恢复。
+- **Inbound**：Consumer 断开，消息由外部队列（RabbitMQ 或 Supervisor 缓存）兜底。Channel 恢复后继续消费。
+- **Outbound**：`send()` 失败时 outbox 记录不删除，`OutboxProcessor` 退避重试。
 
-### 8.3 RabbitMQ 不可用
+### 8.3 消息循环防护
 
-- **Inbound**：Consumer 自动重连，消息积压在 RabbitMQ 队列。
-- **Outbound**：`publishBatch` 中失败的记录不返回 ack，`OutboxProcessor` 周期性重试。
+`InboxProcessor` 调用 `MessageHub.publish(..., persist=False)`，确保外部事件注入内部后**不会再次写入 outbox**。
 
-### 8.4 消息循环防护
-
-`InboxProcessor` 调用 `EventRouter.publish(..., persist=False)`，确保外部事件注入内部后**不会再次写入 outbox**。
-
-### 8.5 预留错误码
+### 8.4 预留错误码
 
 | 错误码 | 含义 |
 |---|---|
-| `-32101` | `messageHub.publishBatch` adapter 发送失败 |
-| `-32102` | `messageHub.syncInbox` project 未注册到 MessageHub |
+| `-32101` | `messageHub.publish` / `publishBatch` 发送失败 |
+| `-32102` | `messageHub` 相关 RPC project 未注册 |
 | `-32103` | inbox 消息格式非法 |
 | `-32104` | outbox 消息超过最大重试次数 |
 
@@ -410,15 +426,18 @@ MessageHub 查询 inbox.sequence > 123
 ### 9.1 单元测试
 
 - `MessageStore`：序列号单调性、幂等、事务边界。
-- `EventRouter`：`external: true` 事件写 outbox，普通事件不写。
-- `OutboxProcessor`：批量推送、失败重试、ack 删除。
-- `RabbitMQAdapter`：publish/consume 基础行为。
+- `MessageHub`：`external: true` 事件写 outbox，普通事件不写；`publish(..., persist=False)` 不写 outbox。
+- `InboxProcessor`：顺序消费、幂等（跳过已处理 sequence）、断点续传。
+- `OutboxProcessor`：批量发送、失败重试、ack 删除。
+- `RabbitMQChannel`：publish/consume 基础行为。
+- `SupervisorChannel`：WebSocket 断连重试、JSON-RPC 调用封装。
 
 ### 9.2 集成测试
 
-- **崩溃恢复**：Runtime 退出期间 RabbitMQ 消息被 inbox 缓存，重启后 `syncInbox` 可恢复。
-- **断连恢复**：WebSocket 断开后 inbox 积压，重连后补齐。
-- **端到端**：Instance behavior 发布 `external: true` 事件，经 outbox → MessageHub → RabbitMQ，再从 RabbitMQ 消费另一条消息，经 inbox → EventBus → Instance behavior。
+- **Worker 崩溃恢复**：模拟进程退出，重启后验证 inbox/outbox 消息可恢复。
+- **Channel 断连恢复**：断开 RabbitMQ / WebSocket，验证消息不丢失，恢复后自动续传。
+- **端到端（RabbitMQChannel）**：Instance behavior 发布 `external: true` 事件，经 outbox → RabbitMQ → 另一条消息回 inbox → EventBus → Instance behavior。
+- **端到端（SupervisorChannel）**：验证 Supervisor 中转路径完整。
 
 ---
 
@@ -426,35 +445,40 @@ MessageHub 查询 inbox.sequence > 123
 
 | 文件 | 职责 |
 |---|---|
-| `src/runtime/event_router.py` | `EventRouter`：统一 publish 入口，代理 EventBus + 写日志 + 写 outbox |
-| `src/runtime/outbox_processor.py` | `OutboxProcessor`：扫描 outbox 并批量推送到 MessageHub |
-| `src/runtime/inbox_processor.py` | `InboxProcessor`：处理 MessageHub 推送的外部事件 |
-| `src/runtime/stores/message_store.py` | `MessageStore`：操作 `messagebox.db`（inbox/outbox/sequence） |
-| `src/runtime/adapters/base.py` | `MessageAdapter` 抽象基类 |
-| `src/runtime/adapters/rabbitmq_adapter.py` | `RabbitMQAdapter`：RabbitMQ 收发的第一个实现 |
-| `src/runtime/server/message_hub.py` | `MessageHub`：Supervisor 内置的消息网关核心 |
-| `tests/runtime/test_event_router.py` | EventRouter 单元测试 |
-| `tests/runtime/test_outbox_processor.py` | OutboxProcessor 单元测试 |
+| `src/runtime/message_hub.py` | `MessageHub`：Worker 内统一的事件入口和出口 |
+| `src/runtime/inbox_processor.py` | `InboxProcessor`：从 inbox 读取并注入 EventBus |
+| `src/runtime/outbox_processor.py` | `OutboxProcessor`：从 outbox 读取并通过 Channel 发送 |
+| `src/runtime/stores/message_store.py` | `MessageStore`：操作 `messagebox.db` |
+| `src/runtime/channels/base.py` | `Channel` 抽象基类 |
+| `src/runtime/channels/rabbitmq_channel.py` | `RabbitMQChannel`：直连 RabbitMQ |
+| `src/runtime/channels/supervisor_channel.py` | `SupervisorChannel`：通过 WebSocket JSON-RPC 与 Supervisor 通信 |
+| `src/runtime/server/supervisor_gateway.py` | Supervisor 侧接收 Worker `messageHub.publish` / `publishBatch` 并处理 `notify.externalEvent` 推送 |
+| `tests/runtime/test_message_hub.py` | MessageHub 单元测试 |
 | `tests/runtime/test_inbox_processor.py` | InboxProcessor 单元测试 |
+| `tests/runtime/test_outbox_processor.py` | OutboxProcessor 单元测试 |
 | `tests/runtime/stores/test_message_store.py` | MessageStore 单元测试 |
-| `tests/runtime/adapters/test_rabbitmq_adapter.py` | RabbitMQAdapter 单元测试 |
-| `tests/runtime/server/test_message_hub.py` | MessageHub 单元测试 |
+| `tests/runtime/channels/test_rabbitmq_channel.py` | RabbitMQChannel 单元测试 |
+| `tests/runtime/channels/test_supervisor_channel.py` | SupervisorChannel 单元测试 |
+| `tests/runtime/server/test_supervisor_gateway.py` | Supervisor 网关单元测试 |
 
 ---
 
 ## 11. 设计决策记录
 
-### 决策 1：MessageHub 内置在 Supervisor 中
-- **原因**：部署最简单，与现有 WebSocket JSON-RPC 架构天然契合。未来若负载成为瓶颈，可平滑拆分为独立进程。
+### 决策 1：MessageHub 下沉到每个 Worker
+- **原因**：保证 Worker 的独立性和故障隔离。一个 Worker 崩溃不会影响其他 Worker 的消息收发。每个 Worker 自己持有 `messagebox.db`，重启后可自给自足恢复。
 
-### 决策 2：`messagebox.db` 与 `runtime.db` 独立
-- **原因**：`.lock` 文件锁保证同一时间只有一个 Runtime 能打开 `runtime.db`。若 inbox/outbox 放在 `runtime.db` 中，Supervisor 的 MessageHub 将无法写入崩溃 Project 的消息。
+### 决策 2：MessageHub 与 EventRouter 合并
+- **原因**：Worker 内只需要一个统一的事件入口。业务代码和 `InstanceManager` 都面对同一个 `MessageHub` 对象，语义一致，减少概念负担。
 
-### 决策 3：Push 为主，Sync 兜底
-- **原因**：在线时延迟最低；断连/崩溃时通过 inbox 缓存和 sequence 同步保证可靠性。
+### 决策 3：Channel 可插拔
+- **原因**：不同部署环境需要不同的通信方式。边缘部署可以直接连 RabbitMQ；本地开发可以通过 Supervisor 中转。Channel 接口让两者共享同一套 MessageHub 逻辑。
 
-### 决策 4：Model 定义外发能力，`project.yaml` 定义外发目标
-- **原因**：模型是"这个事件能不能外发"的元数据声明，不受部署环境变化影响；`project.yaml` 是"发到哪个 RabbitMQ"的运维配置，随环境变化。
+### 决策 4：`messagebox.db` 与 `runtime.db` 独立
+- **原因**：即使 `.lock` 文件锁保护 `runtime.db`，`messagebox.db` 仍然可以被 Worker 自由读写，不受 Supervisor 或其他进程影响。
 
-### 决策 5：Runtime 不感知 MessageHub
-- **原因**：业务代码保持纯净，`publish` 语义不变。外发是基础设施层的自动行为，通过 `EventRouter` 和 `OutboxProcessor` 透明完成。
+### 决策 5：消息先落盘，后处理/发送
+- **原因**：Channel 断连或 Worker 意外退出时，未处理/未发送的消息安全保存在 SQLite 中。恢复后自动续传，不需要依赖 RabbitMQ 的重试机制。
+
+### 决策 6：Model 定义外发能力，`project.yaml` 定义 Channel 配置
+- **原因**：模型是"这个事件能不能外发"的元数据声明；`project.yaml` 是"走哪个 Channel、发到哪"的运维配置，两者解耦。
