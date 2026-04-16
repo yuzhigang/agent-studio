@@ -326,7 +326,11 @@ agent-studio supervisor \
 
 - `ProjectRegistry`、`InstanceManager`、`SceneManager`、`StateManager`、`SQLiteStore` 等核心代码**逻辑直接复用**，仅需在 `ProjectRegistry.load_project()` 和 `unload_project()` 中增加 `.lock` 文件锁的获取与释放逻辑。
 - `SandboxExecutor` 继续作为脚本安全层生效；进程级隔离提供额外的故障隔离层。
-- 新增模块主要集中在 CLI 入口、`runtime/locks/`（跨平台文件锁）和 `runtime/adapters/`（外部数据源适配器）。
+- 新增模块按职责拆分为四个顶层包：
+  - **`src/cli/`**：统一 CLI 入口。`main.py` 负责 argparse 分发，委托给 `src.supervisor.cli` 和 `src.worker.cli`。
+  - **`src/worker/`**：运行时进程外壳。包含 `cli/run_command.py`、`cli/run_inline.py`、`server/jsonrpc_ws.py`。负责把 `runtime` 组装成可独立运行的 OS 进程。
+  - **`src/runtime/`**：业务核心逻辑。包含 `event_bus.py`、`instance_manager.py`、`project_registry.py`、`state_manager.py`、`scene_manager.py`、`stores/`、`lib/` 等。不依赖任何上层包。
+  - **`src/supervisor/`**：管理平面逻辑。包含 `cli.py`、`gateway.py`、`server.py`。内部严禁导入 `worker` 或 `runtime` 的模块，仅通过 `shutil.which("agent-studio")` 调用 CLI 入口。
 
 ---
 
@@ -349,6 +353,10 @@ agent-studio supervisor \
 
 ### 决策 6：运行时排他锁
 - **原因**：多个 `ProjectRuntime` 进程（或同一个 `run-inline` 和另一个 `run`）并发打开同一个 `runtime.db` 会导致数据损坏。文件锁是最简单且跨平台生效的防御手段。
+
+### 决策 7：将 runtime 拆分为 worker（进程外壳）和 runtime（业务核心）
+- **原因**：`runtime` 一词身兼两义，导致包内同时存在"进程生命周期/网络协议"和"业务规则/数据模型"两类代码。把进程外壳提升为独立的 `worker` 包，能让"supervisor 管理 worker → worker 加载 runtime → runtime 执行业务逻辑"的依赖链成为显式的单向结构。
+- **收益**：语义清晰；`supervisor` 对 `runtime` 内部完全不可见；`worker` 的进程模型可独立演进。
 
 ---
 
