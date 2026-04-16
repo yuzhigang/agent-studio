@@ -14,15 +14,15 @@
 1. 为每个 Worker 进程建立统一的 **MessageHub**，负责所有"跨边界"消息的可靠收发与本地持久化。
 2. Worker 不感知 MessageHub 的底层细节：业务代码只调用 `message_hub.publish()`，与内部事件完全一致的语义。
 3. 通过可插拔的 **Channel** 适配不同的部署环境（直连 RabbitMQ、Supervisor 中继等）。
-4. 第一批实现支持 **RabbitMQ Channel** 和 **Supervisor Channel**（JSON-RPC over WebSocket），其他协议通过 Channel 接口预留扩展。
+4. 第一批实现支持 **RabbitMQ Channel** 和 **JSON-RPC Channel**（WebSocket JSON-RPC over Supervisor），其他协议通过 Channel 接口预留扩展。
 
 ---
 
 ## 2. 核心设计原则
 
 - **Worker 独立拥有 MessageHub**：每个 `agent-studio run` 进程自带 `MessageHub`、本地 `messagebox.db`、InboxProcessor 和 OutboxProcessor。Worker 崩溃/重启不影响其他 Worker。
-- **Channel 可插拔**：Worker 通过配置决定消息走哪个 Channel。可以是直连 RabbitMQ，也可以是通过 Supervisor 中转。
-- **Supervisor 只做中继（SupervisorChannel 模式下）**：Supervisor 本身不持有 `messagebox.db`，只负责把 Worker 的 JSON-RPC 消息桥接到外部系统（如浏览器、RabbitMQ）。
+- **Channel 可插拔**：Worker 通过配置决定消息走哪个 Channel。可以是直连 RabbitMQ，也可以是通过 Supervisor 的 JSON-RPC 通道中转。
+- **Supervisor 只做中继（JsonRpcChannel 模式下）**：Supervisor 本身不持有 `messagebox.db`，只负责把 Worker 的 JSON-RPC 消息桥接到外部系统（如浏览器、RabbitMQ）。
 - **统一入口**：`MessageHub` 是 Worker 内唯一的事件入口，封装了 `EventBus.publish()`、`EventLogStore.append()` 和 `MessageStore.outbox_enqueue()`。
 - **消息先落盘，后处理/发送**：外部消息进入后先写 `inbox`；需要外发的消息先写 `outbox`。Channel 断连时消息安全积压在本地 DB，恢复后自动续传。
 
@@ -50,9 +50,9 @@
 │  │  ┌─────────────────────────────────────────────────────▼─────┐    │   │
 │  │  │                        Channel                              │    │   │
 │  │  │  ┌─────────────────┐      ┌─────────────────────────┐    │    │   │
-│  │  │  │ RabbitMQChannel │      │    SupervisorChannel    │    │    │   │
+│  │  │  │ RabbitMQChannel │      │      JsonRpcChannel     │    │    │   │
 │  │  │  │ 直连 RabbitMQ   │      │  WebSocket JSON-RPC     │    │    │   │
-│  │  │  └─────────────────┘      │  到 Supervisor          │    │    │   │
+│  │  │  └─────────────────┘      │  via Supervisor         │    │    │   │
 │  │  │                           └─────────────────────────┘    │    │   │
 │  │  └──────────────────────────────────────────────────────────┘    │   │
 │  │                                                                     │   │
@@ -66,7 +66,7 @@
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                               │
-           RabbitMQChannel    │   SupervisorChannel
+           RabbitMQChannel    │   JsonRpcChannel
                │              │          │
                ▼              │          ▼
         ┌────────────┐        │   ┌──────────────┐
@@ -96,7 +96,7 @@ CREATE TABLE inbox (
 );
 
 -- acked_at 语义：对于需要手动 ack 的 Channel（如 RabbitMQChannel），表示已调用 Channel.ack() 回 ack 给外部 broker 的时间；
--- 对于自动 ack 的 Channel（如 SupervisorChannel），写入时即设置 acked_at = received_at。
+-- 对于自动 ack 的 Channel（如 JsonRpcChannel），写入时即设置 acked_at = received_at。
 
 -- 发件箱：需要外发的事件
 CREATE TABLE outbox (
@@ -174,7 +174,7 @@ config:
 ```
 
 - Runtime 启动时读取 `message_hub.channel`，初始化对应的 Channel 实例。
-- `RabbitMQChannel` 直接连接 RabbitMQ；`SupervisorChannel` 通过现有 WebSocket JSON-RPC 与 Supervisor 通信。
+- `RabbitMQChannel` 直接连接 RabbitMQ；`JsonRpcChannel` 通过现有 WebSocket JSON-RPC 与 Supervisor 通信。
 
 ---
 
@@ -336,7 +336,7 @@ class Channel(ABC):
 - `send()`：调用 `basic_publish` 发送到 RabbitMQ exchange。
 - 断连时自动重连，inbound 消息由 RabbitMQ 队列持久化；outbound 消息由本地 outbox 缓存。
 
-#### `SupervisorChannel`
+#### `JsonRpcChannel`
 
 - `start()`：建立 WebSocket 连接，注册 `notify.externalEvent` 处理器。收到 Supervisor 推送后回调 `inbound_callback`。
 - `send()`：通过 WebSocket JSON-RPC 发送 `messageHub.publishBatch` 或单条 `messageHub.publish` 请求，等待 ack。
@@ -344,7 +344,7 @@ class Channel(ABC):
 
 ---
 
-## 7. Runtime ↔ Supervisor 通信协议（SupervisorChannel 模式下）
+## 7. Runtime ↔ Supervisor 通信协议（JsonRpcChannel 模式下）
 
 在现有 WebSocket JSON-RPC 2.0 通道上新增以下方法：
 
@@ -363,10 +363,10 @@ class Channel(ABC):
 
 ### 7.3 通信时序示例
 
-**SupervisorChannel 正常在线场景（Push 模式）**：
+**JsonRpcChannel 正常在线场景（Push 模式）**：
 
 ```
-外部系统 ──► Supervisor ──► notify.externalEvent ──► Worker SupervisorChannel
+外部系统 ──► Supervisor ──► notify.externalEvent ──► Worker JsonRpcChannel
                                                        │
                                                        ▼
                                              MessageHub.on_channel_message
@@ -378,7 +378,7 @@ class Channel(ABC):
                                              InboxProcessor ──► EventBus
 ```
 
-**SupervisorChannel WebSocket 断连恢复**：
+**JsonRpcChannel WebSocket 断连恢复**：
 
 1. Worker 检测到 WebSocket 断开。
 2. OutboxProcessor 继续扫描 outbox，`send()` 返回 `SendResult.RETRYABLE`，消息不删除。
@@ -397,7 +397,7 @@ class Channel(ABC):
 
 ### 8.2 Channel 断连（RabbitMQ 或 WebSocket）
 
-- **Inbound**：Consumer 断开，消息由外部持久化队列（RabbitMQ）兜底。对于 `SupervisorChannel`，Supervisor 不做内存缓存，离线期间消息由 Supervisor 后端队列保存。Channel 恢复后继续消费。
+- **Inbound**：Consumer 断开，消息由外部持久化队列（RabbitMQ）兜底。对于 `JsonRpcChannel`，Supervisor 不做内存缓存，离线期间消息由 Supervisor 后端队列保存。Channel 恢复后继续消费。
 - **Outbound**：`send()` 返回 `RETRYABLE` 时 outbox 记录不删除，`OutboxProcessor` 按 `retry_after` 退避重试。
 
 ### 8.3 消息循环防护
@@ -424,14 +424,14 @@ class Channel(ABC):
 - `InboxProcessor`：扫描 `processed_at IS NULL`、注入 EventBus、幂等性由业务保证。
 - `OutboxProcessor`：批量发送、失败重试、ack 删除。
 - `RabbitMQChannel`：publish/consume 基础行为。
-- `SupervisorChannel`：WebSocket 断连重试、JSON-RPC 调用封装。
+- `JsonRpcChannel`：WebSocket 断连重试、JSON-RPC 调用封装。
 
 ### 9.2 集成测试
 
 - **Worker 崩溃恢复**：模拟进程退出，重启后验证 inbox/outbox 消息可恢复。
 - **Channel 断连恢复**：断开 RabbitMQ / WebSocket，验证消息不丢失，恢复后自动续传。
 - **端到端（RabbitMQChannel）**：Instance behavior 发布 `external: true` 事件，经 outbox → RabbitMQ → 另一条消息回 inbox → EventBus → Instance behavior。
-- **端到端（SupervisorChannel）**：验证 Supervisor 中转路径完整。
+- **端到端（JsonRpcChannel）**：验证 Supervisor 中转路径完整。
 
 ---
 
@@ -445,14 +445,14 @@ class Channel(ABC):
 | `src/runtime/stores/message_store.py` | `MessageStore`：操作 `messagebox.db` |
 | `src/runtime/channels/base.py` | `Channel` 抽象基类 |
 | `src/runtime/channels/rabbitmq_channel.py` | `RabbitMQChannel`：直连 RabbitMQ |
-| `src/runtime/channels/supervisor_channel.py` | `SupervisorChannel`：通过 WebSocket JSON-RPC 与 Supervisor 通信 |
+| `src/runtime/channels/jsonrpc_channel.py` | `JsonRpcChannel`：通过 WebSocket JSON-RPC 与 Supervisor 通信 |
 | `src/runtime/server/supervisor_gateway.py` | Supervisor 侧接收 Worker `messageHub.publish` / `publishBatch` 并处理 `notify.externalEvent` 推送 |
 | `tests/runtime/test_message_hub.py` | MessageHub 单元测试 |
 | `tests/runtime/test_inbox_processor.py` | InboxProcessor 单元测试 |
 | `tests/runtime/test_outbox_processor.py` | OutboxProcessor 单元测试 |
 | `tests/runtime/stores/test_message_store.py` | MessageStore 单元测试 |
 | `tests/runtime/channels/test_rabbitmq_channel.py` | RabbitMQChannel 单元测试 |
-| `tests/runtime/channels/test_supervisor_channel.py` | SupervisorChannel 单元测试 |
+| `tests/runtime/channels/test_jsonrpc_channel.py` | JsonRpcChannel 单元测试 |
 | `tests/runtime/server/test_supervisor_gateway.py` | Supervisor 网关单元测试 |
 
 ---
