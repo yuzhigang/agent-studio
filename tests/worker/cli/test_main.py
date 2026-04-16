@@ -4,7 +4,7 @@ import sys
 
 def test_cli_help():
     result = subprocess.run(
-        [sys.executable, "-m", "src.runtime.cli.main", "--help"],
+        [sys.executable, "-m", "src.cli.main", "--help"],
         capture_output=True,
         text=True,
     )

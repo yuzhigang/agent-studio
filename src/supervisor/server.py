@@ -25,7 +25,7 @@ def _build_runtime_cmd(project_dir: str, supervisor_ws: str) -> list[str]:
     return [
         sys.executable,
         "-m",
-        "src.runtime.cli.main",
+        "src.cli.main",
         "run",
         f"--project-dir={project_dir}",
         f"--supervisor-ws={supervisor_ws}",

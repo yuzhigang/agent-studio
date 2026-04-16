@@ -1,5 +1,5 @@
 import pytest
-from src.runtime.server.jsonrpc_ws import JsonRpcConnection
+from src.worker.server.jsonrpc_ws import JsonRpcConnection
 
 
 def test_parse_request():

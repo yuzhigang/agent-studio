@@ -1,7 +1,7 @@
 import os
 import tempfile
 from src.runtime.project_registry import ProjectRegistry
-from src.runtime.cli.run_command import _start_shared_scenes, _graceful_shutdown
+from src.worker.cli.run_command import _start_shared_scenes, _graceful_shutdown
 
 
 def test_start_shared_scenes_restores_shared():

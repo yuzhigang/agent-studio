@@ -384,10 +384,11 @@ bus.register(instance_id, scope, event_type, handler)
 
 - `ProjectRegistry`、`InstanceManager`、`SceneManager`、`StateManager`、`SQLiteStore` 等核心代码**逻辑直接复用**，仅需在 `ProjectRegistry.load_project()` 和 `unload_project()` 中增加 `.lock` 文件锁的获取与释放逻辑。
 - `SandboxExecutor` 继续作为脚本安全层生效；进程级隔离提供额外的故障隔离层。
-- 新增模块按职责拆分为两个顶层包：
-  - **`src/runtime/`**：运行时逻辑。包含 `cli/main.py`（统一 CLI 入口）、`cli/run_command.py`、`cli/run_inline.py`、`locks/project_lock.py`（跨平台文件锁）、`server/jsonrpc_ws.py`（通用 JSON-RPC 协议层）。
-  - **`src/supervisor/`**：管理平面逻辑。包含 `cli.py`（supervisor 子命令执行）、`gateway.py`（运行时映射与状态广播）、`server.py`（aiohttp HTTP/WebSocket 服务）。
-  - `runtime/cli/main.py` 负责 argparse 统一分发，但 supervisor 的实际执行逻辑委托给 `src.supervisor.cli`，确保两边代码边界清晰。
+- 新增模块按职责拆分为四个顶层包：
+  - **`src/cli/`**：统一 CLI 入口。`main.py` 负责 argparse 分发，委托给 `src.supervisor.cli` 和 `src.worker.cli`。
+  - **`src/worker/`**：运行时进程外壳。包含 `cli/run_command.py`、`cli/run_inline.py`、`server/jsonrpc_ws.py`。负责把 `runtime` 组装成可独立运行的 OS 进程。
+  - **`src/runtime/`**：业务核心逻辑。包含 `event_bus.py`、`instance_manager.py`、`project_registry.py`、`state_manager.py`、`scene_manager.py`、`stores/`、`lib/` 等。不依赖任何上层包。
+  - **`src/supervisor/`**：管理平面逻辑。包含 `cli.py`、`gateway.py`、`server.py`。内部严禁导入 `worker` 或 `runtime` 的模块，仅通过 `shutil.which("agent-studio")` 调用 CLI 入口。
 - `InstanceManager._on_event` 已完成与 `SandboxExecutor` 的接线，支持 `runScript` 和 `triggerEvent` 两种 action；`_DictProxy` 实现了 behavior 脚本中对 `this.variables.xxx` 的属性级读写。
 
 ---
@@ -415,10 +416,14 @@ bus.register(instance_id, scope, event_type, handler)
 ### 决策 7：EventBus 作为业务逻辑的唯一驱动源
 - **原因**：实例的 behavior 统一通过 EventBus 事件触发，可以使实时运行、状态恢复（事件重放）、分布式通知使用同一套语义。所有外部数据变化（OPC-UA / MQTT / REST）都转化为事件发布到 EventBus，再由 `_on_event` 驱动 behavior 执行，避免多入口导致的逻辑分叉。
 
-### 决策 8：脚本错误静默捕获
+### 决策 8：将 runtime 拆分为 worker（进程外壳）和 runtime（业务核心）
+- **原因**：`runtime` 一词身兼两义，导致包内同时存在"进程生命周期/网络协议"和"业务规则/数据模型"两类代码。把进程外壳提升为独立的 `worker` 包，能让"supervisor 管理 worker → worker 加载 runtime → runtime 执行业务逻辑"的依赖链成为显式的单向结构。
+- **收益**：语义清晰；`supervisor` 对 `runtime` 内部完全不可见；`worker` 的进程模型可独立演进。
+
+### 决策 9：脚本错误静默捕获
 - **原因**：`SandboxExecutor` 执行 behavior 脚本时可能因用户代码错误抛出异常。若将异常向上冒泡，会导致整个 EventBus 的 `publish` 中断，进而影响同 Project 内其他实例的事件处理。静默捕获并忽略脚本错误，是以"隔离故障"换取"系统整体可用性"的务实选择。
 
-### 决策 9：`_DictProxy` 属性代理
+### 决策 10：`_DictProxy` 属性代理
 - **原因**：Python dataclass 的字段存储在 `__dict__` 中，但 `Instance.variables` 等本身是嵌套 dict。Behavior 脚本习惯写成 `this.variables.steelAmount = 180` 而不是 `this.variables['steelAmount'] = 180`。`_DictProxy` 在不改变 `Instance` 数据结构的前提下，为沙箱上下文提供了属性级读写的自然语法，同时保证写操作穿透回原始 dict。
 
 ## 12. 已实现与后续待设计事项
