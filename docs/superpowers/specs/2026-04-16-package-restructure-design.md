@@ -122,6 +122,8 @@ src/runtime ──╳ 不依赖任何人
 - 第 10 节 "与现有代码的兼容性"：将包结构描述从 `src/runtime/` + `src/supervisor/` 更新为 `src/cli/` + `src/worker/` + `src/runtime/` + `src/supervisor/`。
 - 新增一条设计决策记录：解释为什么要从 `runtime` 中拆出 `worker` 层。
 
+> **时序建议**：先完成本 spec 指导的代码迁移与测试验证，在所有 import 路径和测试通过后再一次性回写 `2026-04-16-project-runtime-worker-design.md`，避免两份文档频繁交叉修改导致不一致。
+
 ## 7. 新增设计决策
 
 ### 决策：将 runtime 拆分为 worker（进程外壳）和 runtime（业务核心）
