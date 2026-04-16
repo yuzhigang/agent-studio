@@ -56,7 +56,7 @@ def main(argv=None):
 
 
 def _run_command(args):
-    from src.runtime.cli.run_command import run_project
+    from src.worker.cli.run_command import run_project
     return run_project(
         project_dir=args.project_dir,
         supervisor_ws=args.supervisor_ws,
@@ -66,17 +66,13 @@ def _run_command(args):
 
 
 def _run_inline_command(args):
-    from src.runtime.cli.run_inline import run_inline
+    from src.worker.cli.run_inline import run_inline
     return run_inline(project_dirs=args.project_dir)
 
 
 def _supervisor_command(args):
-    from src.runtime.cli.supervisor_command import run_supervisor
-    return run_supervisor(
-        base_dir=args.base_dir,
-        ws_port=args.ws_port,
-        http_port=args.http_port,
-    )
+    from src.supervisor.cli import supervisor_main
+    return supervisor_main(args)
 
 
 if __name__ == "__main__":
