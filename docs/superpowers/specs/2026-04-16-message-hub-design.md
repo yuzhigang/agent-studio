@@ -97,6 +97,9 @@ CREATE TABLE inbox (
     acked_at TEXT
 );
 
+-- acked_at 语义：对于需要手动 ack 的 Channel（如 RabbitMQChannel），表示已调用 Channel.ack() 回 ack 给外部 broker 的时间；
+-- 对于自动 ack 的 Channel（如 SupervisorChannel），写入时即设置 acked_at = received_at。
+
 -- 发件箱：需要外发的事件
 CREATE TABLE outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,7 +111,9 @@ CREATE TABLE outbox (
     target TEXT,
     created_at TEXT NOT NULL,
     published_at TEXT,
-    error_count INTEGER DEFAULT 0
+    error_count INTEGER DEFAULT 0,
+    retry_after TEXT,
+    last_error TEXT
 );
 
 -- 序列号管理
@@ -117,13 +122,19 @@ CREATE TABLE sequences (
     value INTEGER DEFAULT 0
 );
 
+-- 处理器状态：InboxProcessor / OutboxProcessor 的游标和配置
+CREATE TABLE processor_state (
+    processor TEXT PRIMARY KEY,
+    last_sequence INTEGER NOT NULL DEFAULT 0
+);
+
 -- 查询优化索引
 CREATE INDEX idx_inbox_sequence ON inbox(sequence);
 CREATE INDEX idx_outbox_sequence ON outbox(sequence);
 CREATE INDEX idx_outbox_published_at ON outbox(published_at, error_count);
 ```
 
-> **并发提示**：`messagebox.db` 由 InboxProcessor 和 OutboxProcessor 读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout：`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
+> **路径与并发**：`messagebox.db` 默认位于 `<project_dir>/messagebox.db`，与 `runtime.db` 同目录但独立文件。它由本 Worker 内的 InboxProcessor 和 OutboxProcessor 读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout：`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 
 ### 4.2 序列号生成逻辑
 
@@ -139,8 +150,10 @@ def next_sequence(name: str) -> int:
         return cursor.fetchone()[0]
 ```
 
-- `inbox` 和 `outbox` 使用独立的序列号空间（`name = 'inbox'` / `'outbox'`）。
-- 序列号单调递增，是幂等和断点续传的核心依据。
+- `inbox` 和 `outbox` 使用独立的序列号空间。
+- **`RabbitMQChannel`** 使用 `name = 'inbox_rabbitmq'` 生成自己的单调序列号，**不使用 RabbitMQ delivery tag**（delivery tag 会随重连重置，无法保证唯一性）。
+- **`SupervisorChannel`** 的 `sequence` 由 Supervisor 在推送 `notify.externalEvent` 时生成并分配，Worker 直接透传使用，确保 Supervisor 侧缓存有序。
+- 序列号在 **单个 Worker 的 `messagebox.db` 范围内** 单调递增，用于本地幂等和断点续传。
 
 ---
 
@@ -231,8 +244,9 @@ class MessageHub:
         # 2. 写审计日志
         if persist and self._log_store:
             self._log_store.append(...)
-        # 3. 如果需要外发，写 outbox
-        if self._is_external(event_type):
+        # 3. 如果需要外发且 persist=True，写 outbox
+        #    persist=False 时跳过 outbox，防止消息循环（InboxProcessor 注入外部事件时使用）
+        if persist and self._is_external(event_type):
             self._msg_store.outbox_enqueue(...)
 
     def register(self, instance_id: str, scope: str, event_type: str, handler: callable):
@@ -247,6 +261,9 @@ class MessageHub:
 
     def stop(self) -> None:
         """优雅停止各处理器和 Channel。"""
+
+    def is_ready(self) -> bool:
+        """返回 Channel 是否已连接并可正常工作，供 Runtime 生命周期判断实例启动时机。"""
 
     def on_channel_message(
         self, event_type: str, payload: dict, source: str, sequence: int,
@@ -278,10 +295,10 @@ class InboxProcessor:
 ```
 
 处理流程：
-1. 启动时从 `messagebox.db` 读取上次处理到的 `last_sequence`（或从 0 开始）。
+1. 启动时从 `processor_state` 表读取 `InboxProcessor` 上次处理到的 `last_sequence`（不存在则从 0 开始）。
 2. 每 1s（可配置）扫描 `inbox` 表，读取 `sequence > last_sequence` 的记录。
 3. 按 sequence 顺序调用 `MessageHub.publish(..., persist=False)` 注入内部 EventBus。
-4. 更新 `last_sequence`，标记消息为已交付。
+4. 更新 `last_sequence` 并写回 `processor_state` 表，标记消息为已交付（可同步更新 `inbox.delivered_at`）。
 5. 幂等：若 `sequence <= last_sequence`，直接跳过。
 
 > **注意**：`publish(..., persist=False)` 确保外部消息注入内部后**不会再次写入 outbox**，防止消息循环。
@@ -300,15 +317,23 @@ class OutboxProcessor:
 ```
 
 处理流程：
-1. 每 1s（可配置）扫描 `outbox` 表，读取 `published_at IS NULL AND error_count < max_retries` 的记录。
+1. 每 1s（可配置）扫描 `outbox` 表，读取 `published_at IS NULL AND error_count < max_retries AND (retry_after IS NULL OR retry_after <= now)` 的记录。
 2. 调用 `Channel.send(event_type, payload, source, scope, target, sequence)` 发送。
-3. 收到 Channel 返回的成功 ack 后，删除对应记录（或标记 `published_at`）。
-4. 未 ack 的记录等待下次重试，错误计数递增。
-5. 超过 `max_retries`（默认 10 次）的记录不再自动重试，保留在 outbox 中供运维排查。
+3. `SendResult.SUCCESS`：删除对应记录（或标记 `published_at`）。
+4. `SendResult.RETRYABLE`：递增 `error_count`，更新 `retry_after` 为退避后的时间（如指数退避：2^error_count 秒，最大 30s），更新 `last_error`。
+5. `SendResult.PERMANENT`：立即停止重试，标记 `error_count = max_retries` 并记录 `last_error`，保留在 outbox 中供运维排查（或后续移入死信队列）。
+6. 超过 `max_retries`（默认 10 次）的记录不再自动重试。
 
 ### 6.4 `Channel` 抽象基类
 
 ```python
+from enum import Enum
+
+class SendResult(Enum):
+    SUCCESS = "success"
+    RETRYABLE = "retryable"
+    PERMANENT = "permanent"
+
 class Channel(ABC):
     @abstractmethod
     def start(self, inbound_callback: Callable[[str, dict, str, int, str, str | None], None]) -> None:
@@ -328,8 +353,8 @@ class Channel(ABC):
         scope: str,
         target: str | None,
         sequence: int,
-    ) -> bool:
-        """发送单条消息，返回是否成功。"""
+    ) -> SendResult:
+        """发送单条消息，返回发送结果。"""
         ...
 
     @abstractmethod
@@ -338,7 +363,7 @@ class Channel(ABC):
 
 #### `RabbitMQChannel`
 
-- `start()`：启动 RabbitMQ Consumer，收到消息后回调 `inbound_callback`，并自行生成 `sequence`（或复用 RabbitMQ delivery tag）。
+- `start()`：启动 RabbitMQ Consumer，收到消息后回调 `inbound_callback`，并使用 `sequences` 表（`name = 'inbox_rabbitmq'`）生成单调递增的 `sequence`。不使用 RabbitMQ delivery tag，因为 delivery tag 会在重连后重置。
 - `send()`：调用 `basic_publish` 发送到 RabbitMQ exchange。
 - 断连时自动重连，inbound 消息由 RabbitMQ 队列持久化；outbound 消息由本地 outbox 缓存。
 
@@ -346,7 +371,7 @@ class Channel(ABC):
 
 - `start()`：建立 WebSocket 连接，注册 `notify.externalEvent` 处理器。收到 Supervisor 推送后回调 `inbound_callback`。
 - `send()`：通过 WebSocket JSON-RPC 发送 `messageHub.publishBatch` 或单条 `messageHub.publish` 请求，等待 ack。
-- 断连时 WebSocket 自动重连，inbound 消息由 Supervisor 侧的缓存队列（或 RabbitMQ）兜底；outbound 消息由本地 outbox 缓存。
+- 断连时 WebSocket 自动重连，outbound 消息由本地 outbox 缓存。inbound 消息不依赖 Supervisor 内存缓存——Supervisor 只做无状态桥接，Worker 离线期间消息由 Supervisor 后端的 RabbitMQ（或其他持久化队列）保存，Worker 重连后继续消费。
 
 ---
 
@@ -365,7 +390,7 @@ class Channel(ABC):
 
 | 方法 | 方向 | 说明 |
 |---|---|---|
-| `notify.externalEvent` | Supervisor → Worker | 推送外部消息，payload 包含 `sequence`, `event_type`, `payload`, `source`, `scope`, `target` |
+| `notify.externalEvent` | Supervisor → Worker | 推送外部消息，payload 包含 `sequence`, `event_type`, `payload`, `source`, `scope`, `target`。这是 best-effort notification；Worker 收到后先写 inbox，若写入失败（如磁盘满、DB 锁），消息仍可由 Supervisor 后端的持久化队列重试。 |
 
 ### 7.3 通信时序示例
 
@@ -387,9 +412,9 @@ class Channel(ABC):
 **SupervisorChannel WebSocket 断连恢复**：
 
 1. Worker 检测到 WebSocket 断开。
-2. OutboxProcessor 继续扫描 outbox，但 `send()` 返回 `False`，消息不删除。
+2. OutboxProcessor 继续扫描 outbox，`send()` 返回 `SendResult.RETRYABLE`，消息不删除。
 3. WebSocket 重连成功后，OutboxProcessor 自动恢复发送。
-4. Inbound 消息：Supervisor 在 Worker 离线期间可以缓存或让外部 MQ 重试；Worker 重连后继续接收 `notify.externalEvent`。
+4. Inbound 消息：Supervisor 不做内存缓存，Worker 离线期间消息由 Supervisor 后端的 RabbitMQ（或其他持久化队列）保存；Worker 重连后继续接收 `notify.externalEvent`。
 
 ---
 
@@ -403,8 +428,8 @@ class Channel(ABC):
 
 ### 8.2 Channel 断连（RabbitMQ 或 WebSocket）
 
-- **Inbound**：Consumer 断开，消息由外部队列（RabbitMQ 或 Supervisor 缓存）兜底。Channel 恢复后继续消费。
-- **Outbound**：`send()` 失败时 outbox 记录不删除，`OutboxProcessor` 退避重试。
+- **Inbound**：Consumer 断开，消息由外部持久化队列（RabbitMQ）兜底。对于 `SupervisorChannel`，Supervisor 不做内存缓存，离线期间消息由 Supervisor 后端队列保存。Channel 恢复后继续消费。
+- **Outbound**：`send()` 返回 `RETRYABLE` 时 outbox 记录不删除，`OutboxProcessor` 按 `retry_after` 退避重试。
 
 ### 8.3 消息循环防护
 
