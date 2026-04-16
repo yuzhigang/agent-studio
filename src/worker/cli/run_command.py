@@ -7,7 +7,7 @@ import threading
 import uuid
 
 from src.runtime.project_registry import ProjectRegistry
-from src.runtime.server.jsonrpc_ws import JsonRpcConnection, JsonRpcError
+from src.worker.server.jsonrpc_ws import JsonRpcConnection, JsonRpcError
 
 
 def run_project(project_dir, supervisor_ws=None, ws_port=None, force_stop_on_shutdown=None):
