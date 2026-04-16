@@ -413,6 +413,28 @@ class Channel(ABC):
 | `-32103` | inbox 消息格式非法 |
 | `-32104` | outbox 消息超过最大重试次数 |
 
+### 8.5 Inbox 与 EventLog 的职责分离
+
+在现有 `StateManager` 的恢复模型中，`event_log` 用于 instance 状态的事件溯源回放（checkpoint + replay）。引入 `inbox` 后，两者的职责必须严格区分，避免恢复时重复处理：
+
+| 存储 | 负责的消息类型 | 用途 |
+|---|---|---|
+| `inbox` | **外部消息**（来自 Channel） | 缓冲、崩溃恢复、断点续消费 |
+| `event_log` | **内部消息**（Instance behavior、Scene 等产生） | 审计、状态回放、调试 |
+
+具体边界：
+- **InboxProcessor** 调用 `MessageHub.publish(..., persist=False)` 注入外部事件。
+  - `persist=False` 意味着外部消息**不会**写入 `event_log`，也**不会**再次写入 `outbox`。
+- **内部业务代码**调用 `MessageHub.publish(..., persist=True)`（默认）。
+  - 内部消息正常写入 `event_log`，并在需要外发时写入 `outbox`。
+
+**Worker 重启后的恢复流程**：
+1. 加载 `instances` snapshot，恢复到上次 checkpoint 的基准状态。
+2. Replay `event_log`：只重放 checkpoint 之后的**内部事件**。
+3. InboxProcessor 扫描 `processed_at IS NULL`：继续消费崩溃前未处理完的**外部消息**。
+
+这两类消息互不重叠，因此不存在重复触发的问题。
+
 ---
 
 ## 9. 测试策略
