@@ -1,6 +1,7 @@
 import os
 import yaml
 
+from src.runtime.locks.project_lock import ProjectLock
 from src.runtime.stores.sqlite_store import SQLiteStore
 from src.runtime.event_bus import EventBusRegistry
 from src.runtime.instance_manager import InstanceManager
@@ -56,45 +57,55 @@ class ProjectRegistry:
         if not os.path.exists(yaml_path):
             raise ValueError(f"Project {project_id} has no project.yaml")
 
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            project_yaml = yaml.safe_load(f)
+        project_lock = ProjectLock(project_dir)
+        project_lock.acquire()
 
-        store = SQLiteStore(project_dir)
-        store.save_project(project_id, project_yaml.get("config", {}))
+        try:
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                project_yaml = yaml.safe_load(f)
 
-        bus_reg = EventBusRegistry()
-        im = InstanceManager(bus_reg, instance_store=store)
-        scene_mgr = SceneManager(im, bus_reg, scene_store=store)
-        metric_store = (
-            self._metric_store_factory(project_id)
-            if self._metric_store_factory
-            else None
-        )
-        state_mgr = StateManager(
-            im,
-            scene_mgr,
-            store,
-            store,
-            store,
-            metric_store=metric_store,
-        )
-        scene_mgr._state_manager = state_mgr
+            store = SQLiteStore(project_dir)
+            store.save_project(project_id, project_yaml.get("config", {}))
 
-        state_mgr.restore_project(project_id)
-        state_mgr.track_project(project_id)
+            bus_reg = EventBusRegistry()
+            im = InstanceManager(bus_reg, instance_store=store)
+            scene_mgr = SceneManager(im, bus_reg, scene_store=store)
+            metric_store = (
+                self._metric_store_factory(project_id)
+                if self._metric_store_factory
+                else None
+            )
+            state_mgr = StateManager(
+                im,
+                scene_mgr,
+                store,
+                store,
+                store,
+                metric_store=metric_store,
+            )
+            scene_mgr._state_manager = state_mgr
 
-        bundle = {
-            "project_id": project_id,
-            "project_yaml": project_yaml,
-            "store": store,
-            "event_bus_registry": bus_reg,
-            "instance_manager": im,
-            "scene_manager": scene_mgr,
-            "state_manager": state_mgr,
-            "metric_store": metric_store,
-        }
-        self._loaded[project_id] = bundle
-        return bundle
+            state_mgr.restore_project(project_id)
+            state_mgr.track_project(project_id)
+
+            bundle = {
+                "project_id": project_id,
+                "project_yaml": project_yaml,
+                "store": store,
+                "event_bus_registry": bus_reg,
+                "instance_manager": im,
+                "scene_manager": scene_mgr,
+                "state_manager": state_mgr,
+                "metric_store": metric_store,
+                "lock": project_lock,
+                "_registry": self,
+                "force_stop_on_shutdown": False,
+            }
+            self._loaded[project_id] = bundle
+            return bundle
+        except Exception:
+            project_lock.release()
+            raise
 
     def unload_project(self, project_id: str) -> bool:
         bundle = self._loaded.pop(project_id, None)
@@ -110,6 +121,9 @@ class ProjectRegistry:
 
         bus_reg = bundle["event_bus_registry"]
         bus_reg.destroy(project_id)
+
+        project_lock = bundle["lock"]
+        project_lock.release()
 
         return True
 

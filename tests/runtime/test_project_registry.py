@@ -1,6 +1,9 @@
 import os
+import subprocess
+import sys
 import pytest
 from src.runtime.project_registry import ProjectRegistry
+from src.runtime.locks.project_lock import LockAlreadyHeldError
 
 
 @pytest.fixture
@@ -69,3 +72,49 @@ def test_load_project_restores_instances(registry):
     inst = im2.get("proj-a", "ladle-001", scope="project")
     assert inst is not None
     assert inst.model_name == "ladle"
+
+
+def test_load_project_acquires_lock(registry):
+    registry.create_project("proj-a")
+    bundle = registry.load_project("proj-a")
+    assert bundle["lock"] is not None
+
+
+def test_double_load_same_process_returns_same_bundle(registry):
+    registry.create_project("proj-a")
+    bundle1 = registry.load_project("proj-a")
+    bundle2 = registry.load_project("proj-a")
+    assert bundle1 is bundle2
+
+
+def test_concurrent_load_from_different_process_raises(registry):
+    registry.create_project("proj-a")
+    registry.load_project("proj-a")
+
+    script = f"""
+import sys
+sys.path.insert(0, r"{os.getcwd()}")
+from src.runtime.project_registry import ProjectRegistry
+try:
+    reg = ProjectRegistry(base_dir=r"{registry._base_dir}")
+    reg.load_project("proj-a")
+    print("loaded")
+except Exception as e:
+    print(str(e))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert "already loaded" in result.stdout
+
+
+def test_unload_project_releases_lock(registry):
+    registry.create_project("proj-a")
+    registry.load_project("proj-a")
+    assert registry.unload_project("proj-a") is True
+    # should be able to load again after unload
+    bundle2 = registry.load_project("proj-a")
+    assert bundle2 is not None
+    registry.unload_project("proj-a")
