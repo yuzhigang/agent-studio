@@ -228,7 +228,7 @@ agent-studio-worker --project-dir=projects/steel-plant-01 \
 ### 7.2 启动顺序
 
 1. **解析 CLI 参数**：读取 `--project-dir`、`--supervisor-ws`（可选）。
-2. **连接 Supervisor WebSocket**（若提供）：发送 `notify.workerOnline`，携带 `project_id`。
+2. **连接 Supervisor WebSocket**（若提供）：发送 `notify.workerOnline`，携带 `project_id` 和 `session_id`。
 3. **获取运行时排他锁**：在 Project 目录下获取 `.lock` 文件锁，写入 `"runtime_type": "worker"`。若已被占用，立即退出并报错。
 4. **加载 Project**：调用 `ProjectRegistry.load_project(project_id)`。
 5. **恢复状态**：`StateManager.restore_project()` → 加载实例快照 + 重放事件日志。
@@ -248,6 +248,7 @@ agent-studio-worker --project-dir=projects/steel-plant-01 \
    - 以 `worker` 启动时，默认值为 `false`（保护正在运行的 isolated Scene，拒绝随意停止）。
    - 以 `interactive` 启动时，默认值为 `true`（允许卸载时强制停止 Scene）。
    - 可通过启动参数 `--force-stop-on-shutdown=true|false` 覆盖默认值。
+   - 该策略**不作为 Project 持久化配置**，属于纯粹的启动时行为参数。
 4. 禁用自动 checkpoint：先将 `project_id` 从 `StateManager` 的 `loaded_projects` 中移除，并获取 per-project 锁以确保后台线程不会并发执行 checkpoint。
 5. 停止 `shared` Scenes。
 6. 执行最终 checkpoint：`StateManager.checkpoint_project()`。
