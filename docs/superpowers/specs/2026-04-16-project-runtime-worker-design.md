@@ -189,7 +189,7 @@ agent-studio supervisor \
 - 是 Project 的"实时视图"，直接引用 Project 全局实例的内存状态。
 - `agent-studio run` 加载 Project 时，自动从 `scenes` 表恢复并启动所有 `shared` Scene。
 - Project 停止时，所有 `shared` Scene 必须先停止。
-- 对 `shared` Scene 调用 `scene.start` 或 `scene.stop` 应返回 JSON-RPC 错误：`{"code": -32602, "message": "shared scenes cannot be started/stopped independently"}`。
+- 对 `shared` Scene 调用 `scene.start` 或 `scene.stop` 应返回 JSON-RPC 错误：`{"code": -32003, "message": "shared scenes cannot be started/stopped independently"}`。
 
 ### 6.2 `isolated` Scene
 
@@ -235,7 +235,6 @@ agent-studio supervisor \
 | `-32002` | Scene 不存在 |
 | `-32003` | 非法的生命周期迁移 |
 | `-32004` | Project 未加载 |
-| `-32602` | 非法参数（如对 `shared` Scene 调用 `scene.start` / `scene.stop`） |
 
 ### 7.3 数据面通知（Notification / One-way）
 
@@ -276,12 +275,13 @@ agent-studio supervisor \
 7. **若提供了 `--ws-port`**：启动本地 WebSocket 服务器，暴露 JSON-RPC 接口。
 8. **若提供了 `--supervisor-ws`**：建立 WebSocket 连接，发送 `notify.runtimeOnline`。
 9. **进入主循环**：处理 RPC 请求、消费消息、发心跳。
+10. **WebSocket 断连处理**：若启动时指定了 `--supervisor-ws`，当检测到 WebSocket 意外断开且 15 秒内未能重连成功后，主动执行优雅停止（按 8.2 顺序）并退出进程，确保不会与新的 runtime 实例并发运行同一 Project。
 
 ### 8.2 优雅停止顺序
 
 1. 收到 `project.stop` RPC 或 **SIGTERM**。
 2. 停止外部适配器。
-3. 停止 `isolated` Scenes（受 `force_stop_on_shutdown` 策略控制，默认 `false`，可通过 `--force-stop-on-shutdown=true|false` 覆盖）。
+3. 停止 `isolated` Scenes（受 `force_stop_on_shutdown` 策略控制，默认 `false`，可通过 `--force-stop-on-shutdown=true|false` 覆盖）。若策略为 `false` 且存在拒绝停止的 Scene，优雅停止流程应**中止**：`project.stop` RPC 返回错误码 `-32003`；SIGTERM 处理函数记录日志后正常返回（不退出进程），由调用方决定是否升级为 SIGKILL。
 4. 停止 `shared` Scenes。
 5. 禁用自动 checkpoint：将 `project_id` 从 `StateManager.loaded_projects` 中移除，并获取 `StateManager` 内部的 per-project 内存锁（防止 auto-checkpoint 线程与显式 checkpoint/unload 竞态；注意这不是 `.lock` 文件锁）。
 6. 执行最终 checkpoint：`StateManager.checkpoint_project()`。
