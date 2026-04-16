@@ -53,6 +53,7 @@ agent-studio run --project-dir=projects/steel-plant-01 \
 - **进程模型**：当前进程**只加载一个 Project**。
 - **隔离级别**：**进程级隔离**。
 - **适用场景**：生产环境、数字孪生、边缘部署。
+- **参数约束**：`--project-dir` 在此子命令下只能出现**一次**。传入多次应报错。
 
 ### 3.2 `agent-studio run-inline` — 多 Project 内联模式
 
@@ -66,6 +67,7 @@ agent-studio run-inline \
 - **进程模型**：当前进程内加载多个 Project。
 - **隔离级别**：**线程/内存级隔离**（共享同一个 Python 进程）。
 - **适用场景**：开发调试、集成测试、本地快速验证。
+- **参数约束**：`--project-dir` 在此子命令下可出现**一次或多次**，每次指定一个 Project 目录。
 
 ### 3.3 `agent-studio supervisor` — 管理平面
 
@@ -110,7 +112,7 @@ agent-studio supervisor \
 ### 4.3 过期锁恢复
 
 - **Unix**：`fcntl.flock` 是进程绑定的建议锁，进程崩溃后锁自动释放。`.lock` 文件残留不会阻塞后续启动，启动时直接覆盖即可。
-- **Windows**：启动逻辑应读取锁文件中的 `pid`，检查该 PID 是否仍在运行。若 PID 已不存在，允许覆盖并获取锁；若仍在运行，则报错。
+- **Windows**：启动逻辑应读取锁文件中的 `pid`，检查该 PID 是否仍在运行。若 PID 已不存在，允许覆盖并获取锁；若仍在运行，则报错。为降低 PID 复用导致的误判风险，可补充进程启动时间比对等启发式校验，或直接使用 `filelock` / `fasteners` 等基于操作系统原语的库来避免手动 PID 检查。
 - **推荐实现**：封装跨平台 `ProjectLock` 工具类，优先使用 `fasteners` 或 `filelock` 等成熟库。
 
 ---
@@ -195,6 +197,7 @@ agent-studio supervisor \
 - 启动 `isolated` Scene 的前提条件：对应 Project 必须已被 `ProjectRuntime` 加载。
 - `isolated` Scene 的启停不影响 Project 本身。
 - 卸载 Project 时，必须先尝试停止所有运行中的 `isolated` Scene。若某 Scene 拒绝停止（受 `force_stop_on_shutdown` 策略控制），则卸载返回 `False` 并中止；若策略为强制停止，则先停止 Scene 再执行卸载。
+- `force_stop_on_shutdown` 默认值为 `false`（优先保护正在运行的仿真 Scene，避免误停）。可通过 CLI 参数 `--force-stop-on-shutdown=true|false` 覆盖，未来也可在 `project.yaml` 的 `config` 中声明持久化默认值。
 
 ---
 
@@ -224,6 +227,16 @@ agent-studio supervisor \
 | `state.subscribe` | 客户端订阅实时状态流 |
 | `state.unsubscribe` | 客户端取消订阅 |
 
+#### 保留错误码
+
+| 错误码 | 含义 |
+|---|---|
+| `-32001` | Project 已被其他 runtime 锁定 |
+| `-32002` | Scene 不存在 |
+| `-32003` | 非法的生命周期迁移 |
+| `-32004` | Project 未加载 |
+| `-32602` | 非法参数（如对 `shared` Scene 调用 `scene.start` / `scene.stop`） |
+
 ### 7.3 数据面通知（Notification / One-way）
 
 | 方法 | 方向 | 说明 |
@@ -238,7 +251,11 @@ agent-studio supervisor \
 
 ### 7.4 会话与重连
 
-每次 `agent-studio run` 启动时生成一个 `session_id`（UUID），并在 `notify.runtimeOnline` 中携带。Supervisor 用 `session_id` 区分新旧连接，收到新的 `runtimeOnline` 后应使旧连接的订阅失效，并向客户端发送 `notify.sessionReset`。
+每次 `agent-studio run` 启动时生成一个 `session_id`（UUID），并在 `notify.runtimeOnline` 中携带。Supervisor 用 `session_id` 区分新旧连接。当同一个 `project_id` 出现新的 `runtimeOnline` 时，Supervisor 必须：
+1. 关闭旧的 WebSocket 连接；
+2. 用新连接替换 `project_id → WebSocket` 映射；
+3. 向所有订阅该 Project 的客户端广播 `notify.sessionReset`。
+如果旧 runtime 仍然存活，它会检测到 WebSocket 断开并自行退出。被标记为 dead 的远程 runtime 若重新连回（携带新的 `session_id`），Supervisor 应视其为新注册，直接更新映射并广播 `notify.sessionReset`，无需人工干预。
 
 ### 7.5 批量合并
 
@@ -264,9 +281,9 @@ agent-studio supervisor \
 
 1. 收到 `project.stop` RPC 或 **SIGTERM**。
 2. 停止外部适配器。
-3. 停止 `isolated` Scenes（受 `force_stop_on_shutdown` 策略控制，默认 `false`，可通过 `--force-stop-on-shutdown` 覆盖）。
+3. 停止 `isolated` Scenes（受 `force_stop_on_shutdown` 策略控制，默认 `false`，可通过 `--force-stop-on-shutdown=true|false` 覆盖）。
 4. 停止 `shared` Scenes。
-5. 禁用自动 checkpoint（从 `StateManager.loaded_projects` 移除并获取 per-project 锁）。
+5. 禁用自动 checkpoint：将 `project_id` 从 `StateManager.loaded_projects` 中移除，并获取 `StateManager` 内部的 per-project 内存锁（防止 auto-checkpoint 线程与显式 checkpoint/unload 竞态；注意这不是 `.lock` 文件锁）。
 6. 执行最终 checkpoint：`StateManager.checkpoint_project()`。
 7. 卸载 Project：`ProjectRegistry.unload_project(project_id)`。
 8. 释放运行时排他锁并删除 `.lock` 文件。
@@ -278,6 +295,8 @@ agent-studio supervisor \
 1. 收到 SIGINT / SIGTERM。
 2. 对每个已加载的 Project，反向执行 8.2 的步骤 2-8。
 3. 进程退出。
+
+> **注意**：SIGTERM / SIGINT 作用于整个 `run-inline` 进程，会**无差别地停止所有已加载的 Project**；`run-inline` 模式下不存在按 Project 划分的信号级隔离。
 
 ---
 
@@ -305,7 +324,7 @@ agent-studio supervisor \
 
 ## 10. 与现有代码的兼容性
 
-- `ProjectRegistry`、`InstanceManager`、`SceneManager`、`StateManager`、`SQLiteStore` 等核心代码**直接复用**。
+- `ProjectRegistry`、`InstanceManager`、`SceneManager`、`StateManager`、`SQLiteStore` 等核心代码**逻辑直接复用**，仅需在 `ProjectRegistry.load_project()` 和 `unload_project()` 中增加 `.lock` 文件锁的获取与释放逻辑。
 - `SandboxExecutor` 继续作为脚本安全层生效；进程级隔离提供额外的故障隔离层。
 - 新增模块主要集中在 CLI 入口、`runtime/locks/`（跨平台文件锁）和 `runtime/adapters/`（外部数据源适配器）。
 
@@ -339,4 +358,4 @@ agent-studio supervisor \
 - `src/runtime/locks/` 跨平台文件锁实现（Windows / Linux）。
 - `src/runtime/adapters/` 的适配器基类与数据源配置 schema。
 - Supervisor 的 HTTP/WebSocket 网关接口与客户端 SDK 设计。
-- `notify.runtimeOnline` / `notify.runtimeOffline` 的状态机与自动重启策略。
+- Supervisor HTTP API 的 OpenAPI schema 设计。
