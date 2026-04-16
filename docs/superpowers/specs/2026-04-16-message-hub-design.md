@@ -91,6 +91,8 @@ CREATE TABLE inbox (
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     source TEXT,
+    scope TEXT DEFAULT 'project',
+    target TEXT,
     received_at TEXT NOT NULL,
     delivered_at TEXT,
     acked_at TEXT
@@ -115,7 +117,14 @@ CREATE TABLE sequences (
     name TEXT PRIMARY KEY,
     value INTEGER DEFAULT 0
 );
+
+-- 查询优化索引
+CREATE INDEX idx_inbox_sequence ON inbox(sequence);
+CREATE INDEX idx_outbox_sequence ON outbox(sequence);
+CREATE INDEX idx_outbox_published_at ON outbox(published_at, error_count);
 ```
+
+> **并发提示**：`messagebox.db` 由 Supervisor 和 Runtime 同时读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout，以避免写冲突。`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 
 ### 4.2 序列号生成逻辑
 
@@ -225,10 +234,11 @@ class OutboxProcessor:
 ```
 
 处理流程：
-1. 每 1s（可配置）扫描 `outbox` 表，读取未发送记录（`published_at IS NULL`）。
+1. 每 1s（可配置）扫描 `outbox` 表，读取未发送记录（`published_at IS NULL AND error_count < max_retries`）。
 2. 组装 `publishBatch` RPC 调用，发送到 MessageHub。
 3. 收到 ack 的 sequence 列表后，删除对应记录。
 4. 未 ack 的记录等待下次重试，错误计数递增。
+5. 超过 `max_retries`（默认 10 次）的记录不再自动重试，保留在 outbox 中供运维排查，或后续通过死信队列（DLQ）机制处理。
 
 ### 6.3 Runtime 侧：`InboxHandler`
 
@@ -240,14 +250,23 @@ class InboxHandler:
         self._router = event_router
         self._last_delivered_sequence = 0
 
-    def on_external_event(self, event_type: str, payload: dict, source: str, sequence: int):
+    def on_external_event(
+        self,
+        event_type: str,
+        payload: dict,
+        source: str,
+        sequence: int,
+        scope: str = "project",
+        target: str | None = None,
+    ):
         if sequence <= self._last_delivered_sequence:
             return  # 幂等：已处理过
         self._router.publish(
             event_type=event_type,
             payload=payload,
             source=source,
-            scope="project",
+            scope=scope,
+            target=target,
             persist=False,  # 防止循环写入 outbox
         )
         self._last_delivered_sequence = sequence
@@ -286,7 +305,7 @@ class MessageAdapter(ABC):
     @abstractmethod
     def start(
         self,
-        inbound_callback: Callable[[str, dict, str], None],
+        inbound_callback: Callable[[str, dict, str, int], None],
         config: dict,
     ) -> None: ...
 
@@ -296,6 +315,9 @@ class MessageAdapter(ABC):
     @abstractmethod
     def stop(self) -> None: ...
 ```
+
+- `inbound_callback` 的签名是 `(event_type, payload, source, sequence) -> None`。
+- `publish` 返回 `bool` 表示单条发送是否成功。在 `MessageHub.on_outbox_batch` 中，如果 `adapter.publish` 返回 `False`，则该批次中对应记录视为未 ack，由 `OutboxProcessor` 周期性重试。
 
 - `RabbitMQAdapter` 作为第一个实现。
 - 未来可扩展 `MQTTAdapter`、`KafkaAdapter`、`WebhookAdapter` 等。
@@ -317,7 +339,7 @@ class MessageAdapter(ABC):
 
 | 方法 | 方向 | 说明 |
 |---|---|---|
-| `notify.externalEvent` | MessageHub → Runtime | 实时推送新到达的外部事件 |
+| `notify.externalEvent` | MessageHub → Runtime | 实时推送新到达的外部事件，payload 包含 `sequence`, `event_type`, `payload`, `source`, `scope`, `target` |
 
 ### 7.3 通信时序示例
 
