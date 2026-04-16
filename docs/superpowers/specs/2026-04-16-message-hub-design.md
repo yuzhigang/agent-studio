@@ -459,23 +459,28 @@ class Channel(ABC):
 
 ## 10. 新增文件清单
 
+> **包结构约定**：根据项目包重塑设计（`2026-04-16-package-restructure-design.md`），新增文件按职责分布在三个顶层包中：
+> - `src/runtime/`：业务核心（MessageHub、Inbox/OutboxProcessor、MessageStore）
+> - `src/worker/`：进程外壳（Channel 实现、CLI、WebSocket Server）
+> - `src/supervisor/`：管理平面（Supervisor 网关）
+
 | 文件 | 职责 |
 |---|---|
 | `src/runtime/message_hub.py` | `MessageHub`：Worker 内统一的事件入口和出口 |
 | `src/runtime/inbox_processor.py` | `InboxProcessor`：从 inbox 读取并注入 EventBus |
 | `src/runtime/outbox_processor.py` | `OutboxProcessor`：从 outbox 读取并通过 Channel 发送 |
 | `src/runtime/stores/message_store.py` | `MessageStore`：操作 `messagebox.db` |
-| `src/runtime/channels/base.py` | `Channel` 抽象基类 |
-| `src/runtime/channels/rabbitmq_channel.py` | `RabbitMQChannel`：直连 RabbitMQ |
-| `src/runtime/channels/jsonrpc_channel.py` | `JsonRpcChannel`：通过 WebSocket JSON-RPC 与 Supervisor 通信 |
-| `src/runtime/server/supervisor_gateway.py` | Supervisor 侧接收 Worker `messageHub.publish` / `publishBatch` 并处理 `notify.externalEvent` 推送 |
+| `src/worker/channels/base.py` | `Channel` 抽象基类 |
+| `src/worker/channels/rabbitmq_channel.py` | `RabbitMQChannel`：直连 RabbitMQ |
+| `src/worker/channels/jsonrpc_channel.py` | `JsonRpcChannel`：通过 WebSocket JSON-RPC 与 Supervisor 通信 |
+| `src/supervisor/server/supervisor_gateway.py` | Supervisor 侧接收 Worker `messageHub.publish` / `publishBatch` 并处理 `notify.externalEvent` 推送 |
 | `tests/runtime/test_message_hub.py` | MessageHub 单元测试 |
 | `tests/runtime/test_inbox_processor.py` | InboxProcessor 单元测试 |
 | `tests/runtime/test_outbox_processor.py` | OutboxProcessor 单元测试 |
 | `tests/runtime/stores/test_message_store.py` | MessageStore 单元测试 |
-| `tests/runtime/channels/test_rabbitmq_channel.py` | RabbitMQChannel 单元测试 |
-| `tests/runtime/channels/test_jsonrpc_channel.py` | JsonRpcChannel 单元测试 |
-| `tests/runtime/server/test_supervisor_gateway.py` | Supervisor 网关单元测试 |
+| `tests/worker/channels/test_rabbitmq_channel.py` | RabbitMQChannel 单元测试 |
+| `tests/worker/channels/test_jsonrpc_channel.py` | JsonRpcChannel 单元测试 |
+| `tests/supervisor/server/test_supervisor_gateway.py` | Supervisor 网关单元测试 |
 
 ---
 
