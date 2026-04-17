@@ -14,12 +14,18 @@ def test_pre_publish_hook_called_on_publish():
 def test_remove_pre_publish_hook():
     bus = EventBus()
     calls = []
+    received = []
     def hook(event_type, payload, source, scope, target):
         calls.append(event_type)
+    def handler(event_type, payload, source):
+        received.append((event_type, payload, source))
     bus.add_pre_publish_hook(hook)
     bus.remove_pre_publish_hook(hook)
+    bus.register("inst-1", "project", "test.event", handler)
     bus.publish("test.event", {}, "src-1", "project")
     assert len(calls) == 0
+    assert len(received) == 1
+    assert received[0] == ("test.event", {}, "src-1")
 
 def test_publish_delivers_to_subscriber():
     bus = EventBus()
