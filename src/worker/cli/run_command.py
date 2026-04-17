@@ -6,7 +6,10 @@ import sys
 import threading
 import uuid
 
+from src.runtime.message_hub import MessageHub
 from src.runtime.project_registry import ProjectRegistry
+from src.runtime.stores.sqlite_message_store import SQLiteMessageStore
+from src.worker.channels.jsonrpc_channel import JsonRpcChannel
 from src.worker.server.jsonrpc_ws import JsonRpcConnection, JsonRpcError
 
 
@@ -20,6 +23,17 @@ def run_project(project_dir, supervisor_ws=None, ws_port=None, force_stop_on_shu
     # Apply CLI override or default
     if force_stop_on_shutdown is not None:
         bundle["force_stop_on_shutdown"] = force_stop_on_shutdown
+
+    # Create worker-level MessageHub and register project
+    worker_dir = os.path.join(os.path.expanduser("~"), ".agent-studio", "workers", str(os.getpid()))
+    msg_store = SQLiteMessageStore(worker_dir)
+    channel = JsonRpcChannel(supervisor_ws) if supervisor_ws else None
+    message_hub = MessageHub(msg_store, channel)
+
+    bus = bundle["event_bus_registry"].get_or_create(project_id)
+    message_hub.register_project(project_id, bus, bundle.get("model_events", {}))
+    bundle["instance_manager"]._message_hub = message_hub
+    bundle["message_hub"] = message_hub
 
     _start_shared_scenes(bundle)
 
@@ -41,6 +55,15 @@ def run_project(project_dir, supervisor_ws=None, ws_port=None, force_stop_on_shu
     asyncio.set_event_loop(loop)
 
     tasks = []
+
+    async def _start_and_run():
+        await message_hub.start()
+        try:
+            await asyncio.Future()
+        finally:
+            await message_hub.stop()
+
+    tasks.append(loop.create_task(_start_and_run()))
 
     if ws_port is not None:
         tasks.append(loop.create_task(_run_ws_server(bundle, ws_port)))
@@ -94,11 +117,23 @@ def _graceful_shutdown(bundle, force_stop_on_shutdown=None):
     for scene in shared_scenes:
         sm.stop(project_id, scene["scene_id"])
 
-    # 3. Untrack and checkpoint
+    # 3. Stop MessageHub
+    message_hub = bundle.get("message_hub")
+    if message_hub is not None:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.run_coroutine_threadsafe(message_hub.stop(), loop)
+            else:
+                loop.run_until_complete(message_hub.stop())
+        except Exception:
+            pass
+
+    # 4. Untrack and checkpoint
     state_mgr.untrack_project(project_id)
     state_mgr.checkpoint_project(project_id)
 
-    # 4. Unload project and release file lock
+    # 5. Unload project and release file lock
     if registry is not None:
         registry.unload_project(project_id)
 
@@ -130,11 +165,26 @@ async def _run_ws_server(bundle, port):
         await server.wait_closed()
 
 
+def _register_supervisor_handlers(conn: JsonRpcConnection, message_hub):
+    async def on_external_event(params, _req_id):
+        if message_hub is not None:
+            message_hub.on_channel_message(
+                params.get("event_type", ""),
+                params.get("payload", {}),
+                params.get("source", ""),
+                params.get("scope", "project"),
+                params.get("target"),
+            )
+
+    conn.register("notify.externalEvent", on_external_event)
+
+
 async def _run_supervisor_client(bundle, supervisor_ws):
     import websockets
 
     session_id = str(uuid.uuid4())
     project_id = bundle["project_id"]
+    message_hub = bundle.get("message_hub")
     disconnected_at = None
 
     while True:
@@ -142,6 +192,7 @@ async def _run_supervisor_client(bundle, supervisor_ws):
             async with websockets.connect(supervisor_ws) as ws:
                 disconnected_at = None
                 conn = JsonRpcConnection(ws)
+                _register_supervisor_handlers(conn, message_hub)
                 # Send runtimeOnline
                 await conn.send(
                     conn.build_notification(
@@ -150,17 +201,28 @@ async def _run_supervisor_client(bundle, supervisor_ws):
                     )
                 )
 
-                # Heartbeat loop
+                # Heartbeat and inbound message loop
                 while True:
-                    await asyncio.sleep(5)
-                    if ws.closed:
-                        break
-                    await conn.send(
-                        conn.build_notification(
-                            "notify.heartbeat",
-                            {"project_id": project_id, "session_id": session_id},
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                        msg = json.loads(raw)
+                        if "id" in msg and ("result" in msg or "error" in msg):
+                            continue
+                        resp = await conn.handle_message(raw)
+                        if resp is not None:
+                            await conn.send(resp)
+                    except asyncio.TimeoutError:
+                        if ws.closed:
+                            break
+                        await conn.send(
+                            conn.build_notification(
+                                "notify.heartbeat",
+                                {"project_id": project_id, "session_id": session_id},
+                            )
                         )
-                    )
+                        continue
+                    except websockets.exceptions.ConnectionClosed:
+                        break
         except (websockets.exceptions.ConnectionClosed, OSError):
             pass
 
@@ -217,8 +279,38 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
             raise JsonRpcError(-32002, "scene not found")
         return {"status": "stopped"}
 
+    async def message_hub_publish(params, req_id):
+        hub = bundle.get("message_hub")
+        if hub is None:
+            raise JsonRpcError(-32102, "message hub not initialized")
+        hub.on_channel_message(
+            params.get("event_type", ""),
+            params.get("payload", {}),
+            params.get("source", ""),
+            params.get("scope", "project"),
+            params.get("target"),
+        )
+        return {"acked": True}
+
+    async def message_hub_publish_batch(params, req_id):
+        hub = bundle.get("message_hub")
+        if hub is None:
+            raise JsonRpcError(-32102, "message hub not initialized")
+        records = params.get("records", [])
+        for record in records:
+            hub.on_channel_message(
+                record.get("event_type", ""),
+                record.get("payload", {}),
+                record.get("source", ""),
+                record.get("scope", "project"),
+                record.get("target"),
+            )
+        return {"acked_ids": [r.get("id") for r in records]}
+
     conn.register("project.stop", project_stop)
     conn.register("project.checkpoint", project_checkpoint)
     conn.register("project.getStatus", project_get_status)
     conn.register("scene.start", scene_start)
     conn.register("scene.stop", scene_stop)
+    conn.register("messageHub.publish", message_hub_publish)
+    conn.register("messageHub.publishBatch", message_hub_publish_batch)
