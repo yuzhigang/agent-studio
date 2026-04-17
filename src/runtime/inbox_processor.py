@@ -49,10 +49,6 @@ class InboxProcessor:
         if not project_ids:
             return True
         target = msg.get("target")
-        if target is not None:
-            if target not in project_ids:
-                return True
-            project_ids = [target]
         any_failed = False
         for project_id in project_ids:
             event_bus, _ = self._hub._projects.get(project_id, (None, None))
