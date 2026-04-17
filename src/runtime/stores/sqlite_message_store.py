@@ -162,6 +162,7 @@ class SQLiteMessageStore(MessageStore):
             FROM outbox
             WHERE published_at IS NULL
               AND (retry_after IS NULL OR retry_after <= ?)
+              AND (error_count IS NULL OR error_count < 10)
             ORDER BY id ASC
             LIMIT ?
             """,
