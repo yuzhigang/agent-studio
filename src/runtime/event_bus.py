@@ -1,10 +1,18 @@
 import threading
+from typing import Callable
 
 
 class EventBus:
     def __init__(self):
         self._subscribers: dict[str, list[tuple[str, str, callable]]] = {}
         self._lock = threading.RLock()
+        self._pre_publish_hooks: list[Callable] = []
+
+    def add_pre_publish_hook(self, hook: Callable[[str, dict, str, str, str | None], None]) -> None:
+        self._pre_publish_hooks.append(hook)
+
+    def remove_pre_publish_hook(self, hook: Callable) -> None:
+        self._pre_publish_hooks.remove(hook)
 
     def register(self, instance_id: str, scope: str, event_type: str, handler: callable):
         with self._lock:
@@ -18,6 +26,8 @@ class EventBus:
                 ]
 
     def publish(self, event_type: str, payload: dict, source: str, scope: str, target: str | None = None):
+        for hook in self._pre_publish_hooks:
+            hook(event_type, payload, source, scope, target)
         with self._lock:
             handlers = list(self._subscribers.get(event_type, []))
         for instance_id, inst_scope, handler in handlers:

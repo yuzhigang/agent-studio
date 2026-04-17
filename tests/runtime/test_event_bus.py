@@ -1,6 +1,26 @@
 import pytest
 from src.runtime.event_bus import EventBus
 
+def test_pre_publish_hook_called_on_publish():
+    bus = EventBus()
+    calls = []
+    def hook(event_type, payload, source, scope, target):
+        calls.append((event_type, payload, source, scope, target))
+    bus.add_pre_publish_hook(hook)
+    bus.publish("test.event", {"a": 1}, "src-1", "project", "tgt-1")
+    assert len(calls) == 1
+    assert calls[0] == ("test.event", {"a": 1}, "src-1", "project", "tgt-1")
+
+def test_remove_pre_publish_hook():
+    bus = EventBus()
+    calls = []
+    def hook(event_type, payload, source, scope, target):
+        calls.append(event_type)
+    bus.add_pre_publish_hook(hook)
+    bus.remove_pre_publish_hook(hook)
+    bus.publish("test.event", {}, "src-1", "project")
+    assert len(calls) == 0
+
 def test_publish_delivers_to_subscriber():
     bus = EventBus()
     received = []
