@@ -86,3 +86,120 @@ class EventLogStore(ABC):
         If last_event_id is not None and does not exist, raises ValueError.
         """
         ...
+
+
+class ProjectMessageStore(ABC):
+    @abstractmethod
+    def inbox_enqueue(
+        self,
+        project_id: str,
+        event_type: str,
+        payload: dict,
+        source: str,
+        scope: str,
+        target: str | None,
+    ) -> int:
+        """Append an incoming message to the project inbox. Returns message id."""
+        ...
+
+    @abstractmethod
+    def inbox_mark_processed(self, project_id: str, message_id: int) -> None:
+        """Mark an inbox message as processed."""
+        ...
+
+    @abstractmethod
+    def inbox_read_pending(self, project_id: str, limit: int) -> list[dict]:
+        """Read unprocessed inbox messages for a project."""
+        ...
+
+    @abstractmethod
+    def outbox_enqueue(
+        self,
+        project_id: str,
+        event_type: str,
+        payload: dict,
+        source: str,
+        scope: str,
+        target: str | None,
+    ) -> int:
+        """Append an outgoing message to the project outbox. Returns message id."""
+        ...
+
+    @abstractmethod
+    def outbox_mark_sent(self, project_id: str, message_id: int) -> None:
+        """Mark an outbox message as sent."""
+        ...
+
+    @abstractmethod
+    def outbox_read_pending(self, project_id: str, limit: int) -> list[dict]:
+        """Read unsent outbox messages for a project."""
+        ...
+
+    @abstractmethod
+    def outbox_update_error(
+        self,
+        project_id: str,
+        message_id: int,
+        error_count: int,
+        retry_after: str | None,
+        last_error: str | None,
+    ) -> None:
+        """Update error metadata for an outbox message."""
+        ...
+
+
+class MessageStore(ABC):
+    @abstractmethod
+    def inbox_enqueue(
+        self,
+        event_type: str,
+        payload: dict,
+        source: str,
+        scope: str,
+        target: str | None,
+    ) -> int:
+        """Append an incoming message to the inbox. Returns message id."""
+        ...
+
+    @abstractmethod
+    def inbox_mark_processed(self, message_id: int) -> None:
+        """Mark an inbox message as processed."""
+        ...
+
+    @abstractmethod
+    def inbox_read_pending(self, limit: int) -> list[dict]:
+        """Read unprocessed inbox messages."""
+        ...
+
+    @abstractmethod
+    def outbox_enqueue(
+        self,
+        event_type: str,
+        payload: dict,
+        source: str,
+        scope: str,
+        target: str | None,
+    ) -> int:
+        """Append an outgoing message to the outbox. Returns message id."""
+        ...
+
+    @abstractmethod
+    def outbox_mark_sent(self, message_id: int) -> None:
+        """Mark an outbox message as sent."""
+        ...
+
+    @abstractmethod
+    def outbox_read_pending(self, limit: int) -> list[dict]:
+        """Read unsent outbox messages."""
+        ...
+
+    @abstractmethod
+    def outbox_update_error(
+        self,
+        message_id: int,
+        error_count: int,
+        retry_after: str | None,
+        last_error: str | None,
+    ) -> None:
+        """Update error metadata for an outbox message."""
+        ...

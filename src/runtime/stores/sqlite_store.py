@@ -9,10 +9,11 @@ from src.runtime.stores.base import (
     SceneStore,
     InstanceStore,
     EventLogStore,
+    ProjectMessageStore,
 )
 
 
-class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
+class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore, ProjectMessageStore):
     def __init__(self, project_dir: str):
         self._project_dir = project_dir
         os.makedirs(project_dir, exist_ok=True)
@@ -78,6 +79,38 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             last_event_id TEXT,
             checkpointed_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS inbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            source TEXT,
+            scope TEXT DEFAULT 'project',
+            target TEXT,
+            received_at TEXT NOT NULL,
+            processed_at TEXT,
+            acked_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_inbox_project_processed_at ON inbox(project_id, processed_at);
+
+        CREATE TABLE IF NOT EXISTS outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            source TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            target TEXT,
+            created_at TEXT NOT NULL,
+            published_at TEXT,
+            error_count INTEGER DEFAULT 0,
+            retry_after TEXT,
+            last_error TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_outbox_project_published_at ON outbox(project_id, published_at, error_count, retry_after);
         """
         with self._lock:
             self._conn.executescript(schema)
@@ -430,6 +463,155 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             "last_event_id": row[0],
             "checkpointed_at": row[1],
         }
+
+    # ProjectMessageStore
+    def inbox_enqueue(
+        self,
+        project_id: str,
+        event_type: str,
+        payload: dict,
+        source: str,
+        scope: str,
+        target: str | None,
+    ) -> int:
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO inbox (project_id, event_type, payload, source, scope, target, received_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    event_type,
+                    json.dumps(payload, ensure_ascii=False),
+                    source,
+                    scope,
+                    target,
+                    now,
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def inbox_mark_processed(self, project_id: str, message_id: int) -> None:
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE inbox SET processed_at = ? WHERE id = ? AND project_id = ?",
+                (now, message_id, project_id),
+            )
+            self._conn.commit()
+
+    def inbox_read_pending(self, project_id: str, limit: int) -> list[dict]:
+        rows = self._conn.execute(
+            """
+            SELECT id, event_type, payload, source, scope, target, received_at
+            FROM inbox
+            WHERE project_id = ? AND processed_at IS NULL
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (project_id, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "event_type": r[1],
+                "payload": json.loads(r[2]),
+                "source": r[3],
+                "scope": r[4],
+                "target": r[5],
+                "received_at": r[6],
+            }
+            for r in rows
+        ]
+
+    def outbox_enqueue(
+        self,
+        project_id: str,
+        event_type: str,
+        payload: dict,
+        source: str,
+        scope: str,
+        target: str | None,
+    ) -> int:
+        now = self._now()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO outbox (project_id, event_type, payload, source, scope, target, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    event_type,
+                    json.dumps(payload, ensure_ascii=False),
+                    source,
+                    scope,
+                    target,
+                    now,
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def outbox_mark_sent(self, project_id: str, message_id: int) -> None:
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE outbox SET published_at = ? WHERE id = ? AND project_id = ?",
+                (now, message_id, project_id),
+            )
+            self._conn.commit()
+
+    def outbox_read_pending(self, project_id: str, limit: int) -> list[dict]:
+        now = self._now()
+        rows = self._conn.execute(
+            """
+            SELECT id, event_type, payload, source, scope, target, created_at, error_count, retry_after, last_error
+            FROM outbox
+            WHERE project_id = ? AND published_at IS NULL
+              AND (retry_after IS NULL OR retry_after <= ?)
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (project_id, now, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "event_type": r[1],
+                "payload": json.loads(r[2]),
+                "source": r[3],
+                "scope": r[4],
+                "target": r[5],
+                "created_at": r[6],
+                "error_count": r[7],
+                "retry_after": r[8],
+                "last_error": r[9],
+            }
+            for r in rows
+        ]
+
+    def outbox_update_error(
+        self,
+        project_id: str,
+        message_id: int,
+        error_count: int,
+        retry_after: str | None,
+        last_error: str | None,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE outbox
+                SET error_count = ?, retry_after = ?, last_error = ?
+                WHERE id = ? AND project_id = ?
+                """,
+                (error_count, retry_after, last_error, message_id, project_id),
+            )
+            self._conn.commit()
 
     def close(self) -> None:
         with self._lock:
