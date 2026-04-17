@@ -30,14 +30,15 @@ class EventBus:
                     (iid, sc, h) for iid, sc, h in self._subscribers[event_type] if iid != instance_id
                 ]
 
-    def publish(self, event_type: str, payload: dict, source: str, scope: str, target: str | None = None):
-        with self._lock:
-            hooks = list(self._pre_publish_hooks)
-        for hook in hooks:
-            try:
-                hook(event_type, payload, source, scope, target)
-            except Exception:
-                logger.exception("Pre-publish hook failed")
+    def publish(self, event_type: str, payload: dict, source: str, scope: str, target: str | None = None, skip_hooks: bool = False):
+        if not skip_hooks:
+            with self._lock:
+                hooks = list(self._pre_publish_hooks)
+            for hook in hooks:
+                try:
+                    hook(event_type, payload, source, scope, target)
+                except Exception:
+                    logger.exception("Pre-publish hook failed")
         with self._lock:
             handlers = list(self._subscribers.get(event_type, []))
         for instance_id, inst_scope, handler in handlers:
