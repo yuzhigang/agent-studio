@@ -52,14 +52,15 @@ class Instance:
                 if defn.get("audit"):
                     self._audit_fields[name] = "derived"
 
-        self.snapshot = {}
-        for field_name, source in self._audit_fields.items():
-            if source == "variables":
-                self.snapshot[field_name] = copy.deepcopy(self.variables.get(field_name))
-            elif source == "attributes":
-                self.snapshot[field_name] = copy.deepcopy(self.attributes.get(field_name))
-            elif source == "derived":
-                self.snapshot[field_name] = copy.deepcopy(
-                    self.variables.get(field_name, self.attributes.get(field_name))
-                )
+        if self._audit_fields:
+            self.snapshot = {}
+            for field_name, source in self._audit_fields.items():
+                if source == "variables":
+                    self.snapshot[field_name] = copy.deepcopy(self.variables.get(field_name))
+                elif source == "attributes":
+                    self.snapshot[field_name] = copy.deepcopy(self.attributes.get(field_name))
+                elif source == "derived":
+                    self.snapshot[field_name] = copy.deepcopy(
+                        self.variables.get(field_name, self.attributes.get(field_name))
+                    )
         return self.snapshot

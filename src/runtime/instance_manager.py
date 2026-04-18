@@ -45,6 +45,12 @@ class _DictProxy:
     def __setitem__(self, key, value):
         self._data[key] = value
 
+    def __contains__(self, key):
+        return key in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
 
 def _wrap_instance(instance: Instance):
     """Expose an Instance as a namespace compatible with behavior scripts."""
@@ -72,6 +78,7 @@ class InstanceManager:
         instance_store=None,
         model_loader: Callable[[str], dict | None] | None = None,
         sandbox_executor: SandboxExecutor | None = None,
+        world_state=None,
     ):
         self._instances: dict[tuple[str, str], Instance] = {}
         self._lock = threading.Lock()
@@ -79,6 +86,7 @@ class InstanceManager:
         self._store = instance_store
         self._model_loader = model_loader
         self._sandbox = sandbox_executor or SandboxExecutor()
+        self._world_state = world_state
 
     @staticmethod
     def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
@@ -96,11 +104,16 @@ class InstanceManager:
             if bus is not None:
                 bus.publish(event_type, payload_dict, source=instance.id, scope=instance.scope, target=target)
 
+        world_state = {}
+        if self._world_state is not None:
+            world_state = self._world_state.snapshot()
+
         return {
             "this": _wrap_instance(instance),
             "payload": _DictProxy(payload),
             "source": source,
             "dispatch": dispatch,
+            "world_state": _DictProxy(world_state),
         }
 
     def _execute_action(self, instance: Instance, action: dict, payload: dict, source: str) -> None:
@@ -116,6 +129,7 @@ class InstanceManager:
                 except Exception:
                     # Swallow sandbox errors to avoid breaking the event bus
                     pass
+            instance._update_snapshot()
 
         elif action_type == "triggerEvent":
             event_name = action.get("name")
@@ -179,7 +193,7 @@ class InstanceManager:
         bus = self._bus_reg.get_or_create(inst.world_id)
         bus.unregister(inst.id)
 
-    def snapshot(self, inst: Instance) -> dict:
+    def build_persist_dict(self, inst: Instance) -> dict:
         return {
             "model_name": inst.model_name,
             "model_version": inst.model_version,
@@ -190,13 +204,14 @@ class InstanceManager:
             "memory": inst.memory or {},
             "audit": inst.audit or {"version": 0, "updatedAt": None, "lastEventId": None},
             "lifecycle_state": inst.lifecycle_state,
+            "world_state": inst.world_state or {},
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     def _save_to_store(self, inst: Instance):
         if self._store is not None:
             self._store.save_instance(
-                inst.world_id, inst.instance_id, inst.scope, self.snapshot(inst)
+                inst.world_id, inst.instance_id, inst.scope, self.build_persist_dict(inst)
             )
 
     def create(
@@ -241,6 +256,7 @@ class InstanceManager:
             except Exception:
                 self._instances.pop(key, None)
                 raise
+        inst._update_snapshot()
         self._save_to_store(inst)
         return inst
 
@@ -269,10 +285,12 @@ class InstanceManager:
                 audit=copy.deepcopy(snapshot.get("audit", {"version": 0, "updatedAt": None, "lastEventId": None})),
                 lifecycle_state=snapshot.get("lifecycle_state", "active"),
             )
+            inst.snapshot = copy.deepcopy(snapshot.get("world_state", {}).get("snapshot", {}))
             if self._model_loader is not None:
                 loaded_model = self._model_loader(inst.model_name)
                 if loaded_model is not None:
                     inst.model = loaded_model
+            inst._update_snapshot()
             self._instances[key] = inst
             try:
                 self._register_instance(inst)
@@ -308,11 +326,14 @@ class InstanceManager:
         if inst is None:
             return False
         inst.lifecycle_state = new_state
+        inst._update_snapshot()
         self._save_to_store(inst)
         if new_state == "archived":
             with self._lock:
                 self._instances.pop(self._make_key(world_id, instance_id, scope), None)
             self._unregister_instance(inst)
+            inst.snapshot = {}
+            inst._audit_fields = {}
         return True
 
     def copy_for_scene(self, world_id: str, instance_id: str, scene_id: str) -> Instance | None:
@@ -322,6 +343,7 @@ class InstanceManager:
                 return None
             clone = inst.deep_copy()
             clone.scope = f"scene:{scene_id}"
+            clone._update_snapshot()
             key = self._make_key(world_id, clone.instance_id, clone.scope)
             if key in self._instances:
                 raise ValueError(f"CoW copy {instance_id} for scene {scene_id} already exists")

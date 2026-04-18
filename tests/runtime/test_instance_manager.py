@@ -317,3 +317,158 @@ def test_on_event_ignores_non_event_trigger():
     bus = bus_reg.get_or_create("world-01")
     bus.publish("someEvent", {}, source="external", scope="world")
     assert inst.variables["targetLocation"] == ""
+
+
+def test_create_updates_snapshot():
+    mgr = InstanceManager()
+    inst = mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}}
+        },
+    )
+    assert inst.snapshot["temperature"] == 1500
+    assert inst.world_state["id"] == "ladle-001"
+    assert inst.world_state["state"] == "idle"
+    assert inst.world_state["snapshot"]["temperature"] == 1500
+
+
+def test_run_script_updates_snapshot():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}},
+            "behaviors": {
+                "updateTemp": {
+                    "trigger": {"type": "event", "name": "heat"},
+                    "actions": [
+                        {
+                            "type": "runScript",
+                            "scriptEngine": "python",
+                            "script": "this.variables.temperature = 1600",
+                        }
+                    ],
+                }
+            },
+        },
+    )
+    bus = bus_reg.get_or_create("proj-01")
+    bus.publish("heat", {}, source="external", scope="world")
+    assert inst.snapshot["temperature"] == 1600
+    assert inst.world_state["snapshot"]["temperature"] == 1600
+
+
+def test_transition_lifecycle_archived_clears_snapshot():
+    mgr = InstanceManager()
+    inst = mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}}
+        },
+    )
+    assert inst.snapshot["temperature"] == 1500
+    mgr.transition_lifecycle("proj-01", "ladle-001", "archived")
+    assert inst.snapshot == {}
+    assert inst._audit_fields == {}
+
+
+def test_behavior_context_includes_world_state():
+    from src.runtime.world_state import WorldState
+
+    mgr = InstanceManager()
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}}
+        },
+    )
+    ws = WorldState(mgr, "proj-01")
+    mgr._world_state = ws
+
+    inst = mgr.get("proj-01", "ladle-001")
+    ctx = mgr._build_behavior_context(inst, {"foo": "bar"}, "external")
+    assert "world_state" in ctx
+    assert "ladle" in ctx["world_state"]
+    assert ctx["world_state"]["ladle"][0]["snapshot"]["temperature"] == 1500
+
+
+def test_build_persist_dict_includes_world_state():
+    class FakeStore:
+        def __init__(self):
+            self.saved = {}
+        def save_instance(self, world_id, instance_id, scope, snapshot):
+            self.saved[(world_id, instance_id, scope)] = snapshot
+
+    store = FakeStore()
+    mgr = InstanceManager(instance_store=store)
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}}
+        },
+    )
+    snap = store.saved[("proj-01", "ladle-001", "world")]
+    assert "world_state" in snap
+    assert snap["world_state"]["id"] == "ladle-001"
+    assert snap["world_state"]["snapshot"]["temperature"] == 1500
+
+
+def test_lazy_load_restores_world_state():
+    class FakeStore:
+        def load_instance(self, world_id, instance_id, scope):
+            return {
+                "world_id": world_id,
+                "instance_id": instance_id,
+                "scope": scope,
+                "model_name": "ladle",
+                "model_version": "1.0",
+                "attributes": {},
+                "state": {"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+                "variables": {"temperature": 1500},
+                "links": {},
+                "memory": {},
+                "audit": {"version": 1},
+                "lifecycle_state": "active",
+                "world_state": {
+                    "id": instance_id,
+                    "state": "idle",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "lifecycle_state": "active",
+                    "snapshot": {"temperature": 1500},
+                },
+                "updated_at": "2024-01-01T00:00:00+00:00",
+            }
+
+    store = FakeStore()
+    mgr = InstanceManager(instance_store=store)
+    inst = mgr.get("proj-01", "ladle-001", scope="world")
+    assert inst is not None
+    assert inst.world_state["id"] == "ladle-001"
+    assert inst.world_state["snapshot"]["temperature"] == 1500
