@@ -6,15 +6,15 @@ def test_instance_creation():
     inst = Instance(
         instance_id="ladle-001",
         model_name="ladle",
-        project_id="proj-01",
-        scope="project",
+        world_id="world-01",
+        scope="world",
         attributes={"capacity": 200},
         variables={"steelAmount": 180},
         links={"assignedCaster": "caster-03"},
     )
     assert inst.id == "ladle-001"
     assert inst.model_name == "ladle"
-    assert inst.scope == "project"
+    assert inst.scope == "world"
     assert inst.variables["steelAmount"] == 180
     assert inst.attributes["capacity"] == 200
     assert inst.links["assignedCaster"] == "caster-03"
@@ -27,15 +27,15 @@ def test_instance_deep_copy_isolation():
     inst = Instance(
         instance_id="ladle-001",
         model_name="ladle",
-        project_id="proj-01",
-        scope="project",
+        world_id="world-01",
+        scope="world",
         variables={"steelAmount": 180, "nested": {"a": 1}},
         model={"geometry": {"radius": 5}, "material": "steel"},
     )
     clone = inst.deep_copy()
     assert clone.instance_id == inst.instance_id
     assert clone.model_name == inst.model_name
-    assert clone.project_id == inst.project_id
+    assert clone.world_id == inst.world_id
     assert clone.scope == inst.scope
     clone.variables["steelAmount"] = 0
     clone.variables["nested"]["a"] = 99

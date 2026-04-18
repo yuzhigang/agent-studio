@@ -88,7 +88,7 @@ CREATE TABLE inbox (
     event_type TEXT NOT NULL,
     payload TEXT NOT NULL,
     source TEXT,
-    scope TEXT DEFAULT 'project',
+    scope TEXT DEFAULT 'world',
     target TEXT,
     received_at TEXT NOT NULL,
     processed_at TEXT,
@@ -118,7 +118,7 @@ CREATE INDEX idx_inbox_processed_at ON inbox(processed_at);
 CREATE INDEX idx_outbox_published_at ON outbox(published_at, error_count, retry_after);
 ```
 
-> **路径与并发**：`messagebox.db` 默认位于 `<project_dir>/messagebox.db`，与 `runtime.db` 同目录但独立文件。它由本 Worker 内的 InboxProcessor 和 OutboxProcessor 读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout：`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
+> **路径与并发**：`messagebox.db` 默认位于 `<world_dir>/messagebox.db`，与 `runtime.db` 同目录但独立文件。它由本 Worker 内的 InboxProcessor 和 OutboxProcessor 读写，建议在 `MessageStore` 连接初始化时启用 SQLite WAL 模式并配置 busy-timeout：`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 
 ### 4.2 消息语义
 
@@ -146,12 +146,12 @@ events:
         orderId: { type: string }
 ```
 
-### 5.2 `project.yaml`（部署配置）
+### 5.2 `world.yaml`（部署配置）
 
-Project 部署层面配置 Channel 类型和目标：
+World 部署层面配置 Channel 类型和目标：
 
 ```yaml
-project_id: factory-01
+world_id: factory-01
 config:
   message_hub:
     channel: rabbitmq
@@ -165,7 +165,7 @@ config:
 或 Supervisor 模式：
 
 ```yaml
-project_id: factory-01
+world_id: factory-01
 config:
   message_hub:
     channel: supervisor
@@ -240,7 +240,7 @@ class MessageHub:
 
     def on_channel_message(
         self, event_type: str, payload: dict, source: str,
-        scope: str = "project", target: str | None = None
+        scope: str = "world", target: str | None = None
     ) -> None:
         """Channel 收到外部消息后回调：先写 inbox，再可能被 InboxProcessor 消费。"""
         self._msg_store.inbox_enqueue(
@@ -352,8 +352,8 @@ class Channel(ABC):
 
 | 方法 | 方向 | 参数 | 返回值 |
 |---|---|---|---|
-| `messageHub.publish` | Worker → Supervisor | `{project_id, event_type, payload, source, scope, target}` | `{acked: true}` |
-| `messageHub.publishBatch` | Worker → Supervisor | `{project_id, records}` | `{acked_ids: [...]}` |
+| `messageHub.publish` | Worker → Supervisor | `{world_id, event_type, payload, source, scope, target}` | `{acked: true}` |
+| `messageHub.publishBatch` | Worker → Supervisor | `{world_id, records}` | `{acked_ids: [...]}` |
 
 ### 7.2 Notification（单向推送）
 
@@ -391,7 +391,7 @@ class Channel(ABC):
 
 ### 8.1 Worker 崩溃 / 重启
 
-1. `messagebox.db` 完整保留在 Project 目录中。
+1. `messagebox.db` 完整保留在 World 目录中。
 2. Worker 重启后启动 `MessageHub`，`InboxProcessor` 扫描 `processed_at IS NULL` 的 inbox 记录继续消费。
 3. `OutboxProcessor` 从 outbox 中恢复未发送的消息，通过 Channel 继续发送。
 
@@ -409,7 +409,7 @@ class Channel(ABC):
 | 错误码 | 含义 |
 |---|---|
 | `-32101` | `messageHub.publish` / `publishBatch` 发送失败 |
-| `-32102` | `messageHub` 相关 RPC project 未注册 |
+| `-32102` | `messageHub` 相关 RPC world 未注册 |
 | `-32103` | inbox 消息格式非法 |
 | `-32104` | outbox 消息超过最大重试次数 |
 
@@ -501,5 +501,5 @@ class Channel(ABC):
 ### 决策 5：消息先落盘，后处理/发送
 - **原因**：Channel 断连或 Worker 意外退出时，未处理/未发送的消息安全保存在 SQLite 中。恢复后自动续传，不需要依赖 RabbitMQ 的重试机制。
 
-### 决策 6：Model 定义外发能力，`project.yaml` 定义 Channel 配置
-- **原因**：模型是"这个事件能不能外发"的元数据声明；`project.yaml` 是"走哪个 Channel、发到哪"的运维配置，两者解耦。
+### 决策 6：Model 定义外发能力，`world.yaml` 定义 Channel 配置
+- **原因**：模型是"这个事件能不能外发"的元数据声明；`world.yaml` 是"走哪个 Channel、发到哪"的运维配置，两者解耦。

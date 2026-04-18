@@ -7,10 +7,10 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser(
-        "run", help="Run a single project in isolated process mode"
+        "run", help="Run a single world in isolated process mode"
     )
     run_parser.add_argument(
-        "--project-dir", required=True, help="Path to project directory"
+        "--world-dir", required=True, help="Path to world directory"
     )
     run_parser.add_argument(
         "--supervisor-ws", default=None, help="Supervisor WebSocket URL to register with"
@@ -27,13 +27,13 @@ def main(argv=None):
     run_parser.set_defaults(func=_run_command)
 
     inline_parser = subparsers.add_parser(
-        "run-inline", help="Run multiple projects in the current process"
+        "run-inline", help="Run multiple worlds in the current process"
     )
     inline_parser.add_argument(
-        "--project-dir",
+        "--world-dir",
         action="append",
         required=True,
-        help="Path to project directory (can be repeated)",
+        help="Path to world directory (can be repeated)",
     )
     inline_parser.set_defaults(func=_run_inline_command)
 
@@ -41,7 +41,7 @@ def main(argv=None):
         "supervisor", help="Start the Supervisor management plane"
     )
     sup_parser.add_argument(
-        "--base-dir", default="projects", help="Base directory containing projects"
+        "--base-dir", default="worlds", help="Base directory containing worlds"
     )
     sup_parser.add_argument(
         "--ws-port", type=int, default=8001, help="WebSocket port for runtime registration"
@@ -56,9 +56,9 @@ def main(argv=None):
 
 
 def _run_command(args):
-    from src.worker.cli.run_command import run_project
-    return run_project(
-        project_dir=args.project_dir,
+    from src.worker.cli.run_command import run_world
+    return run_world(
+        world_dir=args.world_dir,
         supervisor_ws=args.supervisor_ws,
         ws_port=args.ws_port,
         force_stop_on_shutdown=args.force_stop_on_shutdown,
@@ -67,7 +67,7 @@ def _run_command(args):
 
 def _run_inline_command(args):
     from src.worker.cli.run_inline import run_inline
-    return run_inline(project_dirs=args.project_dir)
+    return run_inline(world_dirs=args.world_dir)
 
 
 def _supervisor_command(args):

@@ -4,8 +4,8 @@
 
 当前 `src/runtime/` 包同时承载了两层截然不同的职责：
 
-1. **业务核心层**：`EventBus`、`InstanceManager`、`ProjectRegistry`、`StateManager`、`SceneManager`、`stores`、`lib/sandbox.py` 等。这部分是纯业务逻辑，不感知"进程"或"网络"。
-2. **进程/服务层**：`cli/main.py`、`run_command.py`、`run_inline.py`、`locks/project_lock.py`、`server/jsonrpc_ws.py`。这部分负责把业务核心包装成一个可运行的 OS 进程，处理 CLI、文件锁、WebSocket 协议。
+1. **业务核心层**：`EventBus`、`InstanceManager`、`WorldRegistry`、`StateManager`、`SceneManager`、`stores`、`lib/sandbox.py` 等。这部分是纯业务逻辑，不感知"进程"或"网络"。
+2. **进程/服务层**：`cli/main.py`、`run_command.py`、`run_inline.py`、`locks/world_lock.py`、`server/jsonrpc_ws.py`。这部分负责把业务核心包装成一个可运行的 OS 进程，处理 CLI、文件锁、WebSocket 协议。
 
 这导致两个问题：
 - **语义模糊**：`runtime` 一词既指"业务内核"，又指"运行时进程"，新人难以快速定位代码。
@@ -18,7 +18,7 @@
 - **`src/cli/`**：统一 CLI 入口，只做 argparse 分发。
 - **`src/supervisor/`**：管理平面（HTTP/WebSocket 网关、进程映射）。已独立，保持不变。
 - **`src/worker/`**：运行时**进程外壳**。负责把 `runtime` 组装成一个可独立运行的 OS 进程（CLI 子命令实现、文件锁、WebSocket 服务器）。
-- **`src/runtime/`**：业务**核心逻辑**。负责 Project 加载后内部的全部业务规则（EventBus、InstanceManager、State/Scene Manager、stores 等）。
+- **`src/runtime/`**：业务**核心逻辑**。负责 World 加载后内部的全部业务规则（EventBus、InstanceManager、State/Scene Manager、stores 等）。
 
 ## 3. 文件迁移映射
 
@@ -31,7 +31,7 @@
 | 移动 | `src/runtime/cli/run_command.py` | `src/worker/cli/run_command.py` |
 | 移动 | `src/runtime/cli/run_inline.py` | `src/worker/cli/run_inline.py` |
 | 移动 | `src/runtime/locks/__init__.py` | `src/worker/locks/__init__.py` |
-| 移动 | `src/runtime/locks/project_lock.py` | `src/worker/locks/project_lock.py` |
+| 移动 | `src/runtime/locks/world_lock.py` | `src/worker/locks/world_lock.py` |
 | 移动 | `src/runtime/server/__init__.py` | `src/worker/server/__init__.py` |
 | 移动 | `src/runtime/server/jsonrpc_ws.py` | `src/worker/server/jsonrpc_ws.py` |
 
@@ -41,7 +41,7 @@
 - `src/runtime/event_bus.py`
 - `src/runtime/instance.py`
 - `src/runtime/instance_manager.py`
-- `src/runtime/project_registry.py`
+- `src/runtime/world_registry.py`
 - `src/runtime/state_manager.py`
 - `src/runtime/scene_manager.py`
 - `src/runtime/scene_controller.py`
@@ -64,7 +64,7 @@
 
 ### 3.4 根目录保留
 
-- `projects/`：运行时数据目录，保留在根目录（建议加入 `.gitignore`）。
+- `worlds/`：运行时数据目录，保留在根目录（建议加入 `.gitignore`）。
 - `agents/`：Agent 模型定义库（内容资产），保留在根目录。
 
 ## 4. 关键 Import 变更
@@ -85,12 +85,12 @@ from src.supervisor.cli import supervisor_main
 ### `src/worker/cli/run_command.py` / `run_inline.py`
 ```python
 # 旧
-from src.runtime.project_registry import ProjectRegistry
+from src.runtime.world_registry import WorldRegistry
 from src.runtime.state_manager import StateManager
 from src.runtime.server.jsonrpc_ws import JsonRpcWebSocketServer
 
 # 新
-from src.runtime.project_registry import ProjectRegistry
+from src.runtime.world_registry import WorldRegistry
 from src.runtime.state_manager import StateManager
 from src.worker.server.jsonrpc_ws import JsonRpcWebSocketServer
 ```
@@ -117,12 +117,12 @@ src/runtime ──╳ 不依赖任何人
 
 ## 6. 对现有 spec 的影响
 
-需同步更新 `docs/superpowers/specs/2026-04-16-project-runtime-worker-design.md`：
+需同步更新 `docs/superpowers/specs/2026-04-16-world-runtime-worker-design.md`：
 
 - 第 10 节 "与现有代码的兼容性"：将包结构描述从 `src/runtime/` + `src/supervisor/` 更新为 `src/cli/` + `src/worker/` + `src/runtime/` + `src/supervisor/`。
 - 新增一条设计决策记录：解释为什么要从 `runtime` 中拆出 `worker` 层。
 
-> **时序建议**：先完成本 spec 指导的代码迁移与测试验证，在所有 import 路径和测试通过后再一次性回写 `2026-04-16-project-runtime-worker-design.md`，避免两份文档频繁交叉修改导致不一致。
+> **时序建议**：先完成本 spec 指导的代码迁移与测试验证，在所有 import 路径和测试通过后再一次性回写 `2026-04-16-world-runtime-worker-design.md`，避免两份文档频繁交叉修改导致不一致。
 
 ## 7. 新增设计决策
 

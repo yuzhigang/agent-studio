@@ -26,7 +26,7 @@ class SQLiteMessageStore(MessageStore):
             event_type TEXT NOT NULL,
             payload TEXT NOT NULL,
             source TEXT,
-            scope TEXT DEFAULT 'project',
+            scope TEXT DEFAULT 'world',
             target TEXT,
             received_at TEXT NOT NULL,
             processed_at TEXT,

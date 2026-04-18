@@ -112,7 +112,7 @@ class JsonRpcChannel(Channel):
                     params.get("event_type", ""),
                     params.get("payload", {}),
                     params.get("source", ""),
-                    params.get("scope", "project"),
+                    params.get("scope", "world"),
                     params.get("target"),
                 )
 

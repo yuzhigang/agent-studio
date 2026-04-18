@@ -1,12 +1,12 @@
 import os
 import pytest
 import tempfile
-from src.runtime.locks.project_lock import ProjectLock, LockAlreadyHeldError
+from src.runtime.locks.world_lock import WorldLock, LockAlreadyHeldError
 
 
 def test_acquire_and_release_lock():
     with tempfile.TemporaryDirectory() as tmp:
-        lock = ProjectLock(tmp)
+        lock = WorldLock(tmp)
         lock.acquire()
         assert os.path.exists(os.path.join(tmp, ".lock"))
         lock.release()
@@ -15,8 +15,8 @@ def test_acquire_and_release_lock():
 
 def test_second_acquire_raises():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        lock1 = ProjectLock(tmp)
-        lock2 = ProjectLock(tmp)
+        lock1 = WorldLock(tmp)
+        lock2 = WorldLock(tmp)
         lock1.acquire()
         with pytest.raises(LockAlreadyHeldError):
             lock2.acquire()
@@ -25,5 +25,5 @@ def test_second_acquire_raises():
 
 def test_context_manager():
     with tempfile.TemporaryDirectory() as tmp:
-        with ProjectLock(tmp) as lock:
+        with WorldLock(tmp) as lock:
             assert os.path.exists(os.path.join(tmp, ".lock"))

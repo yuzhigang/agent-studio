@@ -1,3 +1,3 @@
-from .project_lock import ProjectLock, LockAlreadyHeldError
+from .world_lock import WorldLock, LockAlreadyHeldError
 
-__all__ = ["ProjectLock", "LockAlreadyHeldError"]
+__all__ = ["WorldLock", "LockAlreadyHeldError"]

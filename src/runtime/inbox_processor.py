@@ -45,13 +45,13 @@ class InboxProcessor:
 
     def _distribute(self, msg: dict) -> bool:
         event_type = msg["event_type"]
-        project_ids = self._hub._subscriptions.get(event_type, set())
-        if not project_ids:
+        world_ids = self._hub._subscriptions.get(event_type, set())
+        if not world_ids:
             return True
         target = msg.get("target")
         any_failed = False
-        for project_id in project_ids:
-            event_bus, _ = self._hub._projects.get(project_id, (None, None))
+        for world_id in world_ids:
+            event_bus, _ = self._hub._worlds.get(world_id, (None, None))
             if event_bus is None:
                 continue
             try:

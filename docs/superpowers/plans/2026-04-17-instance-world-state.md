@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `world_state` derived property to every `Instance`, automatically maintained by the runtime, and expose a project-level aggregated `world_state` snapshot to behavior scripts running in the sandbox.
+**Goal:** Add a `world_state` derived property to every `Instance`, automatically maintained by the runtime, and expose a world-level aggregated `world_state` snapshot to behavior scripts running in the sandbox.
 
 **Architecture:** Each `Instance` computes its own `world_state` (a flattened projection of `audit: true` fields from `variables`, `attributes`, and `derivedProperties`). A lightweight `WorldState` class aggregates active instances on demand. The `InstanceManager` triggers recomputation after instance creation, lifecycle transitions, script execution, and before any event is published.
 
-**Tech Stack:** Python 3.13, pytest, existing runtime (`Instance`, `InstanceManager`, `EventBus`, `ProjectRegistry`, `SceneManager`).
+**Tech Stack:** Python 3.13, pytest, existing runtime (`Instance`, `InstanceManager`, `EventBus`, `WorldRegistry`, `SceneManager`).
 
 ---
 
@@ -15,9 +15,9 @@
 | File | Action | Responsibility |
 |------|--------|----------------|
 | `src/runtime/instance.py` | Modify | Add `world_state` field and `recompute_world_state()` method to `Instance` dataclass |
-| `src/runtime/world_state.py` | Create | Lightweight aggregator that collects `world_state` from all active instances in a project |
+| `src/runtime/world_state.py` | Create | Lightweight aggregator that collects `world_state` from all active instances in a world |
 | `src/runtime/instance_manager.py` | Modify | Trigger `recompute_world_state()` at lifecycle points and inject aggregated `world_state` into sandbox behavior context |
-| `src/runtime/project_registry.py` | Modify | Wire `WorldState` into the project bundle and register an `EventBus.pre_publish_hook` to recompute the source instance before events are published |
+| `src/runtime/world_registry.py` | Modify | Wire `WorldState` into the world bundle and register an `EventBus.pre_publish_hook` to recompute the source instance before events are published |
 | `src/runtime/scene_manager.py` | Modify | Trigger `recompute_world_state()` after property reconciliation during scene start |
 | `tests/runtime/test_instance.py` | Modify | Add tests for `Instance.recompute_world_state()` |
 | `tests/runtime/test_world_state.py` | Create | Add tests for `WorldState.snapshot()` aggregation |
@@ -38,8 +38,8 @@ def test_instance_recompute_world_state_with_audit_fields():
     inst = Instance(
         instance_id="ladle-001",
         model_name="ladle",
-        project_id="proj-01",
-        scope="project",
+        world_id="proj-01",
+        scope="world",
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
         variables={"temperature": 1500, "weight": 200},
         attributes={"capacity": 300},
@@ -88,7 +88,7 @@ from dataclasses import dataclass, field
 class Instance:
     instance_id: str
     model_name: str
-    project_id: str
+    world_id: str
     scope: str
     model_version: str | None = field(default=None)
     attributes: dict = field(default_factory=dict)
@@ -167,10 +167,10 @@ from src.runtime.instance_manager import InstanceManager
 def test_world_state_snapshot_aggregates_active_instances():
     mgr = InstanceManager()
     inst1 = mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-001",
-        scope="project",
+        scope="world",
         state={"current": "idle"},
         variables={"temperature": 1500},
         model={
@@ -180,10 +180,10 @@ def test_world_state_snapshot_aggregates_active_instances():
     inst1.recompute_world_state()
 
     inst2 = mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-002",
-        scope="project",
+        scope="world",
         state={"current": "moving"},
         variables={"temperature": 1600},
         model={
@@ -194,10 +194,10 @@ def test_world_state_snapshot_aggregates_active_instances():
 
     # Create an archived instance that should be excluded
     inst3 = mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-003",
-        scope="project",
+        scope="world",
         state={"current": "idle"},
         variables={"temperature": 1700},
         model={
@@ -232,13 +232,13 @@ import copy
 
 
 class WorldState:
-    def __init__(self, instance_manager, project_id: str):
+    def __init__(self, instance_manager, world_id: str):
         self._im = instance_manager
-        self._project_id = project_id
+        self._world_id = world_id
 
     def snapshot(self) -> dict:
         result = {}
-        for inst in self._im.list_by_project(self._project_id):
+        for inst in self._im.list_by_world(self._world_id):
             if inst.lifecycle_state == "active" and inst.world_state:
                 result[inst.id] = copy.deepcopy(inst.world_state)
         return result
@@ -254,7 +254,7 @@ Expected: `PASS`
 
 ```bash
 git add src/runtime/world_state.py tests/runtime/test_world_state.py
-git commit -m "feat: add WorldState aggregator for project-level snapshots"
+git commit -m "feat: add WorldState aggregator for world-level snapshots"
 ```
 
 ---
@@ -273,10 +273,10 @@ Append to `tests/runtime/test_instance_manager.py`:
 def test_create_recomputes_world_state():
     mgr = InstanceManager()
     inst = mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-001",
-        scope="project",
+        scope="world",
         state={"current": "idle"},
         variables={"temperature": 1500},
         model={
@@ -290,10 +290,10 @@ def test_run_script_recomputes_world_state():
     bus_reg = EventBusRegistry()
     mgr = InstanceManager(bus_reg)
     inst = mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-001",
-        scope="project",
+        scope="world",
         variables={"temperature": 1500},
         model={
             "variables": {"temperature": {"type": "number", "audit": True}},
@@ -312,17 +312,17 @@ def test_run_script_recomputes_world_state():
         },
     )
     bus = bus_reg.get_or_create("proj-01")
-    bus.publish("heat", {}, source="external", scope="project")
+    bus.publish("heat", {}, source="external", scope="world")
     assert inst.world_state["temperature"] == 1600
 
 
 def test_transition_lifecycle_archived_clears_world_state():
     mgr = InstanceManager()
     inst = mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-001",
-        scope="project",
+        scope="world",
         state={"current": "idle"},
         variables={"temperature": 1500},
         model={
@@ -339,10 +339,10 @@ def test_behavior_context_includes_world_state():
 
     mgr = InstanceManager()
     mgr.create(
-        project_id="proj-01",
+        world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-001",
-        scope="project",
+        scope="world",
         state={"current": "idle"},
         variables={"temperature": 1500},
         model={
@@ -412,8 +412,8 @@ class InstanceManager:
 5. In `transition_lifecycle`, reorder so `recompute_world_state()` happens before `_save_to_store`:
 
 ```python
-    def transition_lifecycle(self, project_id, instance_id, new_state, scope="project"):
-        inst = self.get(project_id, instance_id, scope)
+    def transition_lifecycle(self, world_id, instance_id, new_state, scope="world"):
+        inst = self.get(world_id, instance_id, scope)
         if inst is None:
             return False
         inst.lifecycle_state = new_state
@@ -421,7 +421,7 @@ class InstanceManager:
         self._save_to_store(inst)
         if new_state == "archived":
             with self._lock:
-                self._instances.pop(self._make_key(project_id, instance_id, scope), None)
+                self._instances.pop(self._make_key(world_id, instance_id, scope), None)
             self._unregister_instance(inst)
             inst.world_state = {}
         return True
@@ -472,34 +472,34 @@ git commit -m "feat: wire world_state into InstanceManager lifecycle and sandbox
 
 ---
 
-### Task 4: Wire `WorldState` into `ProjectRegistry`
+### Task 4: Wire `WorldState` into `WorldRegistry`
 
 **Files:**
-- Modify: `src/runtime/project_registry.py`
-- Test: `tests/runtime/test_project_registry.py`
+- Modify: `src/runtime/world_registry.py`
+- Test: `tests/runtime/test_world_registry.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/runtime/test_project_registry.py`:
+Append to `tests/runtime/test_world_registry.py`:
 
 ```python
-def test_load_project_wires_world_state_and_pre_publish_hook(tmp_path):
-    from src.runtime.project_registry import ProjectRegistry
+def test_load_world_wires_world_state_and_pre_publish_hook(tmp_path):
+    from src.runtime.world_registry import WorldRegistry
     from src.runtime.instance_manager import InstanceManager
 
-    registry = ProjectRegistry(base_dir=str(tmp_path))
-    registry.create_project("ladle-proj")
+    registry = WorldRegistry(base_dir=str(tmp_path))
+    registry.create_world("ladle-proj")
 
-    bundle = registry.load_project("ladle-proj")
+    bundle = registry.load_world("ladle-proj")
     assert "world_state" in bundle
     ws = bundle["world_state"]
     im = bundle["instance_manager"]
 
     inst = im.create(
-        project_id="ladle-proj",
+        world_id="ladle-proj",
         model_name="ladle",
         instance_id="ladle-001",
-        scope="project",
+        scope="world",
         state={"current": "idle"},
         variables={"temperature": 1500},
         model={
@@ -512,7 +512,7 @@ def test_load_project_wires_world_state_and_pre_publish_hook(tmp_path):
     # Publish an event from the instance and verify pre_publish_hook recomputes world_state
     bus = bundle["event_bus_registry"].get_or_create("ladle-proj")
     inst.variables["temperature"] = 1600
-    bus.publish("heat", {}, source="ladle-001", scope="project")
+    bus.publish("heat", {}, source="ladle-001", scope="world")
     assert inst.world_state["temperature"] == 1600
 
     # Verify snapshot
@@ -522,13 +522,13 @@ def test_load_project_wires_world_state_and_pre_publish_hook(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/runtime/test_project_registry.py::test_load_project_wires_world_state_and_pre_publish_hook -v`
+Run: `pytest tests/runtime/test_world_registry.py::test_load_world_wires_world_state_and_pre_publish_hook -v`
 
-Expected: `FAIL` because `ProjectRegistry` does not yet create `WorldState`
+Expected: `FAIL` because `WorldRegistry` does not yet create `WorldState`
 
-- [ ] **Step 3: Modify `ProjectRegistry`**
+- [ ] **Step 3: Modify `WorldRegistry`**
 
-Modify `src/runtime/project_registry.py`:
+Modify `src/runtime/world_registry.py`:
 
 1. Add import:
 
@@ -536,10 +536,10 @@ Modify `src/runtime/project_registry.py`:
 from src.runtime.world_state import WorldState
 ```
 
-2. In `load_project`, after creating `bus_reg` and before creating `im`:
+2. In `load_world`, after creating `bus_reg` and before creating `im`:
 
 ```python
-            world_state = WorldState(None, project_id)
+            world_state = WorldState(None, world_id)
 
             im = InstanceManager(
                 bus_reg,
@@ -548,12 +548,12 @@ from src.runtime.world_state import WorldState
             )
             world_state._im = im
 
-            bus = bus_reg.get_or_create(project_id)
+            bus = bus_reg.get_or_create(world_id)
             # This hook only recomputes the publisher (source) instance.
             # Consumers that run scripts will recompute their own world_state
             # inside InstanceManager._execute_action.
             def world_event_hook(event_type, payload, source, scope, target):
-                inst = im.get(project_id, source, scope=scope)
+                inst = im.get(world_id, source, scope=scope)
                 if inst is not None:
                     inst.recompute_world_state()
             bus.add_pre_publish_hook(world_event_hook)
@@ -563,8 +563,8 @@ from src.runtime.world_state import WorldState
 
 ```python
             bundle = {
-                "project_id": project_id,
-                "project_yaml": project_yaml,
+                "world_id": world_id,
+                "world_yaml": world_yaml,
                 "store": store,
                 "event_bus_registry": bus_reg,
                 "instance_manager": im,
@@ -572,7 +572,7 @@ from src.runtime.world_state import WorldState
                 "state_manager": state_mgr,
                 "metric_store": metric_store,
                 "world_state": world_state,
-                "lock": project_lock,
+                "lock": world_lock,
                 "_registry": self,
                 "force_stop_on_shutdown": False,
             }
@@ -580,15 +580,15 @@ from src.runtime.world_state import WorldState
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/runtime/test_project_registry.py::test_load_project_wires_world_state_and_pre_publish_hook -v`
+Run: `pytest tests/runtime/test_world_registry.py::test_load_world_wires_world_state_and_pre_publish_hook -v`
 
 Expected: `PASS`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/runtime/project_registry.py tests/runtime/test_project_registry.py
-git commit -m "feat: wire WorldState into ProjectRegistry with pre_publish_hook"
+git add src/runtime/world_registry.py tests/runtime/test_world_registry.py
+git commit -m "feat: wire WorldState into WorldRegistry with pre_publish_hook"
 ```
 
 ---
@@ -626,7 +626,7 @@ git commit -m "feat: recompute world_state after scene property reconciliation"
 
 - [ ] **Step 1: Run all related tests**
 
-Run: `pytest tests/runtime/test_instance.py tests/runtime/test_world_state.py tests/runtime/test_instance_manager.py tests/runtime/test_project_registry.py tests/runtime/test_scene_manager.py -v`
+Run: `pytest tests/runtime/test_instance.py tests/runtime/test_world_state.py tests/runtime/test_instance_manager.py tests/runtime/test_world_registry.py tests/runtime/test_scene_manager.py -v`
 
 Expected: All tests pass
 
@@ -638,4 +638,4 @@ If no fixes needed, this step is a no-op. If fixes were needed, commit them with
 
 ## Plan Review
 
-After completing the plan document, dispatch the plan-document-reviewer subagent with the plan path and this spec context: "Add a per-instance `world_state` derived property that aggregates `audit: true` fields, maintained automatically by the runtime, and expose it to sandbox behavior scripts via a project-level `WorldState` snapshot."
+After completing the plan document, dispatch the plan-document-reviewer subagent with the plan path and this spec context: "Add a per-instance `world_state` derived property that aggregates `audit: true` fields, maintained automatically by the runtime, and expose it to sandbox behavior scripts via a world-level `WorldState` snapshot."

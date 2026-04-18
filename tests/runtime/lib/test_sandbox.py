@@ -54,15 +54,15 @@ def test_sandbox_dispatch_publishes_event():
     from src.runtime.event_bus import EventBusRegistry
 
     registry = EventBusRegistry()
-    bus = registry.get_or_create("proj-01")
+    bus = registry.get_or_create("world-01")
     received = []
-    bus.register("ladle-001", "project", "ladleLoaded", lambda t, p, s: received.append((t, p, s)))
+    bus.register("ladle-001", "world", "ladleLoaded", lambda t, p, s: received.append((t, p, s)))
 
     executor = SandboxExecutor()
     context = {
-        "this": {"id": "ladle-001", "project_id": "proj-01"},
+        "this": {"id": "ladle-001", "world_id": "world-01"},
         "dispatch": lambda event_type, payload, target=None: bus.publish(
-            event_type, payload, source="ladle-001", scope="project", target=target
+            event_type, payload, source="ladle-001", scope="world", target=target
         ),
     }
     executor.execute('dispatch("ladleLoaded", {"steelAmount": 180})', context)

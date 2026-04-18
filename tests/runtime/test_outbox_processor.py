@@ -48,7 +48,7 @@ async def test_outbox_processor_sends_and_marks_sent(msg_store):
     channel = FakeChannel(result=SendResult.SUCCESS)
     hub = MessageHub(msg_store, channel=channel)
 
-    msg_store.outbox_enqueue("order.created", {"id": "123"}, "src-1", "project", None)
+    msg_store.outbox_enqueue("order.created", {"id": "123"}, "src-1", "world", None)
 
     await hub.start()
     try:
@@ -74,7 +74,7 @@ async def test_outbox_processor_retries_on_retryable(msg_store):
     channel = FakeChannel(result=SendResult.RETRYABLE)
     hub = MessageHub(msg_store, channel=channel)
 
-    msg_store.outbox_enqueue("order.created", {"id": "456"}, "src-1", "project", None)
+    msg_store.outbox_enqueue("order.created", {"id": "456"}, "src-1", "world", None)
 
     await hub.start()
     try:
@@ -102,7 +102,7 @@ async def test_outbox_processor_permanent_failure(msg_store):
     channel = FakeChannel(result=SendResult.PERMANENT)
     hub = MessageHub(msg_store, channel=channel)
 
-    msg_store.outbox_enqueue("order.created", {"id": "789"}, "src-1", "project", None)
+    msg_store.outbox_enqueue("order.created", {"id": "789"}, "src-1", "world", None)
 
     await hub.start()
     try:
@@ -129,7 +129,7 @@ async def test_outbox_processor_permanent_failure(msg_store):
 async def test_outbox_processor_no_channel_does_not_crash(msg_store):
     hub = MessageHub(msg_store, channel=None)
 
-    msg_store.outbox_enqueue("order.created", {"id": "000"}, "src-1", "project", None)
+    msg_store.outbox_enqueue("order.created", {"id": "000"}, "src-1", "world", None)
 
     await hub.start()
     try:

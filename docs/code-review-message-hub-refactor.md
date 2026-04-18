@@ -3,13 +3,13 @@
 **Branch:** `master`  
 **Commit:** `73b3d169efe036f528c8b0762fb002012c19c37d`  
 **Date:** 2026-04-17  
-**Scope:** MessageHub refactor from per-project to worker-level singleton
+**Scope:** MessageHub refactor from per-world to worker-level singleton
 
 ---
 
 ## Summary
 
-Found 7 issues in the recent changes. Several are functional bugs that will directly impact correctness in multi-project or production scenarios.
+Found 7 issues in the recent changes. Several are functional bugs that will directly impact correctness in multi-world or production scenarios.
 
 ---
 
@@ -17,34 +17,34 @@ Found 7 issues in the recent changes. Several are functional bugs that will dire
 
 ### 1. `InboxProcessor._distribute` causes N^2 message duplication
 
-**Description:** `_distribute` loops over each subscribed `project_id` and calls `self._hub.publish(...)`. However, `MessageHub.publish()` itself loops over all subscribed projects for that `event_type`. If N projects subscribe to the same external event, each project receives the message N times.
+**Description:** `_distribute` loops over each subscribed `world_id` and calls `self._hub.publish(...)`. However, `MessageHub.publish()` itself loops over all subscribed worlds for that `event_type`. If N worlds subscribe to the same external event, each world receives the message N times.
 
-**Fix:** Call `event_bus.publish(...)` directly per project instead of re-entering the hub.
+**Fix:** Call `event_bus.publish(...)` directly per world instead of re-entering the hub.
 
 **Link:** [`src/runtime/inbox_processor.py#L53-L67`](https://github.com/yuzhigang/agent-studio/blob/73b3d169efe036f528c8b0762fb002012c19c37d/src/runtime/inbox_processor.py#L53-L67)
 
 ---
 
-### 2. `ProjectRegistry.load_project` never populates `"model_events"`
+### 2. `WorldRegistry.load_world` never populates `"model_events"`
 
-**Description:** The bundle dict returned by `ProjectRegistry.load_project` does not include a `"model_events"` key. Both `run_command.py` and `run_inline.py` call `bundle.get("model_events", {})`, which always yields an empty dict. This leaves `MessageHub._subscriptions` empty and completely breaks external event routing through the hub.
+**Description:** The bundle dict returned by `WorldRegistry.load_world` does not include a `"model_events"` key. Both `run_command.py` and `run_inline.py` call `bundle.get("model_events", {})`, which always yields an empty dict. This leaves `MessageHub._subscriptions` empty and completely breaks external event routing through the hub.
 
 **Fix:** Populate `model_events` in the bundle (likely parsed from model/behavior definitions) or adjust the callers to extract it from the correct source.
 
-**Link:** [`src/runtime/project_registry.py#L91-L103`](https://github.com/yuzhigang/agent-studio/blob/73b3d169efe036f528c8b0762fb002012c19c37d/src/runtime/project_registry.py#L91-L103)
+**Link:** [`src/runtime/world_registry.py#L91-L103`](https://github.com/yuzhigang/agent-studio/blob/73b3d169efe036f528c8b0762fb002012c19c37d/src/runtime/world_registry.py#L91-L103)
 
 ---
 
 ### 3. `MessageHub` lacks thread-safety for mutable state
 
-**Description:** `MessageHub` reads and writes `_subscriptions` and `_projects` without any synchronization. These structures are accessed concurrently from:
+**Description:** `MessageHub` reads and writes `_subscriptions` and `_worlds` without any synchronization. These structures are accessed concurrently from:
 - `InboxProcessor` asyncio tasks
 - `EventBus.pre_publish_hook` callbacks (which can fire from sandbox threads)
 - Main-thread registration and shutdown
 
 A prior commit (`a457761`) fixed the exact same class of thread-safety issue in `EventBus._pre_publish_hooks`.
 
-**Fix:** Add a `threading.RLock` and guard all reads/writes of `_subscriptions` and `_projects`.
+**Fix:** Add a `threading.RLock` and guard all reads/writes of `_subscriptions` and `_worlds`.
 
 **Link:** [`src/runtime/message_hub.py#L13-L46`](https://github.com/yuzhigang/agent-studio/blob/73b3d169efe036f528c8b0762fb002012c19c37d/src/runtime/message_hub.py#L13-L46)
 
@@ -74,9 +74,9 @@ This violates the CLAUDE.md design principle: "Uses a single `InboxProcessor` / 
 
 ### 6. Stale test file `tests/runtime/stores/test_message_store.py` should be deleted
 
-**Description:** This untracked file calls `inbox_enqueue`, `outbox_enqueue`, etc. on `SQLiteStore`, but these per-project `MessageStore` methods were removed in commit `73b3d16` ("chore: remove per-project MessageStore methods from SQLiteStore"). Running this file produces `AttributeError` failures. A correct replacement already exists at `tests/runtime/stores/test_sqlite_message_store.py`.
+**Description:** This untracked file calls `inbox_enqueue`, `outbox_enqueue`, etc. on `SQLiteStore`, but these per-world `MessageStore` methods were removed in commit `73b3d16` ("chore: remove per-world MessageStore methods from SQLiteStore"). Running this file produces `AttributeError` failures. A correct replacement already exists at `tests/runtime/stores/test_sqlite_message_store.py`.
 
-The implementation plan explicitly stated: "Delete `tests/runtime/stores/test_message_store.py` (old per-project message store tests)."
+The implementation plan explicitly stated: "Delete `tests/runtime/stores/test_message_store.py` (old per-world message store tests)."
 
 **Fix:** Delete the file.
 
@@ -108,7 +108,7 @@ Using a static name can cause collisions if multiple inline workers run concurre
 
 ## Recommendations
 
-1. **Fix the N^2 duplication bug first** — it is unambiguous and will break any multi-project worker.
+1. **Fix the N^2 duplication bug first** — it is unambiguous and will break any multi-world worker.
 2. **Resolve `model_events` population** — without it, external event routing is completely non-functional.
 3. **Add thread-safety locks to `MessageHub`** — given the prior `EventBus` fix, this is a known risk.
 4. **Deduplicate supervisor inbound paths** — decide whether `JsonRpcChannel` or `_run_supervisor_client` owns external events, not both.

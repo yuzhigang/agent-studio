@@ -100,7 +100,7 @@ class RabbitMQChannel(Channel):
                         data.get("event_type", ""),
                         data.get("payload", {}),
                         data.get("source", ""),
-                        data.get("scope", "project"),
+                        data.get("scope", "world"),
                         data.get("target"),
                     )
             except Exception:

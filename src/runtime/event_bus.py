@@ -49,7 +49,7 @@ class EventBus:
             handler(event_type, payload, source)
 
     def _scope_matches(self, msg_scope: str, inst_scope: str) -> bool:
-        if msg_scope == "project":
+        if msg_scope == "world":
             return True
         return msg_scope == inst_scope
 
@@ -59,12 +59,12 @@ class EventBusRegistry:
         self._buses: dict[str, EventBus] = {}
         self._lock = threading.Lock()
 
-    def get_or_create(self, project_id: str) -> EventBus:
+    def get_or_create(self, world_id: str) -> EventBus:
         with self._lock:
-            if project_id not in self._buses:
-                self._buses[project_id] = EventBus()
-            return self._buses[project_id]
+            if world_id not in self._buses:
+                self._buses[world_id] = EventBus()
+            return self._buses[world_id]
 
-    def destroy(self, project_id: str):
+    def destroy(self, world_id: str):
         with self._lock:
-            self._buses.pop(project_id, None)
+            self._buses.pop(world_id, None)

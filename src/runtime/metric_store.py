@@ -7,7 +7,7 @@ class MetricStore(ABC):
     @abstractmethod
     def write(
         self,
-        project_id: str,
+        world_id: str,
         instance_id: str,
         variable: str,
         value: Any,
@@ -17,7 +17,7 @@ class MetricStore(ABC):
         ...
 
     @abstractmethod
-    def latest(self, project_id: str, instance_id: str, variable: str) -> Any | None:
+    def latest(self, world_id: str, instance_id: str, variable: str) -> Any | None:
         """Return the latest metric value for an instance variable, or None."""
         ...
 
@@ -30,17 +30,17 @@ class MemoryMetricStore(MetricStore):
 
     def write(
         self,
-        project_id: str,
+        world_id: str,
         instance_id: str,
         variable: str,
         value: Any,
         timestamp: datetime,
     ) -> None:
-        key = (project_id, instance_id, variable)
+        key = (world_id, instance_id, variable)
         self._data.setdefault(key, []).append((timestamp, value))
 
-    def latest(self, project_id: str, instance_id: str, variable: str) -> Any | None:
-        key = (project_id, instance_id, variable)
+    def latest(self, world_id: str, instance_id: str, variable: str) -> Any | None:
+        key = (world_id, instance_id, variable)
         entries = self._data.get(key, [])
         if not entries:
             return None

@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `pyproject.toml:7`
 
-- [ ] **Step 1: Add `pyyaml` to project dependencies**
+- [ ] **Step 1: Add `pyyaml` to world dependencies**
 
 ```toml
 dependencies = [

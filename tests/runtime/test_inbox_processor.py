@@ -23,15 +23,15 @@ async def test_inbox_processor_injects_events_into_event_bus(msg_store):
     event = asyncio.Event()
     bus.register(
         "inst-1",
-        "project",
+        "world",
         "order.created",
         lambda t, p, s: (received.append((t, p, s)), event.set()),
     )
 
     hub = MessageHub(msg_store, channel=None)
-    hub.register_project("proj-1", bus, {"order.created": {"external": True}})
+    hub.register_world("world-1", bus, {"order.created": {"external": True}})
 
-    msg_store.inbox_enqueue("order.created", {"id": "123"}, "ext-1", "project", None)
+    msg_store.inbox_enqueue("order.created", {"id": "123"}, "ext-1", "world", None)
 
     await hub.start()
     try:
@@ -53,15 +53,15 @@ async def test_inbox_processor_no_outbox_loop(msg_store):
     event = asyncio.Event()
     bus.register(
         "inst-1",
-        "project",
+        "world",
         "order.created",
         lambda t, p, s: (received.append((t, p, s)), event.set()),
     )
 
     hub = MessageHub(msg_store, channel=None)
-    hub.register_project("proj-1", bus, {"order.created": {"external": True}})
+    hub.register_world("world-1", bus, {"order.created": {"external": True}})
 
-    msg_store.inbox_enqueue("order.created", {"id": "456"}, "ext-1", "project", None)
+    msg_store.inbox_enqueue("order.created", {"id": "456"}, "ext-1", "world", None)
 
     await hub.start()
     try:
@@ -83,22 +83,22 @@ async def test_inbox_processor_target_routing(msg_store):
     event = asyncio.Event()
     bus.register(
         "inst-target",
-        "project",
+        "world",
         "notify.alert",
         lambda t, p, s: (received_target.append((t, p, s)), event.set()),
     )
     bus.register(
         "inst-other",
-        "project",
+        "world",
         "notify.alert",
         lambda t, p, s: received_other.append((t, p, s)),
     )
 
     hub = MessageHub(msg_store, channel=None)
-    hub.register_project("proj-1", bus, {"notify.alert": {"external": True}})
+    hub.register_world("world-1", bus, {"notify.alert": {"external": True}})
 
     msg_store.inbox_enqueue(
-        "notify.alert", {"level": "high"}, "ext-1", "project", "inst-target"
+        "notify.alert", {"level": "high"}, "ext-1", "world", "inst-target"
     )
 
     await hub.start()

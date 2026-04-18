@@ -31,7 +31,7 @@ git mv src/runtime/cli/main.py src/cli/main.py
 ```
 
 Then edit `src/cli/main.py` to update imports:
-- `from src.runtime.cli.run_command import run_project` → `from src.worker.cli.run_command import run_project`
+- `from src.runtime.cli.run_command import run_world` → `from src.worker.cli.run_command import run_world`
 - `from src.runtime.cli.run_inline import run_inline` → `from src.worker.cli.run_inline import run_inline`
 - `from src.supervisor.cli import supervisor_main` (keep as-is, already correct)
 
@@ -84,7 +84,7 @@ Replace all occurrences of `from src.runtime.server.` with `from src.worker.serv
 
 - [ ] **Step 4: Run a smoke import test**
 
-Run: `python -c "from src.worker.cli.run_command import run_project; from src.worker.cli.run_inline import run_inline; print('OK')"`
+Run: `python -c "from src.worker.cli.run_command import run_world; from src.worker.cli.run_inline import run_inline; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 5: Commit**
@@ -100,11 +100,11 @@ git commit -m "refactor: move worker CLI commands to src/worker/cli/"
 
 **Files:**
 - Create: `src/worker/locks/__init__.py`
-- Create: `src/worker/locks/project_lock.py`
+- Create: `src/worker/locks/world_lock.py`
 - Create: `src/worker/server/__init__.py`
 - Create: `src/worker/server/jsonrpc_ws.py`
 - Delete: `src/runtime/locks/__init__.py`
-- Delete: `src/runtime/locks/project_lock.py`
+- Delete: `src/runtime/locks/world_lock.py`
 - Delete: `src/runtime/server/__init__.py`
 - Delete: `src/runtime/server/jsonrpc_ws.py`
 
@@ -113,14 +113,14 @@ git commit -m "refactor: move worker CLI commands to src/worker/cli/"
 ```bash
 mkdir -p src/worker/locks src/worker/server
 git mv src/runtime/locks/__init__.py src/worker/locks/__init__.py
-git mv src/runtime/locks/project_lock.py src/worker/locks/project_lock.py
+git mv src/runtime/locks/world_lock.py src/worker/locks/world_lock.py
 git mv src/runtime/server/__init__.py src/worker/server/__init__.py
 git mv src/runtime/server/jsonrpc_ws.py src/worker/server/jsonrpc_ws.py
 ```
 
 - [ ] **Step 2: Verify imports in `src/worker/cli/run_command.py` and `run_inline.py` are valid**
 
-Run: `python -c "from src.worker.server.jsonrpc_ws import JsonRpcWebSocketServer; from src.worker.locks.project_lock import ProjectLock; print('OK')"`
+Run: `python -c "from src.worker.server.jsonrpc_ws import JsonRpcWebSocketServer; from src.worker.locks.world_lock import WorldLock; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
@@ -139,7 +139,7 @@ git commit -m "refactor: move locks and server modules to src/worker/"
 - Create: `tests/worker/cli/test_run_command.py`
 - Create: `tests/worker/cli/test_run_inline.py`
 - Create: `tests/worker/locks/__init__.py`
-- Create: `tests/worker/locks/test_project_lock.py`
+- Create: `tests/worker/locks/test_world_lock.py`
 - Create: `tests/worker/server/__init__.py`
 - Create: `tests/worker/server/test_jsonrpc_ws.py`
 - Create: `tests/worker/__init__.py`
@@ -239,7 +239,7 @@ git commit -m "fix: update remaining imports after package restructure"
 ### Task 7: Update old design spec with new package structure
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-04-16-project-runtime-worker-design.md`
+- Modify: `docs/superpowers/specs/2026-04-16-world-runtime-worker-design.md`
 
 - [ ] **Step 1: Update Section 10 "与现有代码的兼容性"**
 
@@ -248,8 +248,8 @@ Replace the package structure bullet with:
 ```markdown
 - 新增模块按职责拆分为四个顶层包：
   - **`src/cli/`**：统一 CLI 入口。`main.py` 负责 argparse 分发，委托给 `src.supervisor.cli` 和 `src.worker.cli`。
-  - **`src/worker/`**：运行时进程外壳。包含 `cli/run_command.py`、`cli/run_inline.py`、`locks/project_lock.py`、`server/jsonrpc_ws.py`。负责把 `runtime` 组装成可独立运行的 OS 进程。
-  - **`src/runtime/`**：业务核心逻辑。包含 `event_bus.py`、`instance_manager.py`、`project_registry.py`、`state_manager.py`、`scene_manager.py`、`stores/`、`lib/` 等。不依赖任何上层包。
+  - **`src/worker/`**：运行时进程外壳。包含 `cli/run_command.py`、`cli/run_inline.py`、`locks/world_lock.py`、`server/jsonrpc_ws.py`。负责把 `runtime` 组装成可独立运行的 OS 进程。
+  - **`src/runtime/`**：业务核心逻辑。包含 `event_bus.py`、`instance_manager.py`、`world_registry.py`、`state_manager.py`、`scene_manager.py`、`stores/`、`lib/` 等。不依赖任何上层包。
   - **`src/supervisor/`**：管理平面逻辑。包含 `cli.py`、`gateway.py`、`server.py`。内部严禁导入 `worker` 或 `runtime` 的模块，仅通过 `shutil.which("agent-studio")` 调用 CLI 入口。
 ```
 
@@ -266,7 +266,7 @@ Append:
 - [ ] **Step 3: Commit spec update**
 
 ```bash
-git add docs/superpowers/specs/2026-04-16-project-runtime-worker-design.md
+git add docs/superpowers/specs/2026-04-16-world-runtime-worker-design.md
 git commit -m "docs: update runtime spec with new package structure"
 ```
 

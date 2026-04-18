@@ -52,7 +52,7 @@ def _wrap_instance(instance: Instance):
     ns.id = instance.id
     ns.instance_id = instance.instance_id
     ns.model_name = instance.model_name
-    ns.project_id = instance.project_id
+    ns.world_id = instance.world_id
     ns.scope = instance.scope
     ns.model_version = instance.model_version
     ns.attributes = _DictProxy(instance.attributes)
@@ -81,16 +81,16 @@ class InstanceManager:
         self._sandbox = sandbox_executor or SandboxExecutor()
 
     @staticmethod
-    def _make_key(project_id: str, instance_id: str, scope: str = "project") -> tuple[str, str]:
+    def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
         if scope.startswith("scene:"):
             scene_id = scope.split(":", 1)[1]
-            return (project_id, f"{instance_id}@scene:{scene_id}")
-        return (project_id, instance_id)
+            return (world_id, f"{instance_id}@scene:{scene_id}")
+        return (world_id, instance_id)
 
     def _build_behavior_context(self, instance: Instance, payload: dict, source: str) -> dict:
         bus = None
         if self._bus_reg is not None:
-            bus = self._bus_reg.get_or_create(instance.project_id)
+            bus = self._bus_reg.get_or_create(instance.world_id)
 
         def dispatch(event_type: str, payload_dict: dict, target: str | None = None):
             if bus is not None:
@@ -160,7 +160,7 @@ class InstanceManager:
     def _register_instance(self, inst: Instance):
         if self._bus_reg is None:
             return
-        bus = self._bus_reg.get_or_create(inst.project_id)
+        bus = self._bus_reg.get_or_create(inst.world_id)
         model = inst.model or {}
         behaviors = model.get("behaviors") or {}
         event_types = set()
@@ -176,7 +176,7 @@ class InstanceManager:
     def _unregister_instance(self, inst: Instance):
         if self._bus_reg is None:
             return
-        bus = self._bus_reg.get_or_create(inst.project_id)
+        bus = self._bus_reg.get_or_create(inst.world_id)
         bus.unregister(inst.id)
 
     def snapshot(self, inst: Instance) -> dict:
@@ -196,15 +196,15 @@ class InstanceManager:
     def _save_to_store(self, inst: Instance):
         if self._store is not None:
             self._store.save_instance(
-                inst.project_id, inst.instance_id, inst.scope, self.snapshot(inst)
+                inst.world_id, inst.instance_id, inst.scope, self.snapshot(inst)
             )
 
     def create(
         self,
-        project_id: str,
+        world_id: str,
         model_name: str,
         instance_id: str,
-        scope: str = "project",
+        scope: str = "world",
         model_version: str | None = None,
         attributes: dict | None = None,
         variables: dict | None = None,
@@ -221,7 +221,7 @@ class InstanceManager:
         inst = Instance(
             instance_id=instance_id,
             model_name=model_name,
-            project_id=project_id,
+            world_id=world_id,
             scope=scope,
             model_version=model_version,
             attributes=copy.deepcopy(attributes),
@@ -231,10 +231,10 @@ class InstanceManager:
             state=copy.deepcopy(state),
             model=copy.deepcopy(model) if model is not None else None,
         )
-        key = self._make_key(project_id, instance_id, scope)
+        key = self._make_key(world_id, instance_id, scope)
         with self._lock:
             if key in self._instances:
-                raise ValueError(f"Instance {instance_id} already exists in project {project_id} with scope {scope}")
+                raise ValueError(f"Instance {instance_id} already exists in world {world_id} with scope {scope}")
             self._instances[key] = inst
             try:
                 self._register_instance(inst)
@@ -244,21 +244,21 @@ class InstanceManager:
         self._save_to_store(inst)
         return inst
 
-    def get(self, project_id: str, instance_id: str, scope: str = "project") -> Instance | None:
-        key = self._make_key(project_id, instance_id, scope)
+    def get(self, world_id: str, instance_id: str, scope: str = "world") -> Instance | None:
+        key = self._make_key(world_id, instance_id, scope)
         with self._lock:
             inst = self._instances.get(key)
             if inst is not None:
                 return inst
             if self._store is None:
                 return None
-            snapshot = self._store.load_instance(project_id, instance_id, scope)
+            snapshot = self._store.load_instance(world_id, instance_id, scope)
             if snapshot is None:
                 return None
             inst = Instance(
                 instance_id=snapshot["instance_id"],
                 model_name=snapshot["model_name"],
-                project_id=snapshot["project_id"],
+                world_id=snapshot["world_id"],
                 scope=snapshot["scope"],
                 model_version=snapshot.get("model_version"),
                 attributes=copy.deepcopy(snapshot.get("attributes", {})),
@@ -281,48 +281,48 @@ class InstanceManager:
                 raise
             return inst
 
-    def list_by_project(self, project_id: str) -> list[Instance]:
+    def list_by_world(self, world_id: str) -> list[Instance]:
         with self._lock:
-            return [inst for (pid, _), inst in self._instances.items() if pid == project_id]
+            return [inst for (pid, _), inst in self._instances.items() if pid == world_id]
 
-    def list_by_scope(self, project_id: str, scope: str) -> list[Instance]:
+    def list_by_scope(self, world_id: str, scope: str) -> list[Instance]:
         with self._lock:
             return [
                 inst for (pid, _), inst in self._instances.items()
-                if pid == project_id and inst.scope == scope
+                if pid == world_id and inst.scope == scope
             ]
 
-    def remove(self, project_id: str, instance_id: str, scope: str = "project") -> bool:
-        key = self._make_key(project_id, instance_id, scope)
+    def remove(self, world_id: str, instance_id: str, scope: str = "world") -> bool:
+        key = self._make_key(world_id, instance_id, scope)
         with self._lock:
             inst = self._instances.pop(key, None)
         if inst is not None:
             self._unregister_instance(inst)
             if self._store is not None:
-                self._store.delete_instance(project_id, instance_id, scope)
+                self._store.delete_instance(world_id, instance_id, scope)
             return True
         return False
 
-    def transition_lifecycle(self, project_id: str, instance_id: str, new_state: str, scope: str = "project") -> bool:
-        inst = self.get(project_id, instance_id, scope)
+    def transition_lifecycle(self, world_id: str, instance_id: str, new_state: str, scope: str = "world") -> bool:
+        inst = self.get(world_id, instance_id, scope)
         if inst is None:
             return False
         inst.lifecycle_state = new_state
         self._save_to_store(inst)
         if new_state == "archived":
             with self._lock:
-                self._instances.pop(self._make_key(project_id, instance_id, scope), None)
+                self._instances.pop(self._make_key(world_id, instance_id, scope), None)
             self._unregister_instance(inst)
         return True
 
-    def copy_for_scene(self, project_id: str, instance_id: str, scene_id: str) -> Instance | None:
+    def copy_for_scene(self, world_id: str, instance_id: str, scene_id: str) -> Instance | None:
         with self._lock:
-            inst = self._instances.get(self._make_key(project_id, instance_id, "project"))
+            inst = self._instances.get(self._make_key(world_id, instance_id, "world"))
             if inst is None:
                 return None
             clone = inst.deep_copy()
             clone.scope = f"scene:{scene_id}"
-            key = self._make_key(project_id, clone.instance_id, clone.scope)
+            key = self._make_key(world_id, clone.instance_id, clone.scope)
             if key in self._instances:
                 raise ValueError(f"CoW copy {instance_id} for scene {scene_id} already exists")
             self._instances[key] = clone

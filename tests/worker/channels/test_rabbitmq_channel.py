@@ -75,7 +75,7 @@ async def test_rabbitmq_channel_send_success(mock_aio_pika):
     await channel.start(lambda *args: None)
 
     result = await channel.send(
-        "order.shipped", {"id": "1"}, "inst-1", "project", None
+        "order.shipped", {"id": "1"}, "inst-1", "world", None
     )
     assert result == SendResult.SUCCESS
 
@@ -96,7 +96,7 @@ async def test_rabbitmq_channel_send_success(mock_aio_pika):
 async def test_rabbitmq_channel_send_retryable_when_not_ready():
     channel = RabbitMQChannel("amqp://guest:guest@localhost/")
     result = await channel.send(
-        "order.shipped", {"id": "1"}, "inst-1", "project", None
+        "order.shipped", {"id": "1"}, "inst-1", "world", None
     )
     assert result == SendResult.RETRYABLE
 
@@ -115,7 +115,7 @@ async def test_rabbitmq_channel_on_message_delivers_to_callback(mock_aio_pika):
             "event_type": "ext.event",
             "payload": {"val": 42},
             "source": "rmq",
-            "scope": "project",
+            "scope": "world",
             "target": "tgt-1",
         }
     ).encode("utf-8")
@@ -129,7 +129,7 @@ async def test_rabbitmq_channel_on_message_delivers_to_callback(mock_aio_pika):
         "ext.event",
         {"val": 42},
         "rmq",
-        "project",
+        "world",
         "tgt-1",
     )
 

@@ -14,7 +14,7 @@ def test_inbox_enqueue_and_read_pending(store):
         event_type="evt.a",
         payload={"x": 1},
         source="src-1",
-        scope="project",
+        scope="world",
         target="tgt-1",
     )
     assert isinstance(mid, int)
@@ -25,7 +25,7 @@ def test_inbox_enqueue_and_read_pending(store):
     assert pending[0]["event_type"] == "evt.a"
     assert pending[0]["payload"] == {"x": 1}
     assert pending[0]["source"] == "src-1"
-    assert pending[0]["scope"] == "project"
+    assert pending[0]["scope"] == "world"
     assert pending[0]["target"] == "tgt-1"
     assert "received_at" in pending[0]
 
@@ -35,7 +35,7 @@ def test_inbox_mark_processed(store):
         event_type="evt.b",
         payload={},
         source="src-1",
-        scope="project",
+        scope="world",
         target=None,
     )
     store.inbox_mark_processed(mid)
@@ -69,7 +69,7 @@ def test_outbox_mark_sent(store):
         event_type="evt.d",
         payload={},
         source="src-2",
-        scope="project",
+        scope="world",
         target=None,
     )
     store.outbox_mark_sent(mid)
@@ -84,7 +84,7 @@ def test_outbox_update_error_with_retry_after(store):
         event_type="evt.e",
         payload={},
         source="src-3",
-        scope="project",
+        scope="world",
         target=None,
     )
 

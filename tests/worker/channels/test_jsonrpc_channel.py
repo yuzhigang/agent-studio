@@ -32,7 +32,7 @@ async def test_jsonrpc_channel_send_success():
         await asyncio.sleep(0.05)
     assert channel.is_ready()
 
-    result = await channel.send("order.shipped", {"id": "1"}, "inst-1", "project", None)
+    result = await channel.send("order.shipped", {"id": "1"}, "inst-1", "world", None)
     assert result == SendResult.SUCCESS
     assert len(received_messages) == 1
     assert received_messages[0]["method"] == "messageHub.publish"
@@ -47,7 +47,7 @@ async def test_jsonrpc_channel_send_success():
 async def test_jsonrpc_channel_send_retryable_when_not_ready():
     channel = JsonRpcChannel("ws://127.0.0.1:1")
     # Do not start
-    result = await channel.send("order.shipped", {"id": "1"}, "inst-1", "project", None)
+    result = await channel.send("order.shipped", {"id": "1"}, "inst-1", "world", None)
     assert result == SendResult.RETRYABLE
 
 
@@ -64,7 +64,7 @@ async def test_jsonrpc_channel_receives_external_event():
                 "event_type": "ext.event",
                 "payload": {"val": 42},
                 "source": "supervisor",
-                "scope": "project",
+                "scope": "world",
                 "target": None,
             },
         }
@@ -87,4 +87,4 @@ async def test_jsonrpc_channel_receives_external_event():
     await server.wait_closed()
 
     assert len(inbound_events) == 1
-    assert inbound_events[0] == ("ext.event", {"val": 42}, "supervisor", "project", None)
+    assert inbound_events[0] == ("ext.event", {"val": 42}, "supervisor", "world", None)

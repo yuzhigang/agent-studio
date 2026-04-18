@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refactor MessageHub from a per-project component to a worker-level singleton that intercepts events via `EventBus.pre_publish_hook`, routes external messages through a shared subscription table, and persists inbox/outbox in a worker-level `messagebox.db`.
+**Goal:** Refactor MessageHub from a per-world component to a worker-level singleton that intercepts events via `EventBus.pre_publish_hook`, routes external messages through a shared subscription table, and persists inbox/outbox in a worker-level `messagebox.db`.
 
 **Architecture:** 
-- A single `MessageHub` instance per worker process registers multiple projects by attaching `pre_publish_hook`s to their `EventBus` instances.
-- A new `SQLiteMessageStore` manages `messagebox.db` (no `project_id` column) for durable inbox/outbox buffering.
-- `InboxProcessor` polls the worker-level inbox and broadcasts to all subscribed projects; `OutboxProcessor` sends all pending messages through the single shared `Channel`.
-- Worker CLI (`run_command.py`, `run_inline.py`) creates one MessageHub and registers/unregisters projects dynamically.
+- A single `MessageHub` instance per worker process registers multiple worlds by attaching `pre_publish_hook`s to their `EventBus` instances.
+- A new `SQLiteMessageStore` manages `messagebox.db` (no `world_id` column) for durable inbox/outbox buffering.
+- `InboxProcessor` polls the worker-level inbox and broadcasts to all subscribed worlds; `OutboxProcessor` sends all pending messages through the single shared `Channel`.
+- Worker CLI (`run_command.py`, `run_inline.py`) creates one MessageHub and registers/unregisters worlds dynamically.
 
 **Tech Stack:** Python 3.11+, asyncio, sqlite3, pytest+anyio
 
@@ -19,18 +19,18 @@
 | File | Responsibility |
 |------|----------------|
 | `src/runtime/event_bus.py` | Add `pre_publish_hook` list to `EventBus` |
-| `src/runtime/stores/base.py` | Add new `MessageStore` interface **without** `project_id` parameters |
+| `src/runtime/stores/base.py` | Add new `MessageStore` interface **without** `world_id` parameters |
 | `src/runtime/stores/sqlite_message_store.py` | New worker-level SQLite store for `messagebox.db` |
 | `src/runtime/stores/__init__.py` | Export `SQLiteMessageStore` |
-| `src/runtime/message_hub.py` | Rewrite as worker-level singleton with `register_project` / `unregister_project` |
+| `src/runtime/message_hub.py` | Rewrite as worker-level singleton with `register_world` / `unregister_world` |
 | `src/runtime/inbox_processor.py` | Update to read from worker-level store and broadcast via subscription table |
 | `src/runtime/outbox_processor.py` | Update to read from worker-level store |
-| `src/worker/cli/run_command.py` | Use single MessageHub; register project before start |
-| `src/worker/cli/run_inline.py` | Use single MessageHub; register all projects before start |
+| `src/worker/cli/run_command.py` | Use single MessageHub; register world before start |
+| `src/worker/cli/run_inline.py` | Use single MessageHub; register all worlds before start |
 | `tests/runtime/test_event_bus.py` | Add `pre_publish_hook` tests |
 | `tests/runtime/stores/test_sqlite_message_store.py` | New tests for worker-level message store |
 | `tests/runtime/test_message_hub.py` | Rewrite for worker-level semantics |
-| `tests/runtime/test_inbox_processor.py` | Update for multi-project broadcast routing |
+| `tests/runtime/test_inbox_processor.py` | Update for multi-world broadcast routing |
 | `tests/runtime/test_outbox_processor.py` | Update for worker-level store |
 
 ---
@@ -50,9 +50,9 @@ def test_pre_publish_hook_called_on_publish():
     def hook(event_type, payload, source, scope, target):
         calls.append((event_type, payload, source, scope, target))
     bus.add_pre_publish_hook(hook)
-    bus.publish("test.event", {"a": 1}, "src-1", "project", "tgt-1")
+    bus.publish("test.event", {"a": 1}, "src-1", "world", "tgt-1")
     assert len(calls) == 1
-    assert calls[0] == ("test.event", {"a": 1}, "src-1", "project", "tgt-1")
+    assert calls[0] == ("test.event", {"a": 1}, "src-1", "world", "tgt-1")
 
 def test_remove_pre_publish_hook():
     bus = EventBus()
@@ -61,7 +61,7 @@ def test_remove_pre_publish_hook():
         calls.append(event_type)
     bus.add_pre_publish_hook(hook)
     bus.remove_pre_publish_hook(hook)
-    bus.publish("test.event", {}, "src-1", "project")
+    bus.publish("test.event", {}, "src-1", "world")
     assert len(calls) == 0
 ```
 
@@ -114,7 +114,7 @@ git commit -m "feat: add EventBus pre_publish_hook"
 - Modify: `src/runtime/stores/__init__.py`
 - Test: `tests/runtime/stores/test_sqlite_message_store.py`
 
-- [ ] **Step 1: Write the new `MessageStore` interface without `project_id`**
+- [ ] **Step 1: Write the new `MessageStore` interface without `world_id`**
 
 In `src/runtime/stores/base.py`, replace the existing `MessageStore` class with:
 
@@ -178,17 +178,17 @@ class MessageStore(ABC):
 
 - [ ] **Step 2: Create `SQLiteMessageStore`**
 
-Create `src/runtime/stores/sqlite_message_store.py` with the implementation from the codebase patterns (schema without `project_id`, same method signatures as new `MessageStore`).
+Create `src/runtime/stores/sqlite_message_store.py` with the implementation from the codebase patterns (schema without `world_id`, same method signatures as new `MessageStore`).
 
 - [ ] **Step 3: Export `SQLiteMessageStore`**
 
 In `src/runtime/stores/__init__.py`:
 ```python
-from .base import ProjectStore, SceneStore, InstanceStore, EventLogStore, MessageStore
+from .base import WorldStore, SceneStore, InstanceStore, EventLogStore, MessageStore
 from .sqlite_store import SQLiteStore
 from .sqlite_message_store import SQLiteMessageStore
 
-__all__ = ["ProjectStore", "SceneStore", "InstanceStore", "EventLogStore", "MessageStore", "SQLiteStore", "SQLiteMessageStore"]
+__all__ = ["WorldStore", "SceneStore", "InstanceStore", "EventLogStore", "MessageStore", "SQLiteStore", "SQLiteMessageStore"]
 ```
 
 - [ ] **Step 4: Write failing tests for `SQLiteMessageStore`**
@@ -209,7 +209,7 @@ Expected: PASS
 
 ```bash
 git add src/runtime/stores/base.py src/runtime/stores/sqlite_message_store.py src/runtime/stores/__init__.py tests/runtime/stores/test_sqlite_message_store.py
-git commit -m "feat: add worker-level SQLiteMessageStore without project_id"
+git commit -m "feat: add worker-level SQLiteMessageStore without world_id"
 ```
 
 ---
@@ -224,17 +224,17 @@ git commit -m "feat: add worker-level SQLiteMessageStore without project_id"
 
 Replace `src/runtime/message_hub.py` with a worker-level `MessageHub` that:
 - Accepts `message_store` and `channel` in `__init__`
-- Maintains `_subscriptions: dict[str, set[str]]` and `_projects: dict[str, tuple[EventBus, Callable]]`
-- `register_project(project_id, event_bus, model_events)` updates subscription table and attaches a `pre_publish_hook` that writes `outbox_enqueue` for `external=True` events
-- `unregister_project(project_id)` removes hook and cleans subscriptions
+- Maintains `_subscriptions: dict[str, set[str]]` and `_worlds: dict[str, tuple[EventBus, Callable]]`
+- `register_world(world_id, event_bus, model_events)` updates subscription table and attaches a `pre_publish_hook` that writes `outbox_enqueue` for `external=True` events
+- `unregister_world(world_id)` removes hook and cleans subscriptions
 - `on_channel_message` writes to inbox
 - `start()` / `stop()` manage processors and channel
 
 - [ ] **Step 2: Write failing tests for worker-level `MessageHub`**
 
 Replace `tests/runtime/test_message_hub.py` with tests covering:
-- `register_project` adds hook and writes outbox on publish
-- `unregister_project` removes hook
+- `register_world` adds hook and writes outbox on publish
+- `unregister_world` removes hook
 - non-external events do not write outbox
 - `on_channel_message` writes inbox
 - `start`/`stop` manages processors and channel
@@ -254,7 +254,7 @@ git commit -m "feat: refactor MessageHub to worker-level singleton"
 
 ---
 
-## Task 4: Update `InboxProcessor` for Worker-Level Multi-Project Broadcast
+## Task 4: Update `InboxProcessor` for Worker-Level Multi-World Broadcast
 
 **Files:**
 - Modify: `src/runtime/inbox_processor.py`
@@ -309,13 +309,13 @@ class InboxProcessor:
 
     def _distribute(self, msg: dict) -> bool:
         event_type = msg["event_type"]
-        project_ids = self._hub._subscriptions.get(event_type, set())
-        if not project_ids:
+        world_ids = self._hub._subscriptions.get(event_type, set())
+        if not world_ids:
             # No subscribers: mark processed to avoid dead messages
             return True
         any_failed = False
-        for project_id in project_ids:
-            event_bus, _hook = self._hub._projects.get(project_id, (None, None))
+        for world_id in world_ids:
+            event_bus, _hook = self._hub._worlds.get(world_id, (None, None))
             if event_bus is None:
                 continue
             try:
@@ -351,19 +351,19 @@ def msg_store(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_inbox_processor_broadcasts_to_subscribed_projects(msg_store):
+async def test_inbox_processor_broadcasts_to_subscribed_worlds(msg_store):
     hub = MessageHub(msg_store, None)
     bus_a = EventBus()
     bus_b = EventBus()
-    hub.register_project("proj-a", bus_a, {"ext.event": {"external": True}})
-    hub.register_project("proj-b", bus_b, {"ext.event": {"external": True}})
+    hub.register_world("proj-a", bus_a, {"ext.event": {"external": True}})
+    hub.register_world("proj-b", bus_b, {"ext.event": {"external": True}})
 
     received_a = []
     received_b = []
-    bus_a.register("inst-a", "project", "ext.event", lambda t, p, s: received_a.append((t, p, s)))
-    bus_b.register("inst-b", "project", "ext.event", lambda t, p, s: received_b.append((t, p, s)))
+    bus_a.register("inst-a", "world", "ext.event", lambda t, p, s: received_a.append((t, p, s)))
+    bus_b.register("inst-b", "world", "ext.event", lambda t, p, s: received_b.append((t, p, s)))
 
-    msg_store.inbox_enqueue("ext.event", {"val": 42}, "src-x", "project", None)
+    msg_store.inbox_enqueue("ext.event", {"val": 42}, "src-x", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.3)
@@ -376,19 +376,19 @@ async def test_inbox_processor_broadcasts_to_subscribed_projects(msg_store):
 
 
 @pytest.mark.anyio
-async def test_inbox_processor_skips_unsubscribed_projects(msg_store):
+async def test_inbox_processor_skips_unsubscribed_worlds(msg_store):
     hub = MessageHub(msg_store, None)
     bus_a = EventBus()
     bus_b = EventBus()
-    hub.register_project("proj-a", bus_a, {"ext.event": {"external": True}})
-    hub.register_project("proj-b", bus_b, {"other.event": {"external": True}})
+    hub.register_world("proj-a", bus_a, {"ext.event": {"external": True}})
+    hub.register_world("proj-b", bus_b, {"other.event": {"external": True}})
 
     received_a = []
     received_b = []
-    bus_a.register("inst-a", "project", "ext.event", lambda t, p, s: received_a.append((t, p, s)))
-    bus_b.register("inst-b", "project", "ext.event", lambda t, p, s: received_b.append((t, p, s)))
+    bus_a.register("inst-a", "world", "ext.event", lambda t, p, s: received_a.append((t, p, s)))
+    bus_b.register("inst-b", "world", "ext.event", lambda t, p, s: received_b.append((t, p, s)))
 
-    msg_store.inbox_enqueue("ext.event", {"val": 1}, "src-x", "project", None)
+    msg_store.inbox_enqueue("ext.event", {"val": 1}, "src-x", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.3)
@@ -404,7 +404,7 @@ async def test_inbox_processor_skips_unsubscribed_projects(msg_store):
 async def test_inbox_processor_no_subscribers_marks_processed(msg_store):
     hub = MessageHub(msg_store, None)
 
-    msg_store.inbox_enqueue("ext.event", {"val": 1}, "src-x", "project", None)
+    msg_store.inbox_enqueue("ext.event", {"val": 1}, "src-x", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.3)
@@ -565,7 +565,7 @@ async def test_outbox_processor_sends_and_marks_sent(msg_store):
     channel = FakeChannel(SendResult.SUCCESS)
     hub = MessageHub(msg_store, channel)
 
-    msg_store.outbox_enqueue("order.shipped", {"id": "1"}, "inst-1", "project", None)
+    msg_store.outbox_enqueue("order.shipped", {"id": "1"}, "inst-1", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.3)
@@ -581,7 +581,7 @@ async def test_outbox_processor_retries_on_retryable(msg_store):
     channel = FakeChannel(SendResult.RETRYABLE)
     hub = MessageHub(msg_store, channel)
 
-    msg_store.outbox_enqueue("order.failed", {"id": "2"}, "inst-1", "project", None)
+    msg_store.outbox_enqueue("order.failed", {"id": "2"}, "inst-1", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.3)
@@ -601,7 +601,7 @@ async def test_outbox_processor_permanent_failure(msg_store):
     channel = FakeChannel(SendResult.PERMANENT)
     hub = MessageHub(msg_store, channel)
 
-    msg_store.outbox_enqueue("order.bad", {"id": "3"}, "inst-1", "project", None)
+    msg_store.outbox_enqueue("order.bad", {"id": "3"}, "inst-1", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.3)
@@ -619,7 +619,7 @@ async def test_outbox_processor_permanent_failure(msg_store):
 async def test_outbox_processor_no_channel_does_not_crash(msg_store):
     hub = MessageHub(msg_store, None)
 
-    msg_store.outbox_enqueue("order.shipped", {"id": "1"}, "inst-1", "project", None)
+    msg_store.outbox_enqueue("order.shipped", {"id": "1"}, "inst-1", "world", None)
 
     await hub.start()
     await asyncio.sleep(0.2)
@@ -652,12 +652,12 @@ git commit -m "feat: update OutboxProcessor for worker-level store"
 - [ ] **Step 1: Update `run_command.py`**
 
 In `src/worker/cli/run_command.py`:
-- Remove per-project MessageHub creation inside `run_project`.
+- Remove per-world MessageHub creation inside `run_world`.
 - Create a single `MessageHub` after loading the bundle.
-- Register the project: `message_hub.register_project(project_id, bus, bundle.get("model_events", {}))`.
+- Register the world: `message_hub.register_world(world_id, bus, bundle.get("model_events", {}))`.
 - Pass `message_hub` to `InstanceManager` via constructor if possible, or set `bundle["instance_manager"]._message_hub = message_hub`.
 - Start `message_hub` before other async tasks.
-- In `_graceful_shutdown`, stop `message_hub` **before** unregistering project.
+- In `_graceful_shutdown`, stop `message_hub` **before** unregistering world.
 
 Example diff pattern:
 ```python
@@ -665,15 +665,15 @@ from src.runtime.stores.sqlite_message_store import SQLiteMessageStore
 
 # ...
 
-def run_project(...):
+def run_world(...):
     # ... load bundle ...
     worker_dir = os.path.join(os.path.expanduser("~"), ".agent-studio", "workers", str(os.getpid()))
     msg_store = SQLiteMessageStore(worker_dir)
     channel = JsonRpcChannel(supervisor_ws) if supervisor_ws else None
     message_hub = MessageHub(msg_store, channel)
 
-    bus = bundle["event_bus_registry"].get_or_create(project_id)
-    message_hub.register_project(project_id, bus, bundle.get("model_events", {}))
+    bus = bundle["event_bus_registry"].get_or_create(world_id)
+    message_hub.register_world(world_id, bus, bundle.get("model_events", {}))
     bundle["instance_manager"]._message_hub = message_hub
 
     # ... signal handlers, loop setup ...
@@ -688,22 +688,22 @@ def run_project(...):
 - [ ] **Step 2: Update `run_inline.py`**
 
 In `src/worker/cli/run_inline.py`:
-- Create one `MessageHub` before the loop over `project_dirs`.
-- For each project, register it on the shared `message_hub`.
-- In `_shutdown`, stop `message_hub` first, then unload projects.
+- Create one `MessageHub` before the loop over `world_dirs`.
+- For each world, register it on the shared `message_hub`.
+- In `_shutdown`, stop `message_hub` first, then unload worlds.
 
 ```python
-def run_inline(project_dirs):
+def run_inline(world_dirs):
     worker_dir = os.path.join(os.path.expanduser("~"), ".agent-studio", "workers", str(os.getpid()))
     msg_store = SQLiteMessageStore(worker_dir)
     message_hub = MessageHub(msg_store, None)
-    bundles = _load_projects(project_dirs, message_hub)
+    bundles = _load_worlds(world_dirs, message_hub)
     # ... shutdown handler stops message_hub before unloading ...
 ```
 
 - [ ] **Step 3: Update `tests/worker/cli/test_run_inline.py`**
 
-Update the test to assert that a single `MessageHub` is created and shared across bundles, and that each bundle's project is registered.
+Update the test to assert that a single `MessageHub` is created and shared across bundles, and that each bundle's world is registered.
 
 - [ ] **Step 4: Run full test suite for worker CLI**
 
@@ -726,14 +726,14 @@ git commit -m "feat: use single worker-level MessageHub in CLI"
 Run: `pytest tests/ -v`
 Expected: All 140+ tests pass.
 
-- [ ] **Step 2: Remove deprecated per-project inbox/outbox from `SQLiteStore` (optional but recommended)**
+- [ ] **Step 2: Remove deprecated per-world inbox/outbox from `SQLiteStore` (optional but recommended)**
 
 If the old `MessageStore` methods on `SQLiteStore` are no longer referenced anywhere, remove:
 - `inbox` and `outbox` table creation from `SQLiteStore._ensure_schema`
 - `MessageStore` from `SQLiteStore` base classes
 - All `inbox_*` and `outbox_*` methods from `SQLiteStore`
 
-Then delete `tests/runtime/stores/test_message_store.py` (the old per-project message store tests).
+Then delete `tests/runtime/stores/test_message_store.py` (the old per-world message store tests).
 
 Run tests again to confirm nothing breaks.
 
@@ -741,7 +741,7 @@ Run tests again to confirm nothing breaks.
 
 ```bash
 git add src/runtime/stores/sqlite_store.py src/runtime/stores/__init__.py tests/runtime/stores/test_message_store.py
-git commit -m "chore: remove per-project MessageStore methods from SQLiteStore"
+git commit -m "chore: remove per-world MessageStore methods from SQLiteStore"
 ```
 
 ---

@@ -7,16 +7,16 @@ class LockAlreadyHeldError(RuntimeError):
     pass
 
 
-class ProjectLock:
-    def __init__(self, project_dir: str):
-        self._project_dir = project_dir
-        self._meta_path = os.path.join(project_dir, ".lock")
-        self._lockfile_path = os.path.join(project_dir, ".lockfile")
+class WorldLock:
+    def __init__(self, world_dir: str):
+        self._world_dir = world_dir
+        self._meta_path = os.path.join(world_dir, ".lock")
+        self._lockfile_path = os.path.join(world_dir, ".lockfile")
         self._lock = None
         self._acquired = False
 
     def acquire(self) -> None:
-        os.makedirs(self._project_dir, exist_ok=True)
+        os.makedirs(self._world_dir, exist_ok=True)
         self._lock = fasteners.InterProcessLock(self._lockfile_path)
         got_it = self._lock.acquire(blocking=False)
         if not got_it:
@@ -28,12 +28,12 @@ class ProjectLock:
                         pid = data.get("pid")
                 except Exception:
                     pass
-            project_id = os.path.basename(self._project_dir)
+            world_id = os.path.basename(self._world_dir)
             if pid is not None:
                 raise LockAlreadyHeldError(
-                    f"Project {project_id} is already loaded in process {pid}"
+                    f"World {world_id} is already loaded in process {pid}"
                 )
-            raise LockAlreadyHeldError(f"Project {project_id} is already locked")
+            raise LockAlreadyHeldError(f"World {world_id} is already locked")
         self._acquired = True
         with open(self._meta_path, "w", encoding="utf-8") as f:
             json.dump(

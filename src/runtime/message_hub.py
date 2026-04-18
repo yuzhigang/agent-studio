@@ -10,18 +10,18 @@ class MessageHub:
     def __init__(self, message_store: MessageStore | None, channel):
         self._msg_store = message_store
         self._channel = channel
-        self._subscriptions: dict[str, set[str]] = {}  # event_type -> {project_id, ...}
-        self._projects: dict[str, tuple[EventBus, Callable]] = {}  # project_id -> (event_bus, hook)
+        self._subscriptions: dict[str, set[str]] = {}  # event_type -> {world_id, ...}
+        self._worlds: dict[str, tuple[EventBus, Callable]] = {}  # world_id -> (event_bus, hook)
         self._inbox_processor: InboxProcessor | None = None
         self._outbox_processor: OutboxProcessor | None = None
 
-    def register_project(self, project_id: str, event_bus: EventBus, model_events: dict[str, dict]) -> None:
-        if project_id in self._projects:
+    def register_world(self, world_id: str, event_bus: EventBus, model_events: dict[str, dict]) -> None:
+        if world_id in self._worlds:
             return
 
         for event_type, meta in model_events.items():
             if meta.get("external", False):
-                self._subscriptions.setdefault(event_type, set()).add(project_id)
+                self._subscriptions.setdefault(event_type, set()).add(world_id)
 
         def hook(event_type: str, payload: dict, source: str, scope: str, target: str | None) -> None:
             if self._msg_store is None:
@@ -31,24 +31,24 @@ class MessageHub:
                 self._msg_store.outbox_enqueue(event_type, payload, source, scope, target)
 
         event_bus.add_pre_publish_hook(hook)
-        self._projects[project_id] = (event_bus, hook)
+        self._worlds[world_id] = (event_bus, hook)
 
-    def unregister_project(self, project_id: str) -> None:
-        entry = self._projects.pop(project_id, None)
+    def unregister_world(self, world_id: str) -> None:
+        entry = self._worlds.pop(world_id, None)
         if entry is None:
             return
         event_bus, hook = entry
         event_bus.remove_pre_publish_hook(hook)
 
         for event_type in list(self._subscriptions.keys()):
-            self._subscriptions[event_type].discard(project_id)
+            self._subscriptions[event_type].discard(world_id)
             if not self._subscriptions[event_type]:
                 del self._subscriptions[event_type]
 
-    def registered_projects(self) -> list[str]:
-        return list(self._projects.keys())
+    def registered_worlds(self) -> list[str]:
+        return list(self._worlds.keys())
 
-    def on_channel_message(self, event_type, payload, source, scope="project", target=None) -> None:
+    def on_channel_message(self, event_type, payload, source, scope="world", target=None) -> None:
         if self._msg_store is not None:
             self._msg_store.inbox_enqueue(event_type, payload, source, scope, target)
 
@@ -74,12 +74,12 @@ class MessageHub:
         if self._channel is not None:
             await self._channel.stop()
 
-    def publish(self, event_type, payload, source, scope="project", target=None) -> None:
-        project_ids = self._subscriptions.get(event_type, set())
-        if not project_ids:
+    def publish(self, event_type, payload, source, scope="world", target=None) -> None:
+        world_ids = self._subscriptions.get(event_type, set())
+        if not world_ids:
             return
-        for project_id in project_ids:
-            event_bus, _ = self._projects.get(project_id, (None, None))
+        for world_id in world_ids:
+            event_bus, _ = self._worlds.get(world_id, (None, None))
             if event_bus is not None:
                 event_bus.publish(event_type, payload, source, scope, target, skip_hooks=True)
 

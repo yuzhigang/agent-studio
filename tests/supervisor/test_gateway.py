@@ -4,7 +4,7 @@ from src.supervisor.gateway import SupervisorGateway
 
 @pytest.fixture
 def gateway():
-    return SupervisorGateway(base_dir="projects")
+    return SupervisorGateway(base_dir="worlds")
 
 
 def test_register_runtime(gateway):
@@ -18,8 +18,8 @@ def test_register_runtime(gateway):
             self.closed = True
 
     ws = FakeWs()
-    gateway.register_runtime_sync("proj-a", ws, "sess-1")
-    rt = gateway.get_runtime("proj-a")
+    gateway.register_runtime_sync("world-a", ws, "sess-1")
+    rt = gateway.get_runtime("world-a")
     assert rt[0] == ws
     assert rt[1] == "sess-1"
 
@@ -36,9 +36,9 @@ def test_replace_runtime_session(gateway):
 
     ws1 = FakeWs()
     ws2 = FakeWs()
-    gateway.register_runtime_sync("proj-a", ws1, "sess-1")
-    gateway.register_runtime_sync("proj-a", ws2, "sess-2")
+    gateway.register_runtime_sync("world-a", ws1, "sess-1")
+    gateway.register_runtime_sync("world-a", ws2, "sess-2")
     assert ws1.closed is True
-    rt = gateway.get_runtime("proj-a")
+    rt = gateway.get_runtime("world-a")
     assert rt[0] == ws2
     assert rt[1] == "sess-2"

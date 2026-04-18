@@ -5,18 +5,18 @@ import threading
 from datetime import datetime, timezone
 
 from src.runtime.stores.base import (
-    ProjectStore,
+    WorldStore,
     SceneStore,
     InstanceStore,
     EventLogStore,
 )
 
 
-class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
-    def __init__(self, project_dir: str):
-        self._project_dir = project_dir
-        os.makedirs(project_dir, exist_ok=True)
-        db_path = os.path.join(project_dir, "runtime.db")
+class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore):
+    def __init__(self, world_dir: str):
+        self._world_dir = world_dir
+        os.makedirs(world_dir, exist_ok=True)
+        db_path = os.path.join(world_dir, "runtime.db")
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA foreign_keys = ON;")
@@ -25,15 +25,15 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
 
     def _ensure_schema(self) -> None:
         schema = """
-        CREATE TABLE IF NOT EXISTS projects (
-            project_id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS worlds (
+            world_id TEXT PRIMARY KEY,
             config TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS scenes (
-            project_id TEXT NOT NULL,
+            world_id TEXT NOT NULL,
             scene_id TEXT NOT NULL,
             mode TEXT NOT NULL,
             refs TEXT NOT NULL,
@@ -42,11 +42,11 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             checkpointed_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (project_id, scene_id)
+            PRIMARY KEY (world_id, scene_id)
         );
 
         CREATE TABLE IF NOT EXISTS instances (
-            project_id TEXT NOT NULL,
+            world_id TEXT NOT NULL,
             instance_id TEXT NOT NULL,
             scope TEXT NOT NULL,
             model_name TEXT NOT NULL,
@@ -59,22 +59,22 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             audit TEXT NOT NULL,
             lifecycle_state TEXT DEFAULT 'active',
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (project_id, instance_id, scope)
+            PRIMARY KEY (world_id, instance_id, scope)
         );
 
         CREATE TABLE IF NOT EXISTS event_log (
-            project_id TEXT NOT NULL,
+            world_id TEXT NOT NULL,
             event_id TEXT NOT NULL,
             event_type TEXT NOT NULL,
             payload TEXT NOT NULL,
             source TEXT NOT NULL,
             scope TEXT NOT NULL,
             timestamp TEXT NOT NULL,
-            PRIMARY KEY (project_id, event_id)
+            PRIMARY KEY (world_id, event_id)
         );
 
-        CREATE TABLE IF NOT EXISTS project_state (
-            project_id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS world_state (
+            world_id TEXT PRIMARY KEY,
             last_event_id TEXT,
             checkpointed_at TEXT NOT NULL
         );
@@ -86,56 +86,56 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    # ProjectStore
-    def save_project(self, project_id: str, config: dict) -> None:
+    # WorldStore
+    def save_world(self, world_id: str, config: dict) -> None:
         now = self._now()
         config_json = json.dumps(config, ensure_ascii=False)
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO projects (project_id, config, created_at, updated_at)
+                INSERT INTO worlds (world_id, config, created_at, updated_at)
                 VALUES (?, ?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
+                ON CONFLICT(world_id) DO UPDATE SET
                     config = excluded.config,
                     updated_at = excluded.updated_at
                 """,
-                (project_id, config_json, now, now),
+                (world_id, config_json, now, now),
             )
             self._conn.commit()
 
-    def load_project(self, project_id: str) -> dict | None:
+    def load_world(self, world_id: str) -> dict | None:
         row = self._conn.execute(
-            "SELECT config, created_at, updated_at FROM projects WHERE project_id = ?",
-            (project_id,),
+            "SELECT config, created_at, updated_at FROM worlds WHERE world_id = ?",
+            (world_id,),
         ).fetchone()
         if row is None:
             return None
         return {
-            "project_id": project_id,
+            "world_id": world_id,
             "config": json.loads(row[0]),
             "created_at": row[1],
             "updated_at": row[2],
         }
 
-    def delete_project(self, project_id: str) -> bool:
+    def delete_world(self, world_id: str) -> bool:
         with self._lock:
             cur = self._conn.execute(
-                "DELETE FROM projects WHERE project_id = ?", (project_id,)
+                "DELETE FROM worlds WHERE world_id = ?", (world_id,)
             )
             self._conn.commit()
             return cur.rowcount > 0
 
     # SceneStore
-    def save_scene(self, project_id: str, scene_id: str, scene_data: dict) -> None:
+    def save_scene(self, world_id: str, scene_id: str, scene_data: dict) -> None:
         now = self._now()
         with self._lock:
             self._conn.execute(
                 """
                 INSERT INTO scenes (
-                    project_id, scene_id, mode, refs, local_instances,
+                    world_id, scene_id, mode, refs, local_instances,
                     last_event_id, checkpointed_at, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id, scene_id) DO UPDATE SET
+                ON CONFLICT(world_id, scene_id) DO UPDATE SET
                     mode = excluded.mode,
                     refs = excluded.refs,
                     local_instances = excluded.local_instances,
@@ -144,7 +144,7 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
                     updated_at = excluded.updated_at
                 """,
                 (
-                    project_id,
+                    world_id,
                     scene_id,
                     scene_data["mode"],
                     json.dumps(scene_data.get("refs", []), ensure_ascii=False),
@@ -157,19 +157,19 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             )
             self._conn.commit()
 
-    def load_scene(self, project_id: str, scene_id: str) -> dict | None:
+    def load_scene(self, world_id: str, scene_id: str) -> dict | None:
         row = self._conn.execute(
             """
             SELECT mode, refs, local_instances, last_event_id, checkpointed_at,
                    created_at, updated_at
-            FROM scenes WHERE project_id = ? AND scene_id = ?
+            FROM scenes WHERE world_id = ? AND scene_id = ?
             """,
-            (project_id, scene_id),
+            (world_id, scene_id),
         ).fetchone()
         if row is None:
             return None
         return {
-            "project_id": project_id,
+            "world_id": world_id,
             "scene_id": scene_id,
             "mode": row[0],
             "refs": json.loads(row[1]),
@@ -180,18 +180,18 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             "updated_at": row[6],
         }
 
-    def list_scenes(self, project_id: str) -> list[dict]:
+    def list_scenes(self, world_id: str) -> list[dict]:
         rows = self._conn.execute(
             """
             SELECT scene_id, mode, refs, local_instances, last_event_id,
                    checkpointed_at, created_at, updated_at
-            FROM scenes WHERE project_id = ?
+            FROM scenes WHERE world_id = ?
             """,
-            (project_id,),
+            (world_id,),
         ).fetchall()
         return [
             {
-                "project_id": project_id,
+                "world_id": world_id,
                 "scene_id": r[0],
                 "mode": r[1],
                 "refs": json.loads(r[2]),
@@ -204,29 +204,29 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             for r in rows
         ]
 
-    def delete_scene(self, project_id: str, scene_id: str) -> bool:
+    def delete_scene(self, world_id: str, scene_id: str) -> bool:
         with self._lock:
             cur = self._conn.execute(
-                "DELETE FROM scenes WHERE project_id = ? AND scene_id = ?",
-                (project_id, scene_id),
+                "DELETE FROM scenes WHERE world_id = ? AND scene_id = ?",
+                (world_id, scene_id),
             )
             self._conn.commit()
             return cur.rowcount > 0
 
     # InstanceStore
     def save_instance(
-        self, project_id: str, instance_id: str, scope: str, snapshot: dict
+        self, world_id: str, instance_id: str, scope: str, snapshot: dict
     ) -> None:
         now = snapshot.get("updated_at") or self._now()
         with self._lock:
             self._conn.execute(
                 """
                 INSERT INTO instances (
-                    project_id, instance_id, scope, model_name, model_version,
+                    world_id, instance_id, scope, model_name, model_version,
                     attributes, state, variables, links, memory, audit,
                     lifecycle_state, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(project_id, instance_id, scope) DO UPDATE SET
+                ON CONFLICT(world_id, instance_id, scope) DO UPDATE SET
                     model_name = excluded.model_name,
                     model_version = excluded.model_version,
                     attributes = excluded.attributes,
@@ -239,7 +239,7 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
                     updated_at = excluded.updated_at
                 """,
                 (
-                    project_id,
+                    world_id,
                     instance_id,
                     scope,
                     snapshot["model_name"],
@@ -256,19 +256,19 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             )
             self._conn.commit()
 
-    def load_instance(self, project_id: str, instance_id: str, scope: str) -> dict | None:
+    def load_instance(self, world_id: str, instance_id: str, scope: str) -> dict | None:
         row = self._conn.execute(
             """
             SELECT model_name, model_version, attributes, state, variables,
                    links, memory, audit, lifecycle_state, updated_at
-            FROM instances WHERE project_id = ? AND instance_id = ? AND scope = ?
+            FROM instances WHERE world_id = ? AND instance_id = ? AND scope = ?
             """,
-            (project_id, instance_id, scope),
+            (world_id, instance_id, scope),
         ).fetchone()
         if row is None:
             return None
         return {
-            "project_id": project_id,
+            "world_id": world_id,
             "instance_id": instance_id,
             "scope": scope,
             "model_name": row[0],
@@ -285,16 +285,16 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
 
     def list_instances(
         self,
-        project_id: str,
+        world_id: str,
         scope: str | None = None,
         lifecycle_state: str | None = None,
     ) -> list[dict]:
         query = """
             SELECT instance_id, scope, model_name, model_version, attributes,
                    state, variables, links, memory, audit, lifecycle_state, updated_at
-            FROM instances WHERE project_id = ?
+            FROM instances WHERE world_id = ?
         """
-        params: list = [project_id]
+        params: list = [world_id]
         if scope is not None:
             query += " AND scope = ?"
             params.append(scope)
@@ -304,7 +304,7 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
         rows = self._conn.execute(query, params).fetchall()
         return [
             {
-                "project_id": project_id,
+                "world_id": world_id,
                 "instance_id": r[0],
                 "scope": r[1],
                 "model_name": r[2],
@@ -321,11 +321,11 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             for r in rows
         ]
 
-    def delete_instance(self, project_id: str, instance_id: str, scope: str) -> bool:
+    def delete_instance(self, world_id: str, instance_id: str, scope: str) -> bool:
         with self._lock:
             cur = self._conn.execute(
-                "DELETE FROM instances WHERE project_id = ? AND instance_id = ? AND scope = ?",
-                (project_id, instance_id, scope),
+                "DELETE FROM instances WHERE world_id = ? AND instance_id = ? AND scope = ?",
+                (world_id, instance_id, scope),
             )
             self._conn.commit()
             return cur.rowcount > 0
@@ -333,7 +333,7 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
     # EventLogStore
     def append(
         self,
-        project_id: str,
+        world_id: str,
         event_id: str,
         event_type: str,
         payload: dict,
@@ -344,11 +344,11 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO event_log (project_id, event_id, event_type, payload, source, scope, timestamp)
+                INSERT INTO event_log (world_id, event_id, event_type, payload, source, scope, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    project_id,
+                    world_id,
                     event_id,
                     event_type,
                     json.dumps(payload, ensure_ascii=False),
@@ -359,35 +359,35 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             )
             self._conn.commit()
 
-    def replay_after(self, project_id: str, last_event_id: str | None) -> list[dict]:
+    def replay_after(self, world_id: str, last_event_id: str | None) -> list[dict]:
         if last_event_id is None:
             rows = self._conn.execute(
                 """
                 SELECT event_id, event_type, payload, source, scope, timestamp
-                FROM event_log WHERE project_id = ? ORDER BY timestamp ASC
+                FROM event_log WHERE world_id = ? ORDER BY timestamp ASC
                 """,
-                (project_id,),
+                (world_id,),
             ).fetchall()
         else:
             # Verify last_event_id exists
             exists = self._conn.execute(
-                "SELECT 1 FROM event_log WHERE project_id = ? AND event_id = ?",
-                (project_id, last_event_id),
+                "SELECT 1 FROM event_log WHERE world_id = ? AND event_id = ?",
+                (world_id, last_event_id),
             ).fetchone()
             if exists is None:
                 raise ValueError(
-                    f"last_event_id {last_event_id!r} not found in event_log for project {project_id}"
+                    f"last_event_id {last_event_id!r} not found in event_log for world {world_id}"
                 )
             rows = self._conn.execute(
                 """
                 SELECT event_id, event_type, payload, source, scope, timestamp
                 FROM event_log
-                WHERE project_id = ? AND timestamp > (
-                    SELECT timestamp FROM event_log WHERE project_id = ? AND event_id = ?
+                WHERE world_id = ? AND timestamp > (
+                    SELECT timestamp FROM event_log WHERE world_id = ? AND event_id = ?
                 )
                 ORDER BY timestamp ASC
                 """,
-                (project_id, project_id, last_event_id),
+                (world_id, world_id, last_event_id),
             ).fetchall()
         return [
             {
@@ -401,32 +401,32 @@ class SQLiteStore(ProjectStore, SceneStore, InstanceStore, EventLogStore):
             for r in rows
         ]
 
-    # Project state helpers (used by StateManager)
-    def save_project_state(
-        self, project_id: str, last_event_id: str | None, checkpointed_at: str
+    # World state helpers (used by StateManager)
+    def save_world_state(
+        self, world_id: str, last_event_id: str | None, checkpointed_at: str
     ) -> None:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO project_state (project_id, last_event_id, checkpointed_at)
+                INSERT INTO world_state (world_id, last_event_id, checkpointed_at)
                 VALUES (?, ?, ?)
-                ON CONFLICT(project_id) DO UPDATE SET
+                ON CONFLICT(world_id) DO UPDATE SET
                     last_event_id = excluded.last_event_id,
                     checkpointed_at = excluded.checkpointed_at
                 """,
-                (project_id, last_event_id, checkpointed_at),
+                (world_id, last_event_id, checkpointed_at),
             )
             self._conn.commit()
 
-    def load_project_state(self, project_id: str) -> dict | None:
+    def load_world_state(self, world_id: str) -> dict | None:
         row = self._conn.execute(
-            "SELECT last_event_id, checkpointed_at FROM project_state WHERE project_id = ?",
-            (project_id,),
+            "SELECT last_event_id, checkpointed_at FROM world_state WHERE world_id = ?",
+            (world_id,),
         ).fetchone()
         if row is None:
             return None
         return {
-            "project_id": project_id,
+            "world_id": world_id,
             "last_event_id": row[0],
             "checkpointed_at": row[1],
         }

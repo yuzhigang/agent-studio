@@ -6,7 +6,7 @@ import copy
 class Instance:
     instance_id: str
     model_name: str
-    project_id: str
+    world_id: str
     scope: str
     model_version: str | None = field(default=None)
     attributes: dict = field(default_factory=dict)

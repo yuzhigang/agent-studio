@@ -1,4 +1,4 @@
-project_id: sim-factory-01
+world_id: sim-factory-01
 name: Simulation Factory 01
 description: 离散事件仿真工厂
 config:

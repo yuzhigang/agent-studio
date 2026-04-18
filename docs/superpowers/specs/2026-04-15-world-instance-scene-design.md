@@ -1,4 +1,4 @@
-# Project-Instance-Scene 架构设计文档
+# World-Instance-Scene 架构设计文档
 
 ## 1. 背景与目标
 
@@ -16,9 +16,9 @@
 | 概念 | 定义 |
 |---|---|
 | **Model** | Agent 的静态配置模板，由 `ModelLoader` 从 `model/` 目录或 `model.yaml` 加载。 |
-| **Instance** | Model 的运行时实体，`instanceId` 在所属 **Project 内唯一**，运行时通过 `(project_id, instance_id)` 联合标识。 |
-| **Project** | 一个完整工厂/产线的数字化镜像，包含全局实例池、全局配置、Scene 集合。 |
-| **Scene** | Project 内的一个**运行视图或仿真上下文**，可引用 Project 实例，也可挂载私有临时实例。 |
+| **Instance** | Model 的运行时实体，`instanceId` 在所属 **World 内唯一**，运行时通过 `(world_id, instance_id)` 联合标识。 |
+| **World** | 一个完整工厂/产线的数字化镜像，包含全局实例池、全局配置、Scene 集合。 |
+| **Scene** | World 内的一个**运行视图或仿真上下文**，可引用 World 实例，也可挂载私有临时实例。 |
 
 ---
 
@@ -26,11 +26,11 @@
 
 实例根据创建位置和生命周期，分为两类：
 
-### 3.1 Project 实例（全局共享）
-- **作用域**：`scope: "project"`
-- **生命周期**：随 Project 启停而创建/销毁。
+### 3.1 World 实例（全局共享）
+- **作用域**：`scope: "world"`
+- **生命周期**：随 World 启停而创建/销毁。
 - **可见性**：可被任意 Scene 通过 `references` 引用。
-- **示例**：建厂时确定的设备（`ladle-001` ~ `ladle-012`），以及 Project 运行过程中动态生成的物料（`slab-20250415-08921`）。
+- **示例**：建厂时确定的设备（`ladle-001` ~ `ladle-012`），以及 World 运行过程中动态生成的物料（`slab-20250415-08921`）。
 
 ### 3.2 Scene 实例（局部私有）
 - **作用域**：`scope: "scene:<scene-id>"`
@@ -81,13 +81,13 @@ lifecycleStates:
 每个 Scene 必须声明自己的运行模式：
 
 ### 5.1 `shared` 模式
-- 直接引用 Project 实例的**真实内存状态**。
+- 直接引用 World 实例的**真实内存状态**。
 - 任何 Scene 内的修改都会立即影响其他引用该实例的 Scene。
 - **适用场景**：监控面板、多视角观察真实产线。
 
 ### 5.2 `isolated` 模式（Copy-on-Write）
-- Scene 启动时，对引用的 Project 实例做**深度拷贝（deep copy）**，至少包括 `state`、`variables`、`links`、`memory`。
-- Scene 内的读写只操作副本，不影响 Project 全局状态。
+- Scene 启动时，对引用的 World 实例做**深度拷贝（deep copy）**，至少包括 `state`、`variables`、`links`、`memory`。
+- Scene 内的读写只操作副本，不影响 World 全局状态。
 - **适用场景**：仿真、培训、what-if 分析。
 
 ```yaml
@@ -120,7 +120,7 @@ scene:
 instanceId: "ladle-001"
 modelName: "ladle"
 modelVersion: "2.0"
-scope: "project"
+scope: "world"
 state:
   current: "full"
   enteredAt: "2026-04-15T10:00:00Z"
@@ -148,7 +148,7 @@ audit:
 ### 6.3 Isolated Scene 的 Metric 回填
 
 当 `isolated` 模式 Scene 启动时：
-1. 从 DB 加载 Project 实例的 `state` 类变量快照。
+1. 从 DB 加载 World 实例的 `state` 类变量快照。
 2. `metric` 类变量从时序数据库读取**最近一次数据点**进行回填。
 3. 若时序库无数据，则使用 Model 定义的 `default` 值。
 
@@ -160,11 +160,11 @@ audit:
 
 1. **引用完整性校验**
    - 对每个 `references` 中的实例，检查其 `links` 指向的目标是否也在本 Scene 中。
-   - 缺失的目标若存在于 Project 全局池中，可按策略**自动拉入** `references`，但级联深度不得超过 **2 层，避免把整个 Project 拖入 Scene。
-   - 超过深度限制或 Project 池中不存在的 link，在 Scene 内暂时置为 `null`，不阻塞启动。
+   - 缺失的目标若存在于 World 全局池中，可按策略**自动拉入** `references`，但级联深度不得超过 **2 层，避免把整个 World 拖入 Scene。
+   - 超过深度限制或 World 池中不存在的 link，在 Scene 内暂时置为 `null`，不阻塞启动。
 
 2. **CoW 快照复制**
-   - 复制 Project 实例的内存状态到 Scene 私有空间。
+   - 复制 World 实例的内存状态到 Scene 私有空间。
 
 3. **Metric 回填**
    - 从时序库补全 `metric` 类变量的最新值。
@@ -181,26 +181,26 @@ audit:
 ### 7.2 实例状态变更
 
 ```python
-# shared 模式：直接修改 Project 实例
+# shared 模式：直接修改 World 实例
 ladle_001.state.current = "maintenance"
 
 # isolated 模式：只修改 Scene 的 CoW 副本
 scene_copy_of_ladle_001.state.current = "maintenance"
-# Project 实例不受影响
+# World 实例不受影响
 ```
 
-## 8. 实例间通信：Project 级 EventBus
+## 8. 实例间通信：World 级 EventBus
 
 ### 8.1 设计原则
 
-- **每个 Project 拥有独立的 `EventBus`**，运行时通过 `EventBusRegistry` 统一管理。
-- **Scene 和 Project 实例不共享跨 Project 的总线**，确保故障隔离和资源独立回收。
-- **通过 `scope` 字段隔离 Project 内部的路由**（全局 vs Scene 隔离）。
+- **每个 World 拥有独立的 `EventBus`**，运行时通过 `EventBusRegistry` 统一管理。
+- **Scene 和 World 实例不共享跨 World 的总线**，确保故障隔离和资源独立回收。
+- **通过 `scope` 字段隔离 World 内部的路由**（全局 vs Scene 隔离）。
 - **DSL 中不暴露内部消息对象**（如 `AgentMessage`），脚本层只用简单的 `dispatch(type, payload)` 语法。
 
 ### 8.2 EventBus 核心实现
 
-每个 `EventBus` 实例只服务一个 Project，内部通过 `scope` 隔离 Scene：
+每个 `EventBus` 实例只服务一个 World，内部通过 `scope` 隔离 Scene：
 
 ```python
 class EventBus:
@@ -237,13 +237,13 @@ class EventBus:
             handler(event_type, payload, source)
 
     def _scope_matches(self, msg_scope: str, instance_id: str) -> bool:
-        inst_scope = self._registry.get(instance_id, "project")
-        if msg_scope == "project":
-            return True  # project 消息在该 project 内全局可达
+        inst_scope = self._registry.get(instance_id, "world")
+        if msg_scope == "world":
+            return True  # world 消息在该 world 内全局可达
         return msg_scope == inst_scope  # scene 消息只匹配同 scope
 ```
 
-运行时通过 `EventBusRegistry` 按 `project_id` 创建、查找和销毁 Bus：
+运行时通过 `EventBusRegistry` 按 `world_id` 创建、查找和销毁 Bus：
 
 ```python
 class EventBusRegistry:
@@ -251,27 +251,27 @@ class EventBusRegistry:
         self._buses: dict[str, EventBus] = {}
         self._lock = threading.Lock()
 
-    def get_or_create(self, project_id: str) -> EventBus:
+    def get_or_create(self, world_id: str) -> EventBus:
         with self._lock:
-            if project_id not in self._buses:
-                self._buses[project_id] = EventBus()
-            return self._buses[project_id]
+            if world_id not in self._buses:
+                self._buses[world_id] = EventBus()
+            return self._buses[world_id]
 
-    def destroy(self, project_id: str):
+    def destroy(self, world_id: str):
         with self._lock:
-            self._buses.pop(project_id, None)   # 整个 Bus 丢弃，GC 自然回收
+            self._buses.pop(world_id, None)   # 整个 Bus 丢弃，GC 自然回收
 ```
 
 **说明**：
 - `handler` 是由 `InstanceManager` 绑定的实例级闭包，签名统一为 `(event_type, payload, source)`。
 - 注册/注销使用 `RLock` 保证并发安全；`publish` 时复制 handler 列表，避免遍历过程中被修改。
-- `InstanceManager` 通过 `EventBusRegistry.get_or_create(project_id)` 获取 Bus，然后在实例创建时调用 `bus.register()`，在实例销毁或 Scene 关闭时调用 `bus.unregister()`；Project 整体销毁时调用 `EventBusRegistry.destroy(project_id)` 丢弃整个 Bus。
+- `InstanceManager` 通过 `EventBusRegistry.get_or_create(world_id)` 获取 Bus，然后在实例创建时调用 `bus.register()`，在实例销毁或 Scene 关闭时调用 `bus.unregister()`；World 整体销毁时调用 `EventBusRegistry.destroy(world_id)` 丢弃整个 Bus。
 
 **路由规则只有两条**：
-1. `scope == "project"` 的消息 → **同一 Project 内的所有实例都能收到**。
-2. `scope == "scene:<id>"` 的消息 → **同一 Project 且同 Scene 的实例才能收到**。
+1. `scope == "world"` 的消息 → **同一 World 内的所有实例都能收到**。
+2. `scope == "scene:<id>"` 的消息 → **同一 World 且同 Scene 的实例才能收到**。
 
-不同 Project 的实例天然隔离，绝不会跨 Project 路由。
+不同 World 的实例天然隔离，绝不会跨 World 路由。
 
 ### 8.3 DSL 语法简化
 
@@ -292,7 +292,7 @@ dispatch("ladleLoaded", {
 ```python
 def dispatch(event_type: str, payload: dict, target: str | None = None):
     scope = _resolve_scope(current_instance)
-    bus = event_bus_registry.get_or_create(current_instance.project_id)
+    bus = event_bus_registry.get_or_create(current_instance.world_id)
     bus.publish(
         event_type=event_type,
         payload=payload,
@@ -306,8 +306,8 @@ def dispatch(event_type: str, payload: dict, target: str | None = None):
 
 | 实例类型 | 所在上下文 | dispatch 自动推导的 scope |
 |---|---|---|
-| `ladle-001` (project) | Project | `"project"` |
-| `ladle-001` (project) | shared Scene | `"project"`（不隔离） |
+| `ladle-001` (world) | World | `"world"` |
+| `ladle-001` (world) | shared Scene | `"world"`（不隔离） |
 | `ladle-001` (CoW) | isolated Scene `drill` | `"scene:drill"`（强制改写） |
 | `temp-inspector-01` | isolated Scene `drill` | `"scene:drill"` |
 
@@ -344,7 +344,7 @@ def on_event(instance, event_type, payload, source):
 
 ### 8.4 外部系统入口
 
-外部系统发送事件时，通过 `EventBusRegistry` 获取目标 Project 的 Bus，默认进 `project` scope：
+外部系统发送事件时，通过 `EventBusRegistry` 获取目标 World 的 Bus，默认进 `world` scope：
 
 ```python
 bus = event_bus_registry.get_or_create("steel-plant-01")
@@ -352,25 +352,25 @@ bus.publish(
     event_type="beginLoad",
     payload={"source": "MES", "converterId": "C01"},
     source="__external__",
-    scope="project",
+    scope="world",
     target="ladle-001"
 )
 ```
 
-若外部系统需向 isolated Scene 发消息，必须通过 Scene 专属 API（如 `POST /scenes/{sceneId}/events`），由 `SceneController` 获取对应 Project 的 Bus，并将 scope 设为 `"scene:{sceneId}"`。
+若外部系统需向 isolated Scene 发消息，必须通过 Scene 专属 API（如 `POST /scenes/{sceneId}/events`），由 `SceneController` 获取对应 World 的 Bus，并将 scope 设为 `"scene:{sceneId}"`。
 
 ### 8.5 消息边界总结
 
 | 场景 | Scope | 影响范围 |
 |---|---|---|
-| Project 实例之间通信 | `project` | 全局所有实例 |
-| Shared Scene 实例通信 | `project` | 全局所有实例（透传） |
+| World 实例之间通信 | `world` | 全局所有实例 |
+| Shared Scene 实例通信 | `world` | 全局所有实例（透传） |
 | Isolated Scene 的 local 实例通信 | `scene:<id>` | 仅该 Scene 内部 |
 | Isolated Scene 的 reference 实例通信 | `scene:<id>`（强制改写） | 仅该 Scene 内部 |
-| 外部系统 → Project 实例 | `project` | 指定的 Project 实例 |
+| 外部系统 → World 实例 | `world` | 指定的 World 实例 |
 
 这意味着：
-- `local` 实例的行为副作用**不会逃逸**到 Project 或其他 Scene。
+- `local` 实例的行为副作用**不会逃逸**到 World 或其他 Scene。
 - Scene 关闭时，只需注销该 scope 下的实例订阅，CoW 副本自然不可达。
 
 ---
@@ -382,7 +382,7 @@ bus.publish(
 | `ModelLoader` | 加载静态 Model 定义 | **否**，继续负责纯定义加载 |
 | `LibRegistry` | 扫描 `libs/` 并注册脚本函数 | **否**，实例通过 `modelName` 解析到 `agents/` 下的 `libs/` |
 | `SandboxExecutor` | 沙箱执行脚本 | **否**，脚本层通过 `dispatch()` 自动推导 scope，无需感知 `sceneContext` |
-| **新增 `InstanceManager`** | 管理 Project/Scene 的实例生命周期、CoW、持久化；持有 `ModelLoader` 输出的定义，用于解析 `x-category` 并指导差异化持久化 | **新增** |
+| **新增 `InstanceManager`** | 管理 World/Scene 的实例生命周期、CoW、持久化；持有 `ModelLoader` 输出的定义，用于解析 `x-category` 并指导差异化持久化 | **新增** |
 | **新增 `SceneController`** | 负责 Scene 启动、校验、事件边界、清理 | **新增** |
 
 ---
@@ -393,7 +393,7 @@ bus.publish(
 - **原因**：在当前复杂度下，Fleet 只是实例的逻辑分组，可以用标签或查询条件替代，无需作为一级概念引入。若未来实例数量达到管理瓶颈，再考虑引入。
 
 ### 决策 2：Scene 默认消息隔离
-- **原因**：隔离模式的核心用途是仿真和 what-if 分析，如果消息能逃逸到外部，会导致 Project 真实状态被污染，仿真失去意义。
+- **原因**：隔离模式的核心用途是仿真和 what-if 分析，如果消息能逃逸到外部，会导致 World 真实状态被污染，仿真失去意义。
 
 ### 决策 3：Derived Properties 恢复后强制重算
 - **原因**：`derivedProperties` 是纯计算值，不持久化。实例从快照恢复时，必须保证在第一帧状态机运行前完成重算，否则 behaviors/rules 可能读到过期或缺失值。
