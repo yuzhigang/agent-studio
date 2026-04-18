@@ -1,7 +1,12 @@
+import logging
 import os
+
 import yaml
 
+from src.runtime.instance_loader import InstanceLoader
 from src.runtime.locks.world_lock import WorldLock
+from src.runtime.model_loader import ModelLoader
+from src.runtime.model_resolver import ModelResolver
 from src.runtime.stores.sqlite_store import SQLiteStore
 from src.runtime.event_bus import EventBusRegistry
 from src.runtime.instance_manager import InstanceManager
@@ -9,14 +14,18 @@ from src.runtime.scene_manager import SceneManager
 from src.runtime.state_manager import StateManager
 from src.runtime.world_state import WorldState
 
+logger = logging.getLogger(__name__)
+
 
 class WorldRegistry:
     def __init__(
         self,
         base_dir: str = "worlds",
+        global_model_paths=None,
         metric_store_factory=None,
     ):
         self._base_dir = base_dir
+        self._global_model_paths = global_model_paths or []
         self._metric_store_factory = metric_store_factory
         self._loaded: dict[str, dict] = {}
 
@@ -71,9 +80,18 @@ class WorldRegistry:
             bus_reg = EventBusRegistry()
             world_state = WorldState(None, world_id)
 
+            resolver = ModelResolver(world_dir, self._global_model_paths)
+
+            def model_loader(model_id: str) -> dict | None:
+                model_dir = resolver.resolve(model_id)
+                if model_dir is not None:
+                    return ModelLoader.load(model_dir.parent)
+                return None
+
             im = InstanceManager(
                 bus_reg,
                 instance_store=store,
+                model_loader=model_loader,
                 world_state=world_state,
             )
             world_state._im = im
@@ -103,6 +121,8 @@ class WorldRegistry:
                 metric_store=metric_store,
             )
             scene_mgr._state_manager = state_mgr
+
+            self._load_instance_declarations(world_id, world_dir, im, model_loader)
 
             state_mgr.restore_world(world_id)
             state_mgr.track_world(world_id)
@@ -159,3 +179,80 @@ class WorldRegistry:
 
     def get_loaded_world(self, world_id: str) -> dict | None:
         return self._loaded.get(world_id)
+
+    @staticmethod
+    def _merge_defaults(model_specs: dict, overrides: dict) -> dict:
+        result = {}
+        for key, spec in model_specs.items():
+            if isinstance(spec, dict):
+                result[key] = overrides.get(key, spec.get("default"))
+            else:
+                result[key] = overrides.get(key, spec)
+        for key, value in overrides.items():
+            if key not in result:
+                result[key] = value
+        return result
+
+    def _load_instance_declarations(
+        self,
+        world_id: str,
+        world_dir: str,
+        im: InstanceManager,
+        model_loader,
+    ) -> None:
+        """Scan and create static instances from *.instance.yaml declarations."""
+        declarations = InstanceLoader.scan(world_dir)
+        for decl in declarations:
+            model_id = decl.get("modelId")
+            instance_id = decl.get("id")
+            if not model_id or not instance_id:
+                logger.warning(
+                    "Skipping instance declaration missing modelId or id: %s",
+                    decl.get("_source_file", "unknown"),
+                )
+                continue
+
+            model = model_loader(model_id)
+            if model is None:
+                logger.warning(
+                    "Skipping instance declaration %s: model %s not found",
+                    instance_id,
+                    model_id,
+                )
+                continue
+
+            # Merge defaults with overrides
+            variables = self._merge_defaults(
+                model.get("variables") or {}, decl.get("variables") or {}
+            )
+            attributes = self._merge_defaults(
+                model.get("attributes") or {}, decl.get("attributes") or {}
+            )
+            links = self._merge_defaults(
+                model.get("links") or {}, decl.get("links") or {}
+            )
+            memory = self._merge_defaults(
+                model.get("memory") or {}, decl.get("memory") or {}
+            )
+
+            state = {"current": None, "enteredAt": None}
+            if decl.get("state"):
+                state["current"] = decl["state"]
+
+            # If instance already exists (from DB or previous declaration), remove it
+            # so that declaration wins.
+            if im.get(world_id, instance_id, scope="world") is not None:
+                im.remove(world_id, instance_id, scope="world")
+
+            im.create(
+                world_id=world_id,
+                model_name=model_id,
+                instance_id=instance_id,
+                scope="world",
+                model=model,
+                state=state,
+                attributes=attributes,
+                variables=variables,
+                links=links,
+                memory=memory,
+            )
