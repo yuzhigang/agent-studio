@@ -1,0 +1,16 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: sensor-01
+modelId: heartbeat
+state: idle
+metadata:
+  name: sensor-01
+attributes:
+  interval: 500
+variables:
+  count: 0
+  temperature: 30
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null
+extensions: {}

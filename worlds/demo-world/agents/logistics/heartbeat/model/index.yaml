@@ -1,0 +1,184 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: heartbeat
+  title: 温度监控传感器
+  description: 带状态机的演示智能体，可监控温度、触发告警、自动恢复
+
+attributes:
+  interval:
+    type: number
+    default: 1000
+    description: 心跳间隔(ms)
+  threshold:
+    type: number
+    default: 80.0
+    description: 温度告警阈值(°C)
+  maxTemp:
+    type: number
+    default: 120.0
+    description: 最大允许温度(°C)
+
+variables:
+  count:
+    type: number
+    default: 0
+    description: 心跳计数
+  temperature:
+    type: number
+    default: 25.0
+    description: 当前温度(°C)
+  lastBeat:
+    type: string
+    default: ""
+    description: 上次心跳时间
+  maxRecorded:
+    type: number
+    default: 25.0
+    description: 记录的最高温度
+  alertCount:
+    type: number
+    default: 0
+    description: 告警次数
+
+states:
+  idle:
+    title: 空闲
+    description: 传感器未启动
+    group: workState
+    initialState: true
+  monitoring:
+    title: 监控中
+    description: 正常运行，接收温度数据
+    group: workState
+  alert:
+    title: 告警
+    description: 温度超限，已触发告警
+    group: workState
+
+transitions:
+  startMonitoring:
+    title: 启动监控
+    from: idle
+    to: monitoring
+    trigger:
+      type: event
+      name: start
+  tempOverThreshold:
+    title: 温度超限
+    from: monitoring
+    to: alert
+    trigger:
+      type: condition
+      window:
+        type: time-sliding
+        duration: 1
+      condition: this.variables.temperature >= this.attributes.threshold
+  recoverFromAlert:
+    title: 温度恢复
+    from: alert
+    to: monitoring
+    trigger:
+      type: condition
+      window:
+        type: time-sliding
+        duration: 1
+      condition: this.variables.temperature < this.attributes.threshold * 0.8
+  stopMonitoring:
+    title: 停止监控
+    from: monitoring
+    to: idle
+    trigger:
+      type: event
+      name: stop
+  resetAlert:
+    title: 告警复位
+    from: alert
+    to: idle
+    trigger:
+      type: event
+      name: reset
+
+behaviors:
+  onBeat:
+    title: 收到心跳
+    trigger:
+      type: event
+      name: beat
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.count += 1
+          import datetime
+          this.variables.lastBeat = datetime.datetime.now().isoformat()
+          print(f"[{this.id}] Beat #{this.variables.count} | state={this.state.get('current')} | temp={this.variables.temperature}°C")
+
+  onTickUpdateTemp:
+    title: 收到温度数据
+    trigger:
+      type: event
+      name: tick
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          new_temp = payload.get("temperature", this.variables.temperature)
+          this.variables.temperature = round(new_temp, 1)
+          if new_temp > this.variables.maxRecorded:
+            this.variables.maxRecorded = round(new_temp, 1)
+          print(f"[{this.id}] 温度更新: {this.variables.temperature}°C (max={this.variables.maxRecorded})")
+
+  onEnterMonitoringLog:
+    title: 进入监控状态
+    trigger:
+      type: stateEnter
+      state: monitoring
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] >>> 进入监控模式")
+
+  onEnterAlertLog:
+    title: 进入告警状态
+    trigger:
+      type: stateEnter
+      state: alert
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.alertCount += 1
+          print(f"[{this.id}] !!! 告警触发! 温度={this.variables.temperature}°C 超过阈值={this.attributes.threshold}°C (第{this.variables.alertCount}次)")
+      - type: triggerEvent
+        name: alertTriggered
+        payload:
+          sensorId: this.id
+          temperature: this.variables.temperature
+          threshold: this.attributes.threshold
+          timestamp: datetime.now().isoformat()
+
+  onEnterIdleReset:
+    title: 进入空闲复位
+    trigger:
+      type: stateEnter
+      state: idle
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.temperature = 25.0
+          this.variables.count = 0
+          print(f"[{this.id}] --- 复位到空闲状态")
+
+  onDispatchAssigned:
+    title: 收到派工指令
+    trigger:
+      type: event
+      name: dispatchAssigned
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          task = payload.get("task", "unknown")
+          print(f"[{this.id}] 收到派工: {task}")

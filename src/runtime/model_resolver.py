@@ -46,15 +46,28 @@ class ModelResolver:
     def _find_model_dir(root: Path, model_id: str) -> Path | None:
         """Recursively search root for */{model_id}/model directory.
 
+        Also supports legacy single-file models at */{model_id}/model.yaml.
+
         Args:
             root: Directory to search under
             model_id: The model identifier to find
 
         Returns:
-            Path to the model/ directory if found, None otherwise
+            Path to the model/ directory if found, or the parent directory
+            containing model.yaml for legacy models. None otherwise.
         """
+        # Prefer directory-based models: */{model_id}/model/
         pattern = f"{model_id}/model"
         matches = list(root.rglob(pattern))
-        if matches:
-            return matches[0]
+        for match in matches:
+            if match.is_dir():
+                return match
+
+        # Fallback to legacy single-file models: */{model_id}/model.yaml
+        legacy_pattern = f"{model_id}/model.yaml"
+        legacy_matches = list(root.rglob(legacy_pattern))
+        for match in legacy_matches:
+            if match.is_file():
+                return match.parent
+
         return None
