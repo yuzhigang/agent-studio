@@ -70,7 +70,7 @@ class StateManager:
             instances = self._im.list_by_world(world_id)
             for inst in instances:
                 if inst.lifecycle_state in ("active", "completed"):
-                    snapshot = self._im.snapshot(inst)
+                    snapshot = self._im.build_persist_dict(inst)
                     self._instance_store.save_instance(
                         world_id, inst.id, inst.scope, snapshot
                     )
@@ -130,7 +130,7 @@ class StateManager:
         with lock:
             scene_instances = self._im.list_by_scope(world_id, f"scene:{scene_id}")
             for inst in scene_instances:
-                snapshot = self._im.snapshot(inst)
+                snapshot = self._im.build_persist_dict(inst)
                 self._instance_store.save_instance(
                     world_id, inst.id, inst.scope, snapshot
                 )
