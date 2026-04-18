@@ -23,6 +23,69 @@ def test_instance_creation():
     assert inst.audit == {"version": 0, "updatedAt": None, "lastEventId": None}
 
 
+def test_instance_update_snapshot_with_audit_fields():
+    inst = Instance(
+        instance_id="ladle-001",
+        model_name="ladle",
+        world_id="proj-01",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500, "weight": 200},
+        attributes={"capacity": 300},
+        model={
+            "variables": {
+                "temperature": {"type": "number", "audit": True},
+                "weight": {"type": "number", "audit": True},
+                "operator": {"type": "string"},
+            },
+            "attributes": {
+                "capacity": {"type": "number", "audit": True},
+                "material": {"type": "string"},
+            },
+            "derivedProperties": {
+                "loadRatio": {"type": "number", "audit": True},
+            },
+        },
+    )
+    inst._update_snapshot()
+    assert inst.snapshot["temperature"] == 1500
+    assert inst.snapshot["weight"] == 200
+    assert inst.snapshot["capacity"] == 300
+    assert inst.snapshot["loadRatio"] is None
+    assert "operator" not in inst.snapshot
+    assert "material" not in inst.snapshot
+
+    # Verify world_state property assembles correctly
+    ws = inst.world_state
+    assert ws["id"] == "ladle-001"
+    assert ws["state"] == "idle"
+    assert ws["updated_at"] == "2024-01-01T00:00:00Z"
+    assert ws["lifecycle_state"] == "active"
+    assert ws["snapshot"]["temperature"] == 1500
+
+
+def test_instance_update_snapshot_caches_audit_fields():
+    inst = Instance(
+        instance_id="ladle-001",
+        model_name="ladle",
+        world_id="proj-01",
+        scope="world",
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}}
+        },
+    )
+    assert not inst._audit_fields
+    inst._update_snapshot()
+    assert "temperature" in inst._audit_fields
+    assert inst._audit_fields["temperature"] == "variables"
+
+    # Change variable and update again - should use cached fields
+    inst.variables["temperature"] = 1600
+    inst._update_snapshot()
+    assert inst.snapshot["temperature"] == 1600
+
+
 def test_instance_deep_copy_isolation():
     inst = Instance(
         instance_id="ladle-001",
