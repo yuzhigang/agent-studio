@@ -77,3 +77,84 @@ def test_world_state_snapshot_groups_by_model_name():
     assert "updated_at" in item
     assert "lifecycle_state" in item
     assert "snapshot" in item
+
+
+def test_world_state_get_model():
+    mgr = InstanceManager()
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={"variables": {"temperature": {"type": "number", "audit": True}}},
+    )
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-002",
+        scope="world",
+        state={"current": "moving", "enteredAt": "2024-01-01T01:00:00Z"},
+        variables={"temperature": 1600},
+        model={"variables": {"temperature": {"type": "number", "audit": True}}},
+    )
+    mgr.create(
+        world_id="proj-01",
+        model_name="crane",
+        instance_id="crane-001",
+        scope="world",
+        state={"current": "lifting", "enteredAt": "2024-01-01T00:30:00Z"},
+        variables={"loadWeight": 5000},
+        model={"variables": {"loadWeight": {"type": "number", "audit": True}}},
+    )
+
+    ws = WorldState(mgr, "proj-01")
+    ladle_list = ws.get_model("ladle")
+    assert len(ladle_list) == 2
+    assert {item["id"] for item in ladle_list} == {"ladle-001", "ladle-002"}
+
+    crane_list = ws.get_model("crane")
+    assert len(crane_list) == 1
+    assert crane_list[0]["id"] == "crane-001"
+
+    assert ws.get_model("nonexistent") == []
+
+
+def test_world_state_get_instance():
+    mgr = InstanceManager()
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={"variables": {"temperature": {"type": "number", "audit": True}}},
+    )
+
+    ws = WorldState(mgr, "proj-01")
+    item = ws.get_instance("ladle-001")
+    assert item is not None
+    assert item["id"] == "ladle-001"
+    assert item["state"] == "idle"
+    assert item["snapshot"]["temperature"] == 1500
+
+    assert ws.get_instance("nonexistent") is None
+
+
+def test_world_state_get_instance_state():
+    mgr = InstanceManager()
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={"variables": {"temperature": {"type": "number", "audit": True}}},
+    )
+
+    ws = WorldState(mgr, "proj-01")
+    assert ws.get_instance_state("ladle-001") == "idle"
+    assert ws.get_instance_state("nonexistent") is None
