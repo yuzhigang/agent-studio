@@ -1,5 +1,7 @@
 import json
 
+from websockets.protocol import State
+
 
 class JsonRpcConnection:
     def __init__(self, websocket):
@@ -45,12 +47,19 @@ class JsonRpcConnection:
                 return self.build_error(req_id, -32603, str(e))
         return None
 
+    def _is_open(self) -> bool:
+        if self._ws is None:
+            return False
+        if hasattr(self._ws, "state"):
+            return self._ws.state == State.OPEN
+        return not self._ws.closed
+
     async def send(self, msg: dict):
-        if self._ws is not None and not self._ws.closed:
+        if self._is_open():
             await self._ws.send(json.dumps(msg))
 
     async def close(self):
-        if self._ws is not None and not self._ws.closed:
+        if self._is_open():
             await self._ws.close()
 
 

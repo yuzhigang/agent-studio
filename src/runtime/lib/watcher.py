@@ -22,10 +22,10 @@ class _ReloadHandler(FileSystemEventHandler):
 
 
 class LibWatcher:
-    def __init__(self, agents_root: str, registry: LibRegistry | None = None):
+    def __init__(self, agents_root: str, registry: LibRegistry | None = None, observer_class=None):
         self.agents_root = agents_root
         self.registry = registry or LibRegistry(_singleton=True)
-        self.observer = Observer()
+        self.observer = (observer_class or Observer)()
         self.handler = _ReloadHandler(self.registry)
 
     def start(self):

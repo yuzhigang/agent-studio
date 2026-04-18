@@ -2,6 +2,7 @@ import os
 import time
 import tempfile
 import pytest
+from watchdog.observers.polling import PollingObserver
 from src.runtime.lib.registry import LibRegistry
 from src.runtime.lib.watcher import LibWatcher
 
@@ -26,7 +27,7 @@ def demo(args: dict) -> dict:
         registry.scan(tmpdir)
         assert registry.lookup("ladle", "demo", "demo")({}) == {"version": 1}
 
-        watcher = LibWatcher(tmpdir, registry=registry)
+        watcher = LibWatcher(tmpdir, registry=registry, observer_class=PollingObserver)
         watcher.start()
 
         # Modify file

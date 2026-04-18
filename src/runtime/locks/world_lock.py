@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import fasteners
 
 
@@ -8,6 +9,9 @@ class LockAlreadyHeldError(RuntimeError):
 
 
 class WorldLock:
+    _in_process_locks: dict[str, int] = {}
+    _in_process_locks_lock = threading.Lock()
+
     def __init__(self, world_dir: str):
         self._world_dir = world_dir
         self._meta_path = os.path.join(world_dir, ".lock")
@@ -17,9 +21,20 @@ class WorldLock:
 
     def acquire(self) -> None:
         os.makedirs(self._world_dir, exist_ok=True)
+
+        with self._in_process_locks_lock:
+            if self._world_dir in self._in_process_locks:
+                world_id = os.path.basename(self._world_dir)
+                raise LockAlreadyHeldError(
+                    f"World {world_id} is already loaded in this process"
+                )
+            self._in_process_locks[self._world_dir] = 1
+
         self._lock = fasteners.InterProcessLock(self._lockfile_path)
         got_it = self._lock.acquire(blocking=False)
         if not got_it:
+            with self._in_process_locks_lock:
+                del self._in_process_locks[self._world_dir]
             pid = None
             if os.path.exists(self._meta_path):
                 try:
@@ -50,6 +65,8 @@ class WorldLock:
             self._lock.release()
             self._acquired = False
             self._lock = None
+        with self._in_process_locks_lock:
+            self._in_process_locks.pop(self._world_dir, None)
 
     def __enter__(self):
         self.acquire()
