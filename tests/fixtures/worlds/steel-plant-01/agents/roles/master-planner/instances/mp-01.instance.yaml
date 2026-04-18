@@ -1,0 +1,15 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: mp-01
+modelId: master-planner
+state: idle
+metadata:
+  name: mp-01
+attributes:
+  skillLevel: expert
+variables:
+  tasksAssigned: 0
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null
+extensions: {}

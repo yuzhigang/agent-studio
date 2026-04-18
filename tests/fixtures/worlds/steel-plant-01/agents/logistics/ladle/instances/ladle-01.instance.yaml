@@ -1,0 +1,15 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: ladle-01
+modelId: ladle
+state: empty
+metadata:
+  name: ladle-01
+attributes:
+  capacity: 200
+variables:
+  steelAmount: 0
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null
+extensions: {}
