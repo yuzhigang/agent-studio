@@ -7,6 +7,7 @@ from src.runtime.event_bus import EventBusRegistry
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.scene_manager import SceneManager
 from src.runtime.state_manager import StateManager
+from src.runtime.world_state import WorldState
 
 
 class WorldRegistry:
@@ -68,7 +69,25 @@ class WorldRegistry:
             store.save_world(world_id, world_yaml.get("config", {}))
 
             bus_reg = EventBusRegistry()
-            im = InstanceManager(bus_reg, instance_store=store)
+            world_state = WorldState(None, world_id)
+
+            im = InstanceManager(
+                bus_reg,
+                instance_store=store,
+                world_state=world_state,
+            )
+            world_state._im = im
+
+            bus = bus_reg.get_or_create(world_id)
+            # This hook only recomputes the publisher (source) instance.
+            # Consumers that run scripts will recompute their own snapshot
+            # inside InstanceManager._execute_action.
+            def world_event_hook(event_type, payload, source, scope, target):
+                inst = im.get(world_id, source, scope=scope)
+                if inst is not None:
+                    inst._update_snapshot()
+            bus.add_pre_publish_hook(world_event_hook)
+
             scene_mgr = SceneManager(im, bus_reg, scene_store=store)
             metric_store = (
                 self._metric_store_factory(world_id)
@@ -97,6 +116,7 @@ class WorldRegistry:
                 "scene_manager": scene_mgr,
                 "state_manager": state_mgr,
                 "metric_store": metric_store,
+                "world_state": world_state,
                 "lock": world_lock,
                 "_registry": self,
                 "force_stop_on_shutdown": False,

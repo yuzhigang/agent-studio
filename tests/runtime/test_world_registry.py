@@ -118,3 +118,41 @@ def test_unload_world_releases_lock(registry):
     bundle2 = registry.load_world("world-a")
     assert bundle2 is not None
     registry.unload_world("world-a")
+
+
+def test_load_world_wires_world_state_and_pre_publish_hook(registry):
+    registry.create_world("ladle-proj")
+
+    bundle = registry.load_world("ladle-proj")
+    assert "world_state" in bundle
+    ws = bundle["world_state"]
+    im = bundle["instance_manager"]
+
+    inst = im.create(
+        world_id="ladle-proj",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "audit": True}}
+        },
+    )
+    # snapshot should already be computed by InstanceManager.create
+    assert inst.snapshot["temperature"] == 1500
+
+    # Publish an event from the instance and verify pre_publish_hook updates snapshot
+    bus = bundle["event_bus_registry"].get_or_create("ladle-proj")
+    inst.variables["temperature"] = 1600
+    bus.publish("heat", {}, source="ladle-001", scope="world")
+    assert inst.snapshot["temperature"] == 1600
+
+    # Verify WorldState snapshot structure
+    snapshot = ws.snapshot()
+    assert "ladle" in snapshot
+    assert len(snapshot["ladle"]) == 1
+    assert snapshot["ladle"][0]["id"] == "ladle-001"
+    assert snapshot["ladle"][0]["snapshot"]["temperature"] == 1600
+
+    registry.unload_world("ladle-proj")
