@@ -31,3 +31,9 @@ agent-studio = "src.runtime.cli.main:main"
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib -p anyio"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-anyio>=0.0.0",
+]
