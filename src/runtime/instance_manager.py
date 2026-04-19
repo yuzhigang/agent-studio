@@ -138,10 +138,8 @@ class InstanceManager:
             raise ValueError(f"Transition '{transition_name}' not found")
         current = instance.state.get("current")
         if tx.get("from") != current:
-            raise ValueError(
-                f"Invalid transition '{transition_name}': current state is '{current}', "
-                f"expected '{tx.get('from')}'"
-            )
+            # Silent skip: multiple triggers may compete, invalid from is normal
+            return
         instance.state["current"] = tx["to"]
         instance.state["enteredAt"] = datetime.now(timezone.utc).isoformat()
         instance._update_snapshot()

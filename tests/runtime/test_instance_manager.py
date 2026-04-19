@@ -539,7 +539,7 @@ def test_transition_state_changes_current_state():
     assert inst.state["enteredAt"] is not None
 
 
-def test_transition_state_from_wrong_state_raises():
+def test_transition_state_from_wrong_state_skips():
     bus_reg = EventBusRegistry()
     mgr = InstanceManager(bus_reg)
     inst = mgr.create(
@@ -554,8 +554,8 @@ def test_transition_state_from_wrong_state_raises():
             }
         },
     )
-    with pytest.raises(ValueError, match="Invalid transition"):
-        mgr._transition_state(inst, "start")
+    mgr._transition_state(inst, "start")  # silent skip
+    assert inst.state["current"] == "alert"
 
 
 def test_execute_actions_runs_multiple_actions():
