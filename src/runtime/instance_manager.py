@@ -10,10 +10,13 @@ from src.runtime.lib.sandbox import SandboxExecutor
 
 
 class _DictProxy:
-    """Wrap a dict so that keys can be accessed as attributes (read/write)."""
+    """Wrap a dict so that keys can be accessed as attributes (read/write).
+    Optionally tracks changed field paths for trigger notification."""
 
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, path_prefix: str = "", changed_fields: list | None = None):
         object.__setattr__(self, "_data", data)
+        object.__setattr__(self, "_path_prefix", path_prefix)
+        object.__setattr__(self, "_changed_fields", changed_fields)
 
     def __getattr__(self, name: str):
         try:
@@ -21,29 +24,38 @@ class _DictProxy:
         except KeyError:
             raise AttributeError(name)
         if isinstance(val, dict):
-            return _DictProxy(val)
+            nested_prefix = f"{self._path_prefix}.{name}" if self._path_prefix else name
+            return _DictProxy(val, path_prefix=nested_prefix, changed_fields=self._changed_fields)
         return val
 
     def __setattr__(self, name: str, value):
-        if name == "_data":
+        if name in ("_data", "_path_prefix", "_changed_fields"):
             object.__setattr__(self, name, value)
             return
         self._data[name] = value
+        if self._changed_fields is not None:
+            field_path = f"{self._path_prefix}.{name}" if self._path_prefix else name
+            self._changed_fields.append(field_path)
 
     def get(self, key, default=None):
         val = self._data.get(key, default)
         if isinstance(val, dict):
-            return _DictProxy(val)
+            nested_prefix = f"{self._path_prefix}.{key}" if self._path_prefix else key
+            return _DictProxy(val, path_prefix=nested_prefix, changed_fields=self._changed_fields)
         return val
 
     def __getitem__(self, key):
         val = self._data[key]
         if isinstance(val, dict):
-            return _DictProxy(val)
+            nested_prefix = f"{self._path_prefix}.{key}" if self._path_prefix else key
+            return _DictProxy(val, path_prefix=nested_prefix, changed_fields=self._changed_fields)
         return val
 
     def __setitem__(self, key, value):
         self._data[key] = value
+        if self._changed_fields is not None:
+            field_path = f"{self._path_prefix}.{key}" if self._path_prefix else key
+            self._changed_fields.append(field_path)
 
     def __contains__(self, key):
         return key in self._data
@@ -52,7 +64,7 @@ class _DictProxy:
         return iter(self._data)
 
 
-def _wrap_instance(instance: Instance):
+def _wrap_instance(instance: Instance, changed_fields: list | None = None):
     """Expose an Instance as a namespace compatible with behavior scripts."""
     ns = SimpleNamespace()
     ns.id = instance.id
@@ -61,11 +73,11 @@ def _wrap_instance(instance: Instance):
     ns.world_id = instance.world_id
     ns.scope = instance.scope
     ns.model_version = instance.model_version
-    ns.attributes = _DictProxy(instance.attributes)
-    ns.variables = _DictProxy(instance.variables)
+    ns.attributes = _DictProxy(instance.attributes, path_prefix="attributes", changed_fields=changed_fields)
+    ns.variables = _DictProxy(instance.variables, path_prefix="variables", changed_fields=changed_fields)
     ns.links = _DictProxy(instance.links)
     ns.memory = _DictProxy(instance.memory)
-    ns.state = _DictProxy(instance.state)
+    ns.state = _DictProxy(instance.state, path_prefix="state", changed_fields=changed_fields)
     ns.audit = _DictProxy(instance.audit)
     ns.lifecycle_state = instance.lifecycle_state
     return ns
@@ -79,6 +91,7 @@ class InstanceManager:
         model_loader: Callable[[str], dict | None] | None = None,
         sandbox_executor: SandboxExecutor | None = None,
         world_state=None,
+        trigger_registry=None,
     ):
         self._instances: dict[tuple[str, str], Instance] = {}
         self._lock = threading.Lock()
@@ -87,6 +100,7 @@ class InstanceManager:
         self._model_loader = model_loader
         self._sandbox = sandbox_executor or SandboxExecutor()
         self._world_state = world_state
+        self._trigger_registry = trigger_registry
 
     @staticmethod
     def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
@@ -95,7 +109,7 @@ class InstanceManager:
             return (world_id, f"{instance_id}@scene:{scene_id}")
         return (world_id, instance_id)
 
-    def _build_behavior_context(self, instance: Instance, payload: dict, source: str) -> dict:
+    def _build_behavior_context(self, instance: Instance, payload: dict, source: str, changed_fields: list | None = None) -> dict:
         bus = None
         if self._bus_reg is not None:
             bus = self._bus_reg.get_or_create(instance.world_id)
@@ -109,18 +123,40 @@ class InstanceManager:
             world_state = self._world_state.snapshot()
 
         return {
-            "this": _wrap_instance(instance),
+            "this": _wrap_instance(instance, changed_fields=changed_fields),
             "payload": _DictProxy(payload),
             "source": source,
             "dispatch": dispatch,
             "world_state": _DictProxy(world_state),
         }
 
-    def _execute_action(self, instance: Instance, action: dict, payload: dict, source: str) -> None:
-        action_type = action.get("type")
-        context = self._build_behavior_context(instance, payload, source)
+    def _transition_state(self, instance: Instance, transition_name: str) -> None:
+        model = instance.model or {}
+        transitions = model.get("transitions") or {}
+        tx = transitions.get(transition_name)
+        if tx is None:
+            raise ValueError(f"Transition '{transition_name}' not found")
+        current = instance.state.get("current")
+        if tx.get("from") != current:
+            raise ValueError(
+                f"Invalid transition '{transition_name}': current state is '{current}', "
+                f"expected '{tx.get('from')}'"
+            )
+        instance.state["current"] = tx["to"]
+        instance.state["enteredAt"] = datetime.now(timezone.utc).isoformat()
+        instance._update_snapshot()
+        self._save_to_store(instance)
 
-        if action_type == "runScript":
+    def _execute_action(self, instance: Instance, action: dict, payload: dict, source: str, context_override=None) -> None:
+        action_type = action.get("type")
+        context = context_override or self._build_behavior_context(instance, payload, source)
+
+        if action_type == "transition":
+            transition_name = action.get("transition")
+            if transition_name:
+                self._transition_state(instance, transition_name)
+
+        elif action_type == "runScript":
             script = action.get("script", "")
             engine = action.get("scriptEngine", "python")
             if engine == "python" and script:
@@ -147,51 +183,55 @@ class InstanceManager:
             if dispatch_fn and event_name:
                 dispatch_fn(event_name, evaluated)
 
-    def _on_event(self, instance: Instance, event_type: str, payload: dict, source: str):
-        model = instance.model or {}
-        behaviors = model.get("behaviors") or {}
+    def _execute_actions(self, instance: Instance, actions: list, payload: dict, source: str) -> None:
+        changed_fields = []
+        for action in actions:
+            context = self._build_behavior_context(instance, payload, source, changed_fields=changed_fields)
+            self._execute_action(instance, action, payload, source, context_override=context)
 
-        for behavior in behaviors.values():
-            trigger = behavior.get("trigger", {})
-            if trigger.get("type") != "event":
-                continue
-            if trigger.get("name") != event_type:
-                continue
+        if self._trigger_registry is not None:
+            for field_path in set(changed_fields):
+                parts = field_path.split(".")
+                if len(parts) >= 2:
+                    section = parts[0]
+                    key = parts[1]
+                    source_dict = getattr(instance, section, {})
+                    new_val = source_dict.get(key)
+                    self._trigger_registry.notify_value_change(instance, field_path, None, new_val)
 
+    def _make_behavior_callback(self, instance, trigger, actions):
+        def callback(inst, payload=None, source="trigger", **kwargs):
             when_expr = trigger.get("when")
             if when_expr:
-                context = self._build_behavior_context(instance, payload, source)
+                context = self._build_behavior_context(inst, payload or {}, source)
                 expr = when_expr.replace("null", "None") if isinstance(when_expr, str) else when_expr
                 try:
                     if not self._sandbox.execute(f"result = ({expr})", context):
-                        continue
+                        return
                 except Exception:
-                    continue
-
-            for action in behavior.get("actions", []):
-                self._execute_action(instance, action, payload, source)
+                    return
+            self._execute_actions(inst, actions, payload or {}, source)
+        return callback
 
     def _register_instance(self, inst: Instance):
-        if self._bus_reg is None:
+        if self._trigger_registry is None:
             return
-        bus = self._bus_reg.get_or_create(inst.world_id)
         model = inst.model or {}
         behaviors = model.get("behaviors") or {}
-        event_types = set()
-        for b in behaviors.values():
-            trigger = b.get("trigger", {})
-            if trigger.get("type") == "event":
-                event_types.add(trigger.get("name"))
-        if not event_types:
-            event_types.add("__noop__")
-        for et in event_types:
-            bus.register(inst.id, inst.scope, et, functools.partial(self._on_event, inst))
+        for name, behavior in behaviors.items():
+            trigger = behavior.get("trigger")
+            if not trigger:
+                continue
+            actions = behavior.get("actions", [])
+            callback = self._make_behavior_callback(inst, trigger, actions)
+            self._trigger_registry.register(inst, trigger, callback, tag=name)
 
     def _unregister_instance(self, inst: Instance):
-        if self._bus_reg is None:
-            return
-        bus = self._bus_reg.get_or_create(inst.world_id)
-        bus.unregister(inst.id)
+        if self._bus_reg is not None:
+            bus = self._bus_reg.get_or_create(inst.world_id)
+            bus.unregister(inst.id)
+        if self._trigger_registry is not None:
+            self._trigger_registry.unregister_instance(inst)
 
     def build_persist_dict(self, inst: Instance) -> dict:
         return {

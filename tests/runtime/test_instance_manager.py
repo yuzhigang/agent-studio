@@ -188,8 +188,13 @@ def test_transition_lifecycle_returns_false_for_missing_instance():
 
 
 def test_on_event_runs_script_action():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
     bus_reg = EventBusRegistry()
-    mgr = InstanceManager(bus_reg)
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+    mgr = InstanceManager(bus_reg, trigger_registry=te)
     inst = mgr.create(
         world_id="world-01",
         model_name="ladle",
@@ -217,8 +222,13 @@ def test_on_event_runs_script_action():
 
 
 def test_on_event_when_condition_filters_behavior():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
     bus_reg = EventBusRegistry()
-    mgr = InstanceManager(bus_reg)
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+    mgr = InstanceManager(bus_reg, trigger_registry=te)
     inst = mgr.create(
         world_id="world-01",
         model_name="ladle",
@@ -254,8 +264,13 @@ def test_on_event_when_condition_filters_behavior():
 
 
 def test_on_event_trigger_event_action():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
     bus_reg = EventBusRegistry()
-    mgr = InstanceManager(bus_reg)
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+    mgr = InstanceManager(bus_reg, trigger_registry=te)
     mgr.create(
         world_id="world-01",
         model_name="ladle",
@@ -339,8 +354,13 @@ def test_create_updates_snapshot():
 
 
 def test_run_script_updates_snapshot():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
     bus_reg = EventBusRegistry()
-    mgr = InstanceManager(bus_reg)
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+    mgr = InstanceManager(bus_reg, trigger_registry=te)
     inst = mgr.create(
         world_id="proj-01",
         model_name="ladle",
@@ -472,3 +492,176 @@ def test_lazy_load_restores_world_state():
     assert inst is not None
     assert inst.world_state["id"] == "ladle-001"
     assert inst.world_state["snapshot"]["temperature"] == 1500
+
+
+def test_dict_proxy_tracks_changes():
+    from src.runtime.instance_manager import _DictProxy
+
+    data = {"temperature": 20, "nested": {"value": 1}}
+    proxy = _DictProxy(data)
+    proxy._changed_fields = []
+
+    proxy.temperature = 25
+    assert "temperature" in proxy._changed_fields
+
+    proxy.nested.value = 2
+    assert "nested.value" in proxy._changed_fields
+
+
+def test_dict_proxy_tracks_with_path_prefix():
+    from src.runtime.instance_manager import _DictProxy
+
+    data = {"temperature": 20}
+    proxy = _DictProxy(data, path_prefix="variables")
+    proxy._changed_fields = []
+
+    proxy.temperature = 25
+    assert "variables.temperature" in proxy._changed_fields
+
+
+def test_transition_state_changes_current_state():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        world_id="w1",
+        model_name="ladle",
+        instance_id="l1",
+        scope="world",
+        state={"current": "idle", "enteredAt": None},
+        model={
+            "transitions": {
+                "start": {"from": "idle", "to": "monitoring"}
+            }
+        },
+    )
+    mgr._transition_state(inst, "start")
+    assert inst.state["current"] == "monitoring"
+    assert inst.state["enteredAt"] is not None
+
+
+def test_transition_state_from_wrong_state_raises():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        world_id="w1",
+        model_name="ladle",
+        instance_id="l1",
+        scope="world",
+        state={"current": "alert", "enteredAt": None},
+        model={
+            "transitions": {
+                "start": {"from": "idle", "to": "monitoring"}
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Invalid transition"):
+        mgr._transition_state(inst, "start")
+
+
+def test_execute_actions_runs_multiple_actions():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        world_id="w1",
+        model_name="ladle",
+        instance_id="l1",
+        scope="world",
+        variables={"count": 0, "temp": 20},
+        model={
+            "transitions": {
+                "start": {"from": "idle", "to": "monitoring"}
+            }
+        },
+    )
+    actions = [
+        {"type": "runScript", "scriptEngine": "python", "script": "this.variables.count += 1"},
+        {"type": "runScript", "scriptEngine": "python", "script": "this.variables.temp = 30"},
+    ]
+    mgr._execute_actions(inst, actions, {}, "test")
+    assert inst.variables["count"] == 1
+    assert inst.variables["temp"] == 30
+
+
+def test_execute_actions_transition_action():
+    bus_reg = EventBusRegistry()
+    mgr = InstanceManager(bus_reg)
+    inst = mgr.create(
+        world_id="w1",
+        model_name="ladle",
+        instance_id="l1",
+        scope="world",
+        state={"current": "idle", "enteredAt": None},
+        model={
+            "transitions": {
+                "start": {"from": "idle", "to": "monitoring"}
+            }
+        },
+    )
+    actions = [
+        {"type": "transition", "transition": "start"},
+    ]
+    mgr._execute_actions(inst, actions, {}, "test")
+    assert inst.state["current"] == "monitoring"
+
+
+def test_register_instance_creates_trigger_registry_entries():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
+    bus_reg = EventBusRegistry()
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+
+    mgr = InstanceManager(bus_reg, trigger_registry=te)
+
+    inst = mgr.create(
+        world_id="w1",
+        model_name="ladle",
+        instance_id="l1",
+        scope="world",
+        model={
+            "behaviors": {
+                "onStart": {
+                    "trigger": {"type": "event", "name": "start"},
+                    "actions": [{"type": "runScript", "scriptEngine": "python", "script": "this.variables.x = 1"}],
+                }
+            }
+        },
+    )
+
+    bus = bus_reg.get_or_create("w1")
+    bus.publish("start", {}, source="ext", scope="world")
+    assert inst.variables["x"] == 1
+
+
+def test_unregister_instance_removes_trigger_entries():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
+    bus_reg = EventBusRegistry()
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+
+    mgr = InstanceManager(bus_reg, trigger_registry=te)
+
+    mgr.create(
+        world_id="w1",
+        model_name="ladle",
+        instance_id="l1",
+        scope="world",
+        model={
+            "behaviors": {
+                "onStart": {
+                    "trigger": {"type": "event", "name": "start"},
+                    "actions": [{"type": "runScript", "scriptEngine": "python", "script": "this.variables.x = 1"}],
+                }
+            }
+        },
+    )
+    mgr.remove("w1", "l1", scope="world")
+
+    bus = bus_reg.get_or_create("w1")
+    received = []
+    bus.register("observer", "world", "start", lambda t, p, s: received.append(t))
+    bus.publish("start", {}, source="ext", scope="world")
+    assert len(received) == 1  # only observer, not the removed instance
