@@ -43,7 +43,7 @@ class AlarmManager:
     def register_instance_alarms(self, instance, alarm_configs):
         for alarm_id, config in alarm_configs.items():
             trigger_cfg = config["trigger"]
-            clear_cfg = config.get("clear") or self._build_default_clear(trigger_cfg)
+            clear_cfg = config.get("clear") if "clear" in config else self._build_default_clear(trigger_cfg)
 
             trigger_callback = lambda inst, alarm_id=alarm_id, cfg=config: self._on_trigger(inst, alarm_id, cfg)
             trigger_tag = f"alarm:{alarm_id}:trigger"

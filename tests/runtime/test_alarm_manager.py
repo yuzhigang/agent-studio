@@ -28,10 +28,54 @@ def test_build_default_clear_for_condition():
     trigger = {"type": "condition", "condition": "this.variables.temperature > 80"}
     clear = am._build_default_clear(trigger)
     assert clear["type"] == "condition"
-    assert "not (this.variables.temperature > 80)" in clear["condition"]
+    assert clear["condition"] == "not (this.variables.temperature > 80)"
 
 
 def test_build_default_clear_for_event_is_none():
     am = AlarmManager(None, None, None)
     trigger = {"type": "event", "name": "start"}
     assert am._build_default_clear(trigger) is None
+
+
+class FakeTriggerRegistry:
+    def __init__(self):
+        self._entries = []
+
+    def register(self, instance, trigger, callback, tag=None):
+        entry_id = f"entry_{len(self._entries)}"
+        self._entries.append({"id": entry_id, "instance": instance, "trigger": trigger, "tag": tag})
+        return entry_id
+
+    def unregister(self, entry_id):
+        self._entries = [e for e in self._entries if e["id"] != entry_id]
+
+
+def test_register_instance_alarms():
+    fake_reg = FakeTriggerRegistry()
+    am = AlarmManager(fake_reg, None, None)
+    inst = FakeInstance()
+
+    configs = {
+        "alarm1": {
+            "trigger": {"type": "event", "name": "start"},
+            "clear": {"type": "event", "name": "stop"},
+        }
+    }
+    am.register_instance_alarms(inst, configs)
+    assert len(fake_reg._entries) == 2
+    assert fake_reg._entries[0]["tag"] == "alarm:alarm1:trigger"
+    assert fake_reg._entries[1]["tag"] == "alarm:alarm1:clear"
+
+
+def test_unregister_instance_alarms():
+    fake_reg = FakeTriggerRegistry()
+    am = AlarmManager(fake_reg, None, None)
+    inst = FakeInstance()
+
+    configs = {"alarm1": {"trigger": {"type": "event", "name": "start"}}}
+    am.register_instance_alarms(inst, configs)
+    assert len(fake_reg._entries) == 1
+
+    am.unregister_instance_alarms(inst)
+    assert len(fake_reg._entries) == 0
+    assert len(am._states) == 0
