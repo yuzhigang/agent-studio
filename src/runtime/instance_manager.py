@@ -146,6 +146,8 @@ class InstanceManager:
         instance.state["enteredAt"] = datetime.now(timezone.utc).isoformat()
         instance._update_snapshot()
         self._save_to_store(instance)
+        if self._trigger_registry is not None:
+            self._trigger_registry.notify_value_change(instance, "state.current", current, tx["to"])
 
     def _execute_action(self, instance: Instance, action: dict, payload: dict, source: str, context_override=None) -> None:
         action_type = action.get("type")
