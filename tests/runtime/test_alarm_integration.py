@@ -1,4 +1,7 @@
+import time
+
 import pytest
+
 from src.runtime.world_registry import WorldRegistry
 
 
@@ -95,3 +98,43 @@ def test_instance_manager_unregisters_alarms_on_archive():
 
     im.transition_lifecycle("w1", "i1", "archived")
     assert len(alarm_mgr._trigger_ids) == 0
+
+
+def test_alarm_triggered_via_condition():
+    """End-to-end: load demo-world, trigger alarm via tick event, verify alarm state."""
+    registry = WorldRegistry(base_dir="worlds", global_model_paths=["agents"])
+    bundle = registry.load_world("demo-world")
+
+    im = bundle["instance_manager"]
+    bus = bundle["event_bus_registry"].get_or_create("demo-world")
+    alarm_mgr = bundle["alarm_manager"]
+
+    inst = im.get("demo-world", "sensor-01", scope="world")
+    assert inst is not None
+
+    # Start monitoring so condition trigger is relevant
+    bus.publish("start", {}, source="test", scope="world")
+    time.sleep(0.1)
+    assert inst.state.get("current") == "monitoring"
+
+    # Send temperature above threshold
+    bus.publish("tick", {"temperature": 95.0}, source="test", scope="world")
+    time.sleep(0.2)
+
+    # Verify alarm is active
+    state = alarm_mgr._get_state(inst, "overheat.warning")
+    assert state.state == "active"
+    assert state.trigger_count >= 1
+
+    # Verify temperature updated
+    assert inst.variables.get("temperature") == 95.0
+
+    # Reset — temperature drops to 25, condition false, alarm clears
+    bus.publish("reset", {}, source="test", scope="world")
+    time.sleep(0.1)
+
+    # Alarm should be inactive after reset
+    state = alarm_mgr._get_state(inst, "overheat.warning")
+    assert state.state == "inactive"
+
+    registry.unload_world("demo-world")
