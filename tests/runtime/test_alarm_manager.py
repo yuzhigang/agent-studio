@@ -138,14 +138,21 @@ def test_silence_interval_blocks_retrigger():
     assert state.trigger_count == 1  # unchanged
 
 
-def test_silence_expired_allows_retrigger():
+def test_silence_expired_allows_retrigger(monkeypatch):
+    from datetime import datetime, timezone, timedelta
+    import src.runtime.alarm_manager as alarm_module
     am = AlarmManager(None, None, None)
     inst = FakeInstance()
-    config = {"severity": "warning", "silenceInterval": 0}
+    config = {"severity": "warning", "silenceInterval": 60}
 
     am._on_trigger(inst, "a1", config)
     state = am._get_state(inst, "a1")
     assert state.trigger_count == 1
+    assert state.silence_expires_at is not None
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=120)
+    FakeDatetime = type("FakeDatetime", (datetime,), {"now": lambda tz=None: future})
+    monkeypatch.setattr(alarm_module, "datetime", FakeDatetime)
 
     am._on_trigger(inst, "a1", config)
     assert state.trigger_count == 2
