@@ -49,7 +49,7 @@ class EventBus:
             handler(event_type, payload, source)
 
     def _scope_matches(self, msg_scope: str, inst_scope: str) -> bool:
-        if msg_scope == "world":
+        if inst_scope == "world":
             return True
         return msg_scope == inst_scope
 
