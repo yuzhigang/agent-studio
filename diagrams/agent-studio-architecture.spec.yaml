@@ -1,0 +1,491 @@
+meta:
+  profile: engineering-review
+  theme: tech-blue
+  layout: vertical
+  canvas: 1400x1050
+  routing: orthogonal
+  title: Agent Studio Runtime Architecture
+  description: Event-driven multi-world simulation platform architecture
+  source: generated
+modules:
+  - id: supervisor_layer
+    label: 'Layer 1: Supervisor (Management Plane)'
+    style:
+      fillColor: '#EFF6FF'
+      strokeColor: '#3B82F6'
+      strokeWidth: 2
+  - id: worker_layer
+    label: 'Layer 2: Worker (Runtime Container)'
+    style:
+      fillColor: '#F0FDF4'
+      strokeColor: '#22C55E'
+      strokeWidth: 2
+  - id: world_layer
+    label: 'Layer 3: World (Business Domain)'
+    style:
+      fillColor: '#FFFBEB'
+      strokeColor: '#F59E0B'
+      strokeWidth: 2
+nodes:
+  - id: external_systems
+    label: |-
+      External Systems
+      (Sensors / Users / APIs)
+    type: cloud
+    module: supervisor_layer
+    position:
+      x: 80
+      'y': 60
+  - id: supervisor
+    label: Supervisor
+    type: service
+    module: supervisor_layer
+    size: large
+    position:
+      x: 620
+      'y': 60
+    style:
+      fillColor: '#DBEAFE'
+      strokeColor: '#2563EB'
+      strokeWidth: 2
+      fontWeight: 600
+  - id: ws_tracker
+    label: |-
+      WebSocket Tracker
+      (Worker Monitoring)
+    type: service
+    module: supervisor_layer
+    size: small
+    position:
+      x: 520
+      'y': 140
+  - id: http_gateway
+    label: |-
+      HTTP Gateway
+      (Event Ingress)
+    type: service
+    module: supervisor_layer
+    size: small
+    position:
+      x: 720
+      'y': 140
+  - id: worker
+    label: Worker Process
+    type: service
+    module: worker_layer
+    size: large
+    position:
+      x: 620
+      'y': 280
+    style:
+      fillColor: '#DCFCE7'
+      strokeColor: '#16A34A'
+      strokeWidth: 2
+      fontWeight: 600
+  - id: messagehub
+    label: |-
+      MessageHub
+      (Worker-Level)
+    type: service
+    module: worker_layer
+    size: medium
+    position:
+      x: 620
+      'y': 370
+    style:
+      fillColor: '#BBF7D0'
+      strokeColor: '#16A34A'
+      strokeWidth: 2
+  - id: channel_ws
+    label: |-
+      WebSocket
+      Channel
+    type: service
+    module: worker_layer
+    size: small
+    position:
+      x: 400
+      'y': 325
+  - id: channel_mq
+    label: |-
+      RabbitMQ
+      Channel
+    type: queue
+    module: worker_layer
+    size: small
+    position:
+      x: 840
+      'y': 325
+  - id: eventbus
+    label: |-
+      EventBus
+      (Central Hub)
+    type: service
+    module: world_layer
+    size: large
+    position:
+      x: 660
+      'y': 500
+    style:
+      fillColor: '#FDE68A'
+      strokeColor: '#D97706'
+      strokeWidth: 3
+      fontWeight: 700
+  - id: scene_mgr
+    label: |-
+      SceneManager
+      (Scene Lifecycle)
+    type: service
+    module: world_layer
+    size: medium
+    position:
+      x: 200
+      'y': 500
+  - id: instance_mgr
+    label: |-
+      InstanceManager
+      (Instance CRUD)
+    type: service
+    module: world_layer
+    size: medium
+    position:
+      x: 430
+      'y': 500
+  - id: state_mgr
+    label: |-
+      StateManager
+      (Checkpoint / Restore)
+    type: service
+    module: world_layer
+    size: medium
+    position:
+      x: 890
+      'y': 500
+  - id: alarm_mgr
+    label: |-
+      AlarmManager
+      (Trigger / Clear)
+    type: service
+    module: world_layer
+    size: medium
+    position:
+      x: 1140
+      'y': 500
+  - id: scope_world
+    label: scope="world"
+    type: terminal
+    module: world_layer
+    size: small
+    position:
+      x: 430
+      'y': 580
+    style:
+      fillColor: '#E0F2FE'
+      strokeColor: '#0284C7'
+      fontSize: 11
+  - id: scope_scene
+    label: scope="scene:*"
+    type: terminal
+    module: world_layer
+    size: small
+    position:
+      x: 890
+      'y': 580
+    style:
+      fillColor: '#FCE7F3'
+      strokeColor: '#DB2777'
+      fontSize: 11
+  - id: instance
+    label: |-
+      Instance(s)
+      (Runtime Unit)
+    type: service
+    module: world_layer
+    size: medium
+    position:
+      x: 560
+      'y': 660
+    style:
+      fillColor: '#F3E8FF'
+      strokeColor: '#9333EA'
+      strokeWidth: 2
+  - id: model
+    label: |-
+      Model
+      (YAML Definition)
+    type: document
+    module: world_layer
+    size: medium
+    position:
+      x: 780
+      'y': 660
+    style:
+      fillColor: '#F3F4F6'
+      strokeColor: '#6B7280'
+  - id: sandbox
+    label: |-
+      SandboxExecutor
+      (Safe Python Runtime)
+    type: service
+    module: world_layer
+    size: medium
+    position:
+      x: 560
+      'y': 760
+    style:
+      fillColor: '#FEE2E2'
+      strokeColor: '#DC2626'
+      strokeWidth: 2
+  - id: scene_shared
+    label: |-
+      Shared Mode
+      (reference instances)
+    type: terminal
+    module: world_layer
+    size: small
+    position:
+      x: 120
+      'y': 660
+    style:
+      fillColor: '#ECFDF5'
+      strokeColor: '#059669'
+      fontSize: 11
+  - id: scene_isolated
+    label: |-
+      Isolated Mode
+      (copy-on-write)
+    type: terminal
+    module: world_layer
+    size: small
+    position:
+      x: 280
+      'y': 660
+    style:
+      fillColor: '#FFF1F2'
+      strokeColor: '#E11D48'
+      fontSize: 11
+  - id: sqlite_store
+    label: |-
+      SQLiteStore
+      (runtime.db)
+    type: database
+    module: world_layer
+    size: large
+    position:
+      x: 660
+      'y': 880
+    style:
+      fillColor: '#E0E7FF'
+      strokeColor: '#4F46E5'
+      strokeWidth: 2
+  - id: world_label
+    label: |-
+      World: independent business domain
+      (e.g. Steel Plant, Smart Campus)
+    type: service
+    module: world_layer
+    size: xl
+    position:
+      x: 660
+      'y': 430
+    style:
+      fillColor: '#FFFBEB'
+      strokeColor: '#F59E0B'
+      strokeWidth: 1
+      fontStyle: 2
+      fontSize: 12
+edges:
+  - from: external_systems
+    to: http_gateway
+    type: primary
+    label: external events
+    style:
+      strokeColor: '#2563EB'
+      strokeWidth: 2
+  - from: http_gateway
+    to: channel_ws
+    type: primary
+    style:
+      strokeColor: '#2563EB'
+      strokeWidth: 2
+  - from: channel_ws
+    to: messagehub
+    type: primary
+    style:
+      strokeColor: '#2563EB'
+      strokeWidth: 2
+  - from: messagehub
+    to: eventbus
+    type: primary
+    label: pre_publish_hook
+    style:
+      strokeColor: '#2563EB'
+      strokeWidth: 2
+  - from: supervisor
+    to: worker
+    type: primary
+    label: WebSocket
+    style:
+      strokeWidth: 2
+  - from: ws_tracker
+    to: supervisor
+    type: primary
+    style:
+      strokeWidth: 1
+  - from: http_gateway
+    to: supervisor
+    type: primary
+    style:
+      strokeWidth: 1
+  - from: channel_mq
+    to: messagehub
+    type: primary
+    style:
+      strokeWidth: 2
+  - from: messagehub
+    to: eventbus
+    type: primary
+    label: publish
+    style:
+      strokeWidth: 2
+  - from: eventbus
+    to: scene_mgr
+    type: primary
+    style:
+      strokeWidth: 3
+      strokeColor: '#92400E'
+  - from: eventbus
+    to: instance_mgr
+    type: primary
+    style:
+      strokeWidth: 3
+      strokeColor: '#92400E'
+  - from: eventbus
+    to: state_mgr
+    type: primary
+    style:
+      strokeWidth: 3
+      strokeColor: '#92400E'
+  - from: eventbus
+    to: alarm_mgr
+    type: primary
+    style:
+      strokeWidth: 3
+      strokeColor: '#92400E'
+  - from: eventbus
+    to: scope_world
+    type: primary
+    label: world-scoped
+    style:
+      strokeWidth: 2
+      strokeColor: '#0284C7'
+  - from: eventbus
+    to: scope_scene
+    type: primary
+    label: scene-scoped
+    style:
+      strokeWidth: 2
+      strokeColor: '#DB2777'
+  - from: scope_world
+    to: instance
+    type: primary
+    style:
+      strokeWidth: 1
+      strokeColor: '#0284C7'
+  - from: scope_scene
+    to: instance
+    type: primary
+    style:
+      strokeWidth: 1
+      strokeColor: '#DB2777'
+  - from: instance_mgr
+    to: instance
+    type: primary
+    label: creates
+    style:
+      strokeWidth: 1
+  - from: instance
+    to: model
+    type: optional
+    label: references
+    style:
+      strokeWidth: 1
+      dashed: true
+  - from: instance
+    to: sandbox
+    type: primary
+    label: runScript
+    style:
+      strokeWidth: 1
+  - from: instance
+    to: eventbus
+    type: primary
+    label: triggerEvent
+    style:
+      strokeWidth: 1
+      strokeColor: '#059669'
+      dashed: true
+  - from: scene_mgr
+    to: scene_shared
+    type: primary
+    label: shared
+    style:
+      strokeWidth: 1
+  - from: scene_mgr
+    to: scene_isolated
+    type: primary
+    label: isolated
+    style:
+      strokeWidth: 1
+  - from: scene_shared
+    to: instance
+    type: optional
+    label: reference
+    style:
+      strokeWidth: 1
+      dashed: true
+  - from: scene_isolated
+    to: instance
+    type: optional
+    label: COW copy
+    style:
+      strokeWidth: 1
+      dashed: true
+  - from: alarm_mgr
+    to: instance
+    type: primary
+    label: monitors
+    style:
+      strokeWidth: 1
+  - from: state_mgr
+    to: sqlite_store
+    type: data
+    label: checkpoint
+    style:
+      strokeColor: '#9CA3AF'
+      strokeWidth: 2
+      dashed: true
+  - from: alarm_mgr
+    to: sqlite_store
+    type: data
+    label: persist alarms
+    style:
+      strokeColor: '#9CA3AF'
+      strokeWidth: 2
+      dashed: true
+  - from: eventbus
+    to: sqlite_store
+    type: data
+    label: event_log
+    style:
+      strokeColor: '#9CA3AF'
+      strokeWidth: 2
+      dashed: true
+  - from: instance_mgr
+    to: sqlite_store
+    type: data
+    label: save_instance
+    style:
+      strokeColor: '#9CA3AF'
+      strokeWidth: 1
+      dashed: true

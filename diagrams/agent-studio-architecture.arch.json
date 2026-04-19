@@ -1,0 +1,384 @@
+{
+  "version": 1,
+  "title": "Agent Studio Runtime Architecture",
+  "type": "engineering-diagram",
+  "source": "generated",
+  "profile": "engineering-review",
+  "theme": "tech-blue",
+  "layout": "vertical",
+  "counts": {
+    "nodes": 22,
+    "edges": 30,
+    "modules": 3
+  },
+  "nodes": [
+    {
+      "id": "external_systems",
+      "label": "External Systems\n(Sensors / Users / APIs)",
+      "type": "cloud",
+      "module": "supervisor_layer"
+    },
+    {
+      "id": "supervisor",
+      "label": "Supervisor",
+      "type": "service",
+      "module": "supervisor_layer",
+      "size": "large"
+    },
+    {
+      "id": "ws_tracker",
+      "label": "WebSocket Tracker\n(Worker Monitoring)",
+      "type": "service",
+      "module": "supervisor_layer",
+      "size": "small"
+    },
+    {
+      "id": "http_gateway",
+      "label": "HTTP Gateway\n(Event Ingress)",
+      "type": "service",
+      "module": "supervisor_layer",
+      "size": "small"
+    },
+    {
+      "id": "worker",
+      "label": "Worker Process",
+      "type": "service",
+      "module": "worker_layer",
+      "size": "large"
+    },
+    {
+      "id": "messagehub",
+      "label": "MessageHub\n(Worker-Level)",
+      "type": "service",
+      "module": "worker_layer",
+      "size": "medium"
+    },
+    {
+      "id": "channel_ws",
+      "label": "WebSocket\nChannel",
+      "type": "service",
+      "module": "worker_layer",
+      "size": "small"
+    },
+    {
+      "id": "channel_mq",
+      "label": "RabbitMQ\nChannel",
+      "type": "queue",
+      "module": "worker_layer",
+      "size": "small"
+    },
+    {
+      "id": "eventbus",
+      "label": "EventBus\n(Central Hub)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "large"
+    },
+    {
+      "id": "scene_mgr",
+      "label": "SceneManager\n(Scene Lifecycle)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "instance_mgr",
+      "label": "InstanceManager\n(Instance CRUD)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "state_mgr",
+      "label": "StateManager\n(Checkpoint / Restore)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "alarm_mgr",
+      "label": "AlarmManager\n(Trigger / Clear)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "scope_world",
+      "label": "scope=\"world\"",
+      "type": "terminal",
+      "module": "world_layer",
+      "size": "small"
+    },
+    {
+      "id": "scope_scene",
+      "label": "scope=\"scene:*\"",
+      "type": "terminal",
+      "module": "world_layer",
+      "size": "small"
+    },
+    {
+      "id": "instance",
+      "label": "Instance(s)\n(Runtime Unit)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "model",
+      "label": "Model\n(YAML Definition)",
+      "type": "document",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "sandbox",
+      "label": "SandboxExecutor\n(Safe Python Runtime)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "medium"
+    },
+    {
+      "id": "scene_shared",
+      "label": "Shared Mode\n(reference instances)",
+      "type": "terminal",
+      "module": "world_layer",
+      "size": "small"
+    },
+    {
+      "id": "scene_isolated",
+      "label": "Isolated Mode\n(copy-on-write)",
+      "type": "terminal",
+      "module": "world_layer",
+      "size": "small"
+    },
+    {
+      "id": "sqlite_store",
+      "label": "SQLiteStore\n(runtime.db)",
+      "type": "database",
+      "module": "world_layer",
+      "size": "large"
+    },
+    {
+      "id": "world_label",
+      "label": "World: independent business domain\n(e.g. Steel Plant, Smart Campus)",
+      "type": "service",
+      "module": "world_layer",
+      "size": "xl"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "from": "external_systems",
+      "to": "http_gateway",
+      "type": "primary",
+      "label": "external events"
+    },
+    {
+      "id": "edge-2",
+      "from": "http_gateway",
+      "to": "channel_ws",
+      "type": "primary"
+    },
+    {
+      "id": "edge-3",
+      "from": "channel_ws",
+      "to": "messagehub",
+      "type": "primary"
+    },
+    {
+      "id": "edge-4",
+      "from": "messagehub",
+      "to": "eventbus",
+      "type": "primary",
+      "label": "pre_publish_hook"
+    },
+    {
+      "id": "edge-5",
+      "from": "supervisor",
+      "to": "worker",
+      "type": "primary",
+      "label": "WebSocket"
+    },
+    {
+      "id": "edge-6",
+      "from": "ws_tracker",
+      "to": "supervisor",
+      "type": "primary"
+    },
+    {
+      "id": "edge-7",
+      "from": "http_gateway",
+      "to": "supervisor",
+      "type": "primary"
+    },
+    {
+      "id": "edge-8",
+      "from": "channel_mq",
+      "to": "messagehub",
+      "type": "primary"
+    },
+    {
+      "id": "edge-9",
+      "from": "messagehub",
+      "to": "eventbus",
+      "type": "primary",
+      "label": "publish"
+    },
+    {
+      "id": "edge-10",
+      "from": "eventbus",
+      "to": "scene_mgr",
+      "type": "primary"
+    },
+    {
+      "id": "edge-11",
+      "from": "eventbus",
+      "to": "instance_mgr",
+      "type": "primary"
+    },
+    {
+      "id": "edge-12",
+      "from": "eventbus",
+      "to": "state_mgr",
+      "type": "primary"
+    },
+    {
+      "id": "edge-13",
+      "from": "eventbus",
+      "to": "alarm_mgr",
+      "type": "primary"
+    },
+    {
+      "id": "edge-14",
+      "from": "eventbus",
+      "to": "scope_world",
+      "type": "primary",
+      "label": "world-scoped"
+    },
+    {
+      "id": "edge-15",
+      "from": "eventbus",
+      "to": "scope_scene",
+      "type": "primary",
+      "label": "scene-scoped"
+    },
+    {
+      "id": "edge-16",
+      "from": "scope_world",
+      "to": "instance",
+      "type": "primary"
+    },
+    {
+      "id": "edge-17",
+      "from": "scope_scene",
+      "to": "instance",
+      "type": "primary"
+    },
+    {
+      "id": "edge-18",
+      "from": "instance_mgr",
+      "to": "instance",
+      "type": "primary",
+      "label": "creates"
+    },
+    {
+      "id": "edge-19",
+      "from": "instance",
+      "to": "model",
+      "type": "optional",
+      "label": "references"
+    },
+    {
+      "id": "edge-20",
+      "from": "instance",
+      "to": "sandbox",
+      "type": "primary",
+      "label": "runScript"
+    },
+    {
+      "id": "edge-21",
+      "from": "instance",
+      "to": "eventbus",
+      "type": "primary",
+      "label": "triggerEvent"
+    },
+    {
+      "id": "edge-22",
+      "from": "scene_mgr",
+      "to": "scene_shared",
+      "type": "primary",
+      "label": "shared"
+    },
+    {
+      "id": "edge-23",
+      "from": "scene_mgr",
+      "to": "scene_isolated",
+      "type": "primary",
+      "label": "isolated"
+    },
+    {
+      "id": "edge-24",
+      "from": "scene_shared",
+      "to": "instance",
+      "type": "optional",
+      "label": "reference"
+    },
+    {
+      "id": "edge-25",
+      "from": "scene_isolated",
+      "to": "instance",
+      "type": "optional",
+      "label": "COW copy"
+    },
+    {
+      "id": "edge-26",
+      "from": "alarm_mgr",
+      "to": "instance",
+      "type": "primary",
+      "label": "monitors"
+    },
+    {
+      "id": "edge-27",
+      "from": "state_mgr",
+      "to": "sqlite_store",
+      "type": "data",
+      "label": "checkpoint"
+    },
+    {
+      "id": "edge-28",
+      "from": "alarm_mgr",
+      "to": "sqlite_store",
+      "type": "data",
+      "label": "persist alarms"
+    },
+    {
+      "id": "edge-29",
+      "from": "eventbus",
+      "to": "sqlite_store",
+      "type": "data",
+      "label": "event_log"
+    },
+    {
+      "id": "edge-30",
+      "from": "instance_mgr",
+      "to": "sqlite_store",
+      "type": "data",
+      "label": "save_instance"
+    }
+  ],
+  "modules": [
+    {
+      "id": "supervisor_layer",
+      "label": "Layer 1: Supervisor (Management Plane)"
+    },
+    {
+      "id": "worker_layer",
+      "label": "Layer 2: Worker (Runtime Container)"
+    },
+    {
+      "id": "world_layer",
+      "label": "Layer 3: World (Business Domain)"
+    }
+  ]
+}
