@@ -124,6 +124,8 @@ class AlarmManager:
         if silence_seconds > 0:
             state.silence_expires_at = self._now_offset(silence_seconds)
 
+        self._persist_alarm_state(instance, alarm_id, config, is_clear=False)
+
     def _on_clear(self, instance, alarm_id: str, config: dict) -> None:
         state = self._get_state(instance, alarm_id)
         if state.state != "active":
@@ -132,6 +134,7 @@ class AlarmManager:
         state.cleared_at = self._now()
         state.silence_expires_at = None
         self._notify_clear(state, config, instance)
+        self._persist_alarm_state(instance, alarm_id, config, is_clear=True)
 
     def _is_in_silence(self, state: AlarmState) -> bool:
         if state.silence_expires_at is None:
@@ -146,6 +149,38 @@ class AlarmManager:
     @staticmethod
     def _now():
         return datetime.now(timezone.utc).isoformat()
+
+    def _persist_alarm_state(self, instance, alarm_id: str, config: dict, is_clear: bool = False) -> None:
+        if self._store is None:
+            return
+        state = self._get_state(instance, alarm_id)
+        payload = self._extract_payload(config.get("triggerMessage", ""), instance)
+        alarm_data = {
+            "instance_id": instance.instance_id,
+            "alarm_id": alarm_id,
+            "category": config.get("category"),
+            "severity": config.get("severity"),
+            "level": config.get("level"),
+            "state": state.state,
+            "trigger_count": state.trigger_count,
+            "trigger_message": self._interpolate_message(config.get("triggerMessage", ""), instance) or None,
+            "clear_message": self._interpolate_message(config.get("clearMessage", ""), instance) or None,
+            "triggered_at": state.triggered_at,
+            "cleared_at": state.cleared_at,
+            "payload": payload if payload else None,
+        }
+        self._store.save_alarm(instance.world_id, alarm_data)
+
+    def _extract_payload(self, template: str, instance) -> dict:
+        import re
+        keys = set(re.findall(r"\{(\w+)\}", template))
+        payload = {}
+        for key in keys:
+            for source in (instance.variables, instance.attributes, instance.state):
+                if key in source:
+                    payload[key] = source[key]
+                    break
+        return payload
 
     def unregister_instance_alarms(self, instance):
         keys_to_remove = []

@@ -203,3 +203,37 @@ class MessageStore(ABC):
     ) -> None:
         """Update error metadata for an outbox message."""
         ...
+
+
+class AlarmStore(ABC):
+    @abstractmethod
+    def save_alarm(self, world_id: str, alarm_data: dict) -> None:
+        """Upsert an alarm record."""
+        ...
+
+    @abstractmethod
+    def load_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> dict | None:
+        """Load a single alarm record by composite key."""
+        ...
+
+    @abstractmethod
+    def list_alarms(
+        self,
+        world_id: str,
+        instance_id: str | None = None,
+        state: str | None = None,
+        triggered_after: str | None = None,
+        triggered_before: str | None = None,
+    ) -> list[dict]:
+        """List alarms with optional filters."""
+        ...
+
+    @abstractmethod
+    def delete_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> bool:
+        """Delete an alarm record."""
+        ...
+
+    @abstractmethod
+    def clear_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> bool:
+        """Manually clear an active alarm. Returns True if cleared."""
+        ...

@@ -264,3 +264,37 @@ def test_publish_alarm_cleared_event():
     assert payload["alarmId"] == "a1"
     assert "Cooled 85.0" in payload["message"]
     assert payload["timestamp"] is not None
+
+
+class FakeAlarmStore:
+    def __init__(self):
+        self._alarms = []
+
+    def save_alarm(self, world_id: str, alarm_data: dict) -> None:
+        self._alarms.append(("save", world_id, alarm_data))
+
+    def load_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> dict | None:
+        for _, wid, data in self._alarms:
+            if wid == world_id and data.get("instance_id") == instance_id and data.get("alarm_id") == alarm_id:
+                return data
+        return None
+
+    def list_alarms(self, world_id: str, instance_id: str | None = None, state: str | None = None,
+                    triggered_after: str | None = None, triggered_before: str | None = None) -> list[dict]:
+        return []
+
+    def delete_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> bool:
+        return True
+
+    def clear_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> bool:
+        return True
+
+
+def test_alarm_manager_calls_store_on_trigger():
+    store = FakeAlarmStore()
+    am = AlarmManager(None, None, store)
+    inst = FakeInstanceWithProps()
+    config = {"severity": "warning", "category": "temp", "title": "Hot", "level": 1, "triggerMessage": "Temp {temperature}"}
+    am._on_trigger(inst, "a1", config)
+    assert len(store._alarms) == 1
+    assert store._alarms[0][0] == "save"

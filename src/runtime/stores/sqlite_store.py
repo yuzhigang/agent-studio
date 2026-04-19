@@ -9,10 +9,11 @@ from src.runtime.stores.base import (
     SceneStore,
     InstanceStore,
     EventLogStore,
+    AlarmStore,
 )
 
 
-class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore):
+class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmStore):
     def __init__(self, world_dir: str):
         self._world_dir = world_dir
         os.makedirs(world_dir, exist_ok=True)
@@ -78,6 +79,31 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore):
             last_event_id TEXT,
             checkpointed_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS alarms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            world_id TEXT NOT NULL,
+            instance_id TEXT NOT NULL,
+            alarm_id TEXT NOT NULL,
+            category TEXT,
+            severity TEXT,
+            level INTEGER,
+            state TEXT NOT NULL,
+            trigger_count INTEGER DEFAULT 0,
+            trigger_message TEXT,
+            clear_message TEXT,
+            triggered_at TEXT,
+            cleared_at TEXT,
+            payload TEXT,
+            updated_at TEXT NOT NULL,
+            UNIQUE (world_id, instance_id, alarm_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_alarms_triggered_at
+            ON alarms (world_id, triggered_at);
+
+        CREATE INDEX IF NOT EXISTS idx_alarms_state
+            ON alarms (world_id, state);
         """
         with self._lock:
             self._conn.executescript(schema)
@@ -430,6 +456,148 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore):
             "last_event_id": row[0],
             "checkpointed_at": row[1],
         }
+
+    # AlarmStore
+    def save_alarm(self, world_id: str, alarm_data: dict) -> None:
+        now = self._now()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO alarms (
+                    world_id, instance_id, alarm_id, category, severity, level,
+                    state, trigger_count, trigger_message, clear_message,
+                    triggered_at, cleared_at, payload, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(world_id, instance_id, alarm_id) DO UPDATE SET
+                    category = excluded.category,
+                    severity = excluded.severity,
+                    level = excluded.level,
+                    state = excluded.state,
+                    trigger_count = excluded.trigger_count,
+                    trigger_message = excluded.trigger_message,
+                    clear_message = excluded.clear_message,
+                    triggered_at = excluded.triggered_at,
+                    cleared_at = excluded.cleared_at,
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    world_id,
+                    alarm_data["instance_id"],
+                    alarm_data["alarm_id"],
+                    alarm_data.get("category"),
+                    alarm_data.get("severity"),
+                    alarm_data.get("level"),
+                    alarm_data["state"],
+                    alarm_data.get("trigger_count", 0),
+                    alarm_data.get("trigger_message"),
+                    alarm_data.get("clear_message"),
+                    alarm_data.get("triggered_at"),
+                    alarm_data.get("cleared_at"),
+                    json.dumps(alarm_data.get("payload", {}), ensure_ascii=False) if alarm_data.get("payload") else None,
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+    def load_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT category, severity, level, state, trigger_count, trigger_message,
+                   clear_message, triggered_at, cleared_at, payload, updated_at
+            FROM alarms WHERE world_id = ? AND instance_id = ? AND alarm_id = ?
+            """,
+            (world_id, instance_id, alarm_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "world_id": world_id,
+            "instance_id": instance_id,
+            "alarm_id": alarm_id,
+            "category": row[0],
+            "severity": row[1],
+            "level": row[2],
+            "state": row[3],
+            "trigger_count": row[4],
+            "trigger_message": row[5],
+            "clear_message": row[6],
+            "triggered_at": row[7],
+            "cleared_at": row[8],
+            "payload": json.loads(row[9]) if row[9] else {},
+            "updated_at": row[10],
+        }
+
+    def list_alarms(
+        self,
+        world_id: str,
+        instance_id: str | None = None,
+        state: str | None = None,
+        triggered_after: str | None = None,
+        triggered_before: str | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT world_id, instance_id, alarm_id, category, severity, level,
+                   state, trigger_count, trigger_message, clear_message,
+                   triggered_at, cleared_at, payload, updated_at
+            FROM alarms WHERE world_id = ?
+        """
+        params: list = [world_id]
+        if instance_id is not None:
+            query += " AND instance_id = ?"
+            params.append(instance_id)
+        if state is not None:
+            query += " AND state = ?"
+            params.append(state)
+        if triggered_after is not None:
+            query += " AND triggered_at >= ?"
+            params.append(triggered_after)
+        if triggered_before is not None:
+            query += " AND triggered_at <= ?"
+            params.append(triggered_before)
+        query += " ORDER BY triggered_at DESC"
+        rows = self._conn.execute(query, params).fetchall()
+        return [
+            {
+                "world_id": r[0],
+                "instance_id": r[1],
+                "alarm_id": r[2],
+                "category": r[3],
+                "severity": r[4],
+                "level": r[5],
+                "state": r[6],
+                "trigger_count": r[7],
+                "trigger_message": r[8],
+                "clear_message": r[9],
+                "triggered_at": r[10],
+                "cleared_at": r[11],
+                "payload": json.loads(r[12]) if r[12] else {},
+                "updated_at": r[13],
+            }
+            for r in rows
+        ]
+
+    def delete_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM alarms WHERE world_id = ? AND instance_id = ? AND alarm_id = ?",
+                (world_id, instance_id, alarm_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def clear_alarm(self, world_id: str, instance_id: str, alarm_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                UPDATE alarms
+                SET state = 'inactive', cleared_at = ?, updated_at = ?
+                WHERE world_id = ? AND instance_id = ? AND alarm_id = ? AND state = 'active'
+                """,
+                (self._now(), self._now(), world_id, instance_id, alarm_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def close(self) -> None:
         with self._lock:
