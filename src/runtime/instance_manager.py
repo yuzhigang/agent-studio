@@ -379,7 +379,7 @@ class InstanceManager:
         inst.lifecycle_state = new_state
         inst._update_snapshot()
         self._save_to_store(inst)
-        if inst is not None and self._alarm_manager is not None:
+        if self._alarm_manager is not None:
             self._alarm_manager.unregister_instance_alarms(inst)
         if new_state == "archived":
             with self._lock:
@@ -406,5 +406,9 @@ class InstanceManager:
             except Exception:
                 self._instances.pop(key, None)
                 raise
+        if self._alarm_manager is not None and clone.model:
+            alarm_configs = clone.model.get("alarms")
+            if alarm_configs:
+                self._alarm_manager.register_instance_alarms(clone, alarm_configs)
         self._save_to_store(clone)
         return clone
