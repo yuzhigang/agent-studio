@@ -64,6 +64,7 @@ class AlarmManager:
         state = self._get_state(instance, alarm_id)
         if state.state == "active":
             state.trigger_count += 1
+            state.triggered_at = self._now()
         else:
             state.state = "active"
             state.triggered_at = self._now()

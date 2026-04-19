@@ -105,6 +105,7 @@ def test_on_clear_active_to_inactive():
     state = am._states[("demo-world", "inst-01", "a1")]
     assert state.state == "inactive"
     assert state.cleared_at is not None
+    assert state.triggered_at == "2026-01-01T00:00:00Z"
 
 
 def test_on_trigger_already_active_increments_count():
@@ -118,3 +119,4 @@ def test_on_trigger_already_active_increments_count():
     state = am._states[("demo-world", "inst-01", "a1")]
     assert state.state == "active"
     assert state.trigger_count == 2
+    assert state.triggered_at != "2026-01-01T00:00:00Z"
