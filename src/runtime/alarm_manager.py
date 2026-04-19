@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 @dataclass
@@ -63,6 +63,8 @@ class AlarmManager:
     def _on_trigger(self, instance, alarm_id: str, config: dict) -> None:
         state = self._get_state(instance, alarm_id)
         if state.state == "active":
+            if self._is_in_silence(state):
+                return
             state.trigger_count += 1
             state.triggered_at = self._now()
         else:
@@ -71,6 +73,10 @@ class AlarmManager:
             state.trigger_count = 1
             state.cleared_at = None
 
+        silence_seconds = config.get("silenceInterval", 0)
+        if silence_seconds > 0:
+            state.silence_expires_at = self._now_offset(silence_seconds)
+
     def _on_clear(self, instance, alarm_id: str, config: dict) -> None:
         state = self._get_state(instance, alarm_id)
         if state.state != "active":
@@ -78,6 +84,16 @@ class AlarmManager:
         state.state = "inactive"
         state.cleared_at = self._now()
         state.silence_expires_at = None
+
+    def _is_in_silence(self, state: AlarmState) -> bool:
+        if state.silence_expires_at is None:
+            return False
+        expires = datetime.fromisoformat(state.silence_expires_at)
+        return datetime.now(timezone.utc) < expires
+
+    @staticmethod
+    def _now_offset(seconds: int) -> str:
+        return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
     @staticmethod
     def _now():

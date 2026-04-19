@@ -120,3 +120,32 @@ def test_on_trigger_already_active_increments_count():
     assert state.state == "active"
     assert state.trigger_count == 2
     assert state.triggered_at != "2026-01-01T00:00:00Z"
+
+
+def test_silence_interval_blocks_retrigger():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstance()
+    config = {"severity": "warning", "silenceInterval": 60}
+
+    am._on_trigger(inst, "a1", config)
+    state = am._get_state(inst, "a1")
+    assert state.state == "active"
+    assert state.trigger_count == 1
+    assert state.silence_expires_at is not None
+
+    # Second trigger during silence - should be ignored
+    am._on_trigger(inst, "a1", config)
+    assert state.trigger_count == 1  # unchanged
+
+
+def test_silence_expired_allows_retrigger():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstance()
+    config = {"severity": "warning", "silenceInterval": 0}
+
+    am._on_trigger(inst, "a1", config)
+    state = am._get_state(inst, "a1")
+    assert state.trigger_count == 1
+
+    am._on_trigger(inst, "a1", config)
+    assert state.trigger_count == 2
