@@ -14,6 +14,7 @@ from src.runtime.scene_manager import SceneManager
 from src.runtime.state_manager import StateManager
 from src.runtime.world_state import WorldState
 from src.runtime.trigger_registry import TriggerRegistry
+from src.runtime.alarm_manager import AlarmManager
 from src.runtime.triggers.event_trigger import EventTrigger
 from src.runtime.triggers.value_changed_trigger import ValueChangedTrigger
 from src.runtime.triggers.condition_trigger import ConditionTrigger
@@ -110,6 +111,9 @@ class WorldRegistry:
             world_state._im = im
 
             bus = bus_reg.get_or_create(world_id)
+
+            alarm_manager = AlarmManager(trigger_registry, bus, store)
+            im._alarm_manager = alarm_manager
             # This hook only recomputes the publisher (source) instance.
             # Consumers that run scripts will recompute their own snapshot
             # inside InstanceManager._execute_action.
@@ -151,6 +155,7 @@ class WorldRegistry:
                 "metric_store": metric_store,
                 "world_state": world_state,
                 "lock": world_lock,
+                "alarm_manager": alarm_manager,
                 "_registry": self,
                 "force_stop_on_shutdown": False,
             }
