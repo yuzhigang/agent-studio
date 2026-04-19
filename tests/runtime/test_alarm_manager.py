@@ -79,3 +79,42 @@ def test_unregister_instance_alarms():
     am.unregister_instance_alarms(inst)
     assert len(fake_reg._entries) == 0
     assert len(am._states) == 0
+
+
+def test_on_trigger_inactive_to_active():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstance()
+    am._states[("demo-world", "inst-01", "a1")] = AlarmState(
+        alarm_id="a1", instance_id="inst-01", world_id="demo-world", state="inactive"
+    )
+    am._on_trigger(inst, "a1", {"severity": "warning", "triggerMessage": "hot"})
+    state = am._states[("demo-world", "inst-01", "a1")]
+    assert state.state == "active"
+    assert state.triggered_at is not None
+    assert state.trigger_count == 1
+
+
+def test_on_clear_active_to_inactive():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstance()
+    am._states[("demo-world", "inst-01", "a1")] = AlarmState(
+        alarm_id="a1", instance_id="inst-01", world_id="demo-world",
+        state="active", triggered_at="2026-01-01T00:00:00Z"
+    )
+    am._on_clear(inst, "a1", {"severity": "warning", "clearMessage": "ok"})
+    state = am._states[("demo-world", "inst-01", "a1")]
+    assert state.state == "inactive"
+    assert state.cleared_at is not None
+
+
+def test_on_trigger_already_active_increments_count():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstance()
+    am._states[("demo-world", "inst-01", "a1")] = AlarmState(
+        alarm_id="a1", instance_id="inst-01", world_id="demo-world",
+        state="active", triggered_at="2026-01-01T00:00:00Z", trigger_count=1
+    )
+    am._on_trigger(inst, "a1", {"severity": "warning"})
+    state = am._states[("demo-world", "inst-01", "a1")]
+    assert state.state == "active"
+    assert state.trigger_count == 2

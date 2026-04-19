@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -58,6 +59,28 @@ class AlarmManager:
 
             key = self._key(instance, alarm_id)
             self._trigger_ids[key] = trigger_ids
+
+    def _on_trigger(self, instance, alarm_id: str, config: dict) -> None:
+        state = self._get_state(instance, alarm_id)
+        if state.state == "active":
+            state.trigger_count += 1
+        else:
+            state.state = "active"
+            state.triggered_at = self._now()
+            state.trigger_count = 1
+            state.cleared_at = None
+
+    def _on_clear(self, instance, alarm_id: str, config: dict) -> None:
+        state = self._get_state(instance, alarm_id)
+        if state.state != "active":
+            return
+        state.state = "inactive"
+        state.cleared_at = self._now()
+        state.silence_expires_at = None
+
+    @staticmethod
+    def _now():
+        return datetime.now(timezone.utc).isoformat()
 
     def unregister_instance_alarms(self, instance):
         keys_to_remove = []
