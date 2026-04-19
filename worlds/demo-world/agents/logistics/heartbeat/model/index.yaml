@@ -217,3 +217,17 @@ behaviors:
         script: |
           task = payload.get("task", "unknown")
           print(f"[{this.id}] 收到派工: {task}")
+
+alarms:
+  overheat.warning:
+    category: overheat
+    title: 传感器温度过高
+    severity: warning
+    level: 1
+    silenceInterval: 30
+    triggerMessage: "温度 {temperature}℃ 超过阈值 {threshold}℃"
+    clearMessage: "温度已恢复正常"
+    trigger:
+      type: condition
+      condition: "this.variables.temperature >= this.attributes.threshold"
+    # clear omitted — defaults to "not (condition)"
