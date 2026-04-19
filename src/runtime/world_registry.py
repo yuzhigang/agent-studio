@@ -13,6 +13,11 @@ from src.runtime.instance_manager import InstanceManager
 from src.runtime.scene_manager import SceneManager
 from src.runtime.state_manager import StateManager
 from src.runtime.world_state import WorldState
+from src.runtime.trigger_registry import TriggerRegistry
+from src.runtime.triggers.event_trigger import EventTrigger
+from src.runtime.triggers.value_changed_trigger import ValueChangedTrigger
+from src.runtime.triggers.condition_trigger import ConditionTrigger
+from src.runtime.triggers.timer_trigger import TimerTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +99,14 @@ class WorldRegistry:
                 model_loader=model_loader,
                 world_state=world_state,
             )
+
+            trigger_registry = TriggerRegistry()
+            trigger_registry.add_trigger(EventTrigger(bus_reg))
+            trigger_registry.add_trigger(ValueChangedTrigger())
+            trigger_registry.add_trigger(ConditionTrigger(im._sandbox))
+            trigger_registry.add_trigger(TimerTrigger())
+            im._trigger_registry = trigger_registry
+
             world_state._im = im
 
             bus = bus_reg.get_or_create(world_id)

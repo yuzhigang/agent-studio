@@ -38,6 +38,13 @@ def test_load_world(registry):
     assert "state_manager" in bundle
 
 
+def test_load_world_creates_trigger_registry(registry):
+    registry.create_world("world-a")
+    bundle = registry.load_world("world-a")
+    im = bundle["instance_manager"]
+    assert im._trigger_registry is not None
+
+
 def test_load_world_raises_when_missing(registry):
     with pytest.raises(ValueError, match="not found"):
         registry.load_world("missing-world")
