@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -60,6 +61,50 @@ class AlarmManager:
             key = self._key(instance, alarm_id)
             self._trigger_ids[key] = trigger_ids
 
+    def _interpolate_message(self, template: str, instance) -> str:
+        def replacer(match: re.Match) -> str:
+            key = match.group(1)
+            for source in (instance.variables, instance.attributes, instance.state):
+                if key in source:
+                    return str(source[key])
+            return match.group(0)
+
+        return re.sub(r"\{(\w+)\}", replacer, template)
+
+    def _notify_trigger(self, state: AlarmState, config: dict, instance, repeated: bool = False) -> None:
+        message = self._interpolate_message(config.get("triggerMessage", ""), instance)
+        payload = {
+            "alarmId": state.alarm_id,
+            "category": config.get("category"),
+            "title": config.get("title"),
+            "severity": config.get("severity"),
+            "level": config.get("level"),
+            "message": message,
+            "instanceId": instance.instance_id,
+            "worldId": instance.world_id,
+            "timestamp": state.triggered_at,
+            "triggerCount": state.trigger_count,
+            "repeated": repeated,
+        }
+        if self._event_bus is not None:
+            self._event_bus.publish("alarmTriggered", payload, source=instance.instance_id, scope="world")
+
+    def _notify_clear(self, state: AlarmState, config: dict, instance) -> None:
+        message = self._interpolate_message(config.get("clearMessage", ""), instance)
+        payload = {
+            "alarmId": state.alarm_id,
+            "category": config.get("category"),
+            "title": config.get("title"),
+            "severity": config.get("severity"),
+            "level": config.get("level"),
+            "message": message,
+            "instanceId": instance.instance_id,
+            "worldId": instance.world_id,
+            "timestamp": state.cleared_at,
+        }
+        if self._event_bus is not None:
+            self._event_bus.publish("alarmCleared", payload, source=instance.instance_id, scope="world")
+
     def _on_trigger(self, instance, alarm_id: str, config: dict) -> None:
         state = self._get_state(instance, alarm_id)
         if state.state == "active":
@@ -67,11 +112,13 @@ class AlarmManager:
                 return
             state.trigger_count += 1
             state.triggered_at = self._now()
+            self._notify_trigger(state, config, instance, repeated=True)
         else:
             state.state = "active"
             state.triggered_at = self._now()
             state.trigger_count = 1
             state.cleared_at = None
+            self._notify_trigger(state, config, instance, repeated=False)
 
         silence_seconds = config.get("silenceInterval", 0)
         if silence_seconds > 0:
@@ -84,6 +131,7 @@ class AlarmManager:
         state.state = "inactive"
         state.cleared_at = self._now()
         state.silence_expires_at = None
+        self._notify_clear(state, config, instance)
 
     def _is_in_silence(self, state: AlarmState) -> bool:
         if state.silence_expires_at is None:

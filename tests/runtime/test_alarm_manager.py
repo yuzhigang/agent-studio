@@ -156,3 +156,111 @@ def test_silence_expired_allows_retrigger(monkeypatch):
 
     am._on_trigger(inst, "a1", config)
     assert state.trigger_count == 2
+
+
+class FakeInstanceWithProps:
+    def __init__(self):
+        self.instance_id = "inst-01"
+        self.world_id = "demo-world"
+        self.id = "inst-01"
+        self.variables = {"temperature": 85.0, "threshold": 80.0}
+        self.attributes = {"unit": "celsius"}
+        self.state = {"current": "monitoring"}
+
+
+def test_interpolate_message():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstanceWithProps()
+    msg = am._interpolate_message("Temp {temperature} exceeds {threshold}", inst)
+    assert msg == "Temp 85.0 exceeds 80.0"
+
+
+def test_interpolate_message_fallback():
+    am = AlarmManager(None, None, None)
+    inst = FakeInstanceWithProps()
+    msg = am._interpolate_message("Unknown {missing} here", inst)
+    assert msg == "Unknown {missing} here"
+
+
+def test_publish_alarm_triggered_event():
+    events = []
+
+    class FakeBus:
+        def publish(self, event_type, payload, source=None, scope=None, target=None):
+            events.append((event_type, payload))
+
+    am = AlarmManager(None, FakeBus(), None)
+    inst = FakeInstanceWithProps()
+    config = {
+        "category": "temp",
+        "title": "Overheat",
+        "severity": "warning",
+        "level": 1,
+        "triggerMessage": "Hot {temperature}",
+    }
+    am._on_trigger(inst, "a1", config)
+    assert len(events) == 1
+    etype, payload = events[0]
+    assert etype == "alarmTriggered"
+    assert payload["alarmId"] == "a1"
+    assert payload["severity"] == "warning"
+    assert "Hot 85.0" in payload["message"]
+    assert payload["triggerCount"] == 1
+    assert payload["repeated"] is False
+
+
+def test_publish_alarm_triggered_repeated_event():
+    events = []
+
+    class FakeBus:
+        def publish(self, event_type, payload, source=None, scope=None, target=None):
+            events.append((event_type, payload))
+
+    am = AlarmManager(None, FakeBus(), None)
+    inst = FakeInstanceWithProps()
+    config = {
+        "category": "temp",
+        "title": "Overheat",
+        "severity": "warning",
+        "level": 1,
+        "triggerMessage": "Hot {temperature}",
+    }
+    am._on_trigger(inst, "a1", config)
+    assert len(events) == 1
+    assert events[0][1]["repeated"] is False
+
+    am._on_trigger(inst, "a1", config)
+    assert len(events) == 2
+    etype, payload = events[1]
+    assert etype == "alarmTriggered"
+    assert payload["triggerCount"] == 2
+    assert payload["repeated"] is True
+
+
+def test_publish_alarm_cleared_event():
+    events = []
+
+    class FakeBus:
+        def publish(self, event_type, payload, source=None, scope=None, target=None):
+            events.append((event_type, payload))
+
+    am = AlarmManager(None, FakeBus(), None)
+    inst = FakeInstanceWithProps()
+    config = {
+        "category": "temp",
+        "title": "Overheat",
+        "severity": "warning",
+        "level": 1,
+        "triggerMessage": "Hot {temperature}",
+        "clearMessage": "Cooled {temperature}",
+    }
+    am._on_trigger(inst, "a1", config)
+    assert len(events) == 1
+
+    am._on_clear(inst, "a1", config)
+    assert len(events) == 2
+    etype, payload = events[1]
+    assert etype == "alarmCleared"
+    assert payload["alarmId"] == "a1"
+    assert "Cooled 85.0" in payload["message"]
+    assert payload["timestamp"] is not None
