@@ -33,3 +33,42 @@ class AlarmManager:
                 world_id=instance.world_id,
             )
         return self._states[key]
+
+    @staticmethod
+    def _build_default_clear(trigger_cfg):
+        if trigger_cfg.get("type") == "condition" and "condition" in trigger_cfg:
+            return {"type": "condition", "condition": f"not ({trigger_cfg['condition']})"}
+        return None
+
+    def register_instance_alarms(self, instance, alarm_configs):
+        for alarm_id, config in alarm_configs.items():
+            trigger_cfg = config["trigger"]
+            clear_cfg = config.get("clear") or self._build_default_clear(trigger_cfg)
+
+            trigger_callback = lambda inst, alarm_id=alarm_id, cfg=config: self._on_trigger(inst, alarm_id, cfg)
+            trigger_tag = f"alarm:{alarm_id}:trigger"
+            trigger_id = self._trigger_registry.register(instance, trigger_cfg, trigger_callback, tag=trigger_tag)
+
+            trigger_ids = [trigger_id]
+            if clear_cfg:
+                clear_callback = lambda inst, alarm_id=alarm_id, cfg=config: self._on_clear(inst, alarm_id, cfg)
+                clear_tag = f"alarm:{alarm_id}:clear"
+                clear_id = self._trigger_registry.register(instance, clear_cfg, clear_callback, tag=clear_tag)
+                trigger_ids.append(clear_id)
+
+            key = self._key(instance, alarm_id)
+            self._trigger_ids[key] = trigger_ids
+
+    def unregister_instance_alarms(self, instance):
+        keys_to_remove = []
+        for key, trigger_ids in self._trigger_ids.items():
+            world_id, instance_id, alarm_id = key
+            if world_id == instance.world_id and instance_id == instance.instance_id:
+                for tid in trigger_ids:
+                    self._trigger_registry.unregister(tid)
+                keys_to_remove.append(key)
+
+        for key in keys_to_remove:
+            del self._trigger_ids[key]
+            if key in self._states:
+                del self._states[key]

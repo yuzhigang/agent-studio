@@ -21,3 +21,17 @@ def test_alarm_state_dataclass():
 def test_alarm_manager_init():
     am = AlarmManager(trigger_registry=None, event_bus=None, store=None)
     assert am is not None
+
+
+def test_build_default_clear_for_condition():
+    am = AlarmManager(None, None, None)
+    trigger = {"type": "condition", "condition": "this.variables.temperature > 80"}
+    clear = am._build_default_clear(trigger)
+    assert clear["type"] == "condition"
+    assert "not (this.variables.temperature > 80)" in clear["condition"]
+
+
+def test_build_default_clear_for_event_is_none():
+    am = AlarmManager(None, None, None)
+    trigger = {"type": "event", "name": "start"}
+    assert am._build_default_clear(trigger) is None
