@@ -29,10 +29,12 @@
     "dispatchMode": {
       "type": "string",
       "default": "normal",
+      "x-category": "state",
       "x-audit": true
     },
     "processStatus": {
       "type": "string",
+      "x-category": "state",
       "default": "idle",
       "x-audit": true
     },
@@ -59,6 +61,7 @@
     "replanCounter": {
       "type": "number",
       "default": 0,
+      "x-category": "metric",
       "x-audit": true
     },
     "lastError": {

@@ -494,7 +494,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
                     alarm_data.get("clear_message"),
                     alarm_data.get("triggered_at"),
                     alarm_data.get("cleared_at"),
-                    json.dumps(alarm_data.get("payload", {}), ensure_ascii=False) if alarm_data.get("payload") else None,
+                    json.dumps(alarm_data.get("payload", {}), ensure_ascii=False),
                     now,
                 ),
             )
@@ -536,6 +536,8 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
         triggered_after: str | None = None,
         triggered_before: str | None = None,
     ) -> list[dict]:
+        # NOTE: Dynamic SQL construction below is safe only because all values
+        # are passed as query parameters. Never use f-strings or .format() here.
         query = """
             SELECT world_id, instance_id, alarm_id, category, severity, level,
                    state, trigger_count, trigger_message, clear_message,
@@ -591,7 +593,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
             cur = self._conn.execute(
                 """
                 UPDATE alarms
-                SET state = 'inactive', cleared_at = ?, updated_at = ?
+                SET state = 'inactive', trigger_count = 0, cleared_at = ?, updated_at = ?
                 WHERE world_id = ? AND instance_id = ? AND alarm_id = ? AND state = 'active'
                 """,
                 (self._now(), self._now(), world_id, instance_id, alarm_id),

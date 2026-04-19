@@ -1,15 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git checkout:*)",
-      "Bash(curl --location -g --request POST 'https://api.apifox.com/v1/projects/6998149/import-openapi?locale=zh-CN' --header 'Authorization: Bearer afxp_6d7fb2iYrGmfTCoU7QyzJd8uwuokH3BoqdoL' --header 'Content-Type: application/json' --data-raw '{:*)",
+      "Bash(curl *)",
       "Bash(python3 -c ':*)",
-      "Bash(curl --location -g --request POST 'https://api.apifox.com/v1/projects/6998149/import-openapi?locale=zh-CN' --header 'Authorization: Bearer afxp_6d7fb2iYrGmfTCoU7QyzJd8uwuokH3BoqdoL' --header 'Content-Type: application/json' --data-binary @/tmp/payload.json)",
-      "Bash(curl --location -g --request POST 'https://api.apifox.com/v1/projects/6998149/import-openapi?locale=zh-CN' --header 'Authorization: Bearer afxp_6d7fb2iYrGmfTCoU7QyzJd8uwuokH3BoqdoL' --header 'Content-Type: application/json' --data-binary @/tmp/payload2.json)",
       "Bash(xargs wc:*)",
-      "Bash(python -m json.tool d:/30-Code/AI_Test/agent-studio/ladle_dispatcher.model.json)"
+      "Bash(python -m *)",
+      "Bash(pytest *)",
+      "Bash(git *)"
     ]
   }
 }

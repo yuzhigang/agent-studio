@@ -72,3 +72,7 @@ All channels implement `Channel` (`src/worker/channels/base.py`) with `start(inb
 ## Tool Usage Note
 
 When writing large files with the `Write` tool, break the content into smaller chunks or use `Edit` for incremental updates to avoid failures caused by oversized payloads.
+
+## Note
+- 不考虑任何关于向后兼容的设计目标和代码逻辑， 因为这是全新的项目，不断在调整设计，没有必要兼容过去的设计。
+- 重要的类或文件在文件头给出精要的注释。

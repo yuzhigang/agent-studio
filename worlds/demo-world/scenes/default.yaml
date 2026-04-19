@@ -1,0 +1,6 @@
+scene_id: default
+name: 默认场景
+mode: shared
+description: 演示场景
+references: []
+local_instances: {}

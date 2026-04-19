@@ -64,7 +64,7 @@ def test_alarm_persisted_to_database(tmp_path):
     record = store.load_alarm("test-world", "sensor-01", "overheat.warning")
     assert record["state"] == "inactive"
     assert record["cleared_at"] is not None
-    assert record["trigger_count"] == 1  # unchanged
+    assert record["trigger_count"] == 0  # reset on clear
 
 
 def test_alarm_time_range_query(tmp_path):

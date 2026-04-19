@@ -1,0 +1,6 @@
+world_id: demo-world
+name: Demo World
+description: 最小可运行演示世界
+config:
+  name: Demo World
+  description: 最小可运行演示世界

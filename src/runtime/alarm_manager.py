@@ -124,7 +124,7 @@ class AlarmManager:
         if silence_seconds > 0:
             state.silence_expires_at = self._now_offset(silence_seconds)
 
-        self._persist_alarm_state(instance, alarm_id, config, is_clear=False)
+        self._persist_alarm_state(instance, alarm_id, config)
 
     def _on_clear(self, instance, alarm_id: str, config: dict) -> None:
         state = self._get_state(instance, alarm_id)
@@ -132,9 +132,10 @@ class AlarmManager:
             return
         state.state = "inactive"
         state.cleared_at = self._now()
+        state.trigger_count = 0
         state.silence_expires_at = None
         self._notify_clear(state, config, instance)
-        self._persist_alarm_state(instance, alarm_id, config, is_clear=True)
+        self._persist_alarm_state(instance, alarm_id, config)
 
     def _is_in_silence(self, state: AlarmState) -> bool:
         if state.silence_expires_at is None:
@@ -165,10 +166,11 @@ class AlarmManager:
 
         state.state = "inactive"
         state.cleared_at = self._now()
+        state.trigger_count = 0
         state.silence_expires_at = None
 
         self._notify_clear(state, config, instance)
-        self._persist_alarm_state(instance, alarm_id, config, is_clear=True)
+        self._persist_alarm_state(instance, alarm_id, config)
         return True
 
     def _get_alarm_config(self, instance, alarm_id: str) -> dict:
@@ -178,10 +180,11 @@ class AlarmManager:
             return model["alarms"].get(alarm_id, {})
         return {}
 
-    def _persist_alarm_state(self, instance, alarm_id: str, config: dict, is_clear: bool = False) -> None:
+    def _persist_alarm_state(self, instance, alarm_id: str, config: dict) -> None:
         if self._store is None:
             return
         state = self._get_state(instance, alarm_id)
+        trigger_msg = self._interpolate_message(config.get("triggerMessage", ""), instance)
         payload = self._extract_payload(config.get("triggerMessage", ""), instance)
         alarm_data = {
             "instance_id": instance.instance_id,
@@ -191,16 +194,15 @@ class AlarmManager:
             "level": config.get("level"),
             "state": state.state,
             "trigger_count": state.trigger_count,
-            "trigger_message": self._interpolate_message(config.get("triggerMessage", ""), instance) or None,
+            "trigger_message": trigger_msg or None,
             "clear_message": self._interpolate_message(config.get("clearMessage", ""), instance) or None,
             "triggered_at": state.triggered_at,
             "cleared_at": state.cleared_at,
-            "payload": payload if payload else None,
+            "payload": payload,
         }
         self._store.save_alarm(instance.world_id, alarm_data)
 
     def _extract_payload(self, template: str, instance) -> dict:
-        import re
         keys = set(re.findall(r"\{(\w+)\}", template))
         payload = {}
         for key in keys:

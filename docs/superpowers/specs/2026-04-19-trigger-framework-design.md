@@ -9,7 +9,6 @@
 1. **统一触发机制** — 所有"触发 → 响应"走同一套框架
 2. **概念清晰** — transitions 是状态图定义，behaviors 是触发响应
 3. **精确评估** — condition 触发器只在其依赖的数据变更时评估
-4. **向后兼容** — 保留现有 behavior 的 event trigger 行为
 
 ## 核心洞察
 
@@ -207,31 +206,103 @@ trigger:
 
 ```
 EventBus.publish("start", ...)
-  → IM._on_event(inst, "start", ...)
-    → TriggerEvaluator.on_event(inst, "start", ...)
-      → 匹配 event triggers
-        → 执行 callback
-          → behavior callback → IM._execute_actions(inst, behavior.actions)
-              → action: runScript → sandbox 执行
-              → action: triggerEvent → bus.publish
-              → action: transition → IM._transition_state(inst, transition)
-                  → 改变 inst.state["current"]
+  → EventTrigger (订阅 EventBus)
+    → 匹配 event triggers
+      → 执行 callback
+        → behavior callback → IM._execute_actions(inst, behavior.actions)
+            → action: runScript → sandbox 执行
+            → action: triggerEvent → bus.publish
+            → action: transition → IM._transition_state(inst, transition)
+                → 改变 inst.state["current"]
+                → ValueChangedTrigger.handle_value_change("state.current", ...)
+                  → 匹配 valueChanged triggers (如 stateEnter)
+                    → 执行 callback ...
+
+property 变更 (variables/attributes/derivedProperties)
+  → TriggerRegistry.notify_value_change(...)
+    → ValueChangedTrigger / ConditionTrigger（duck typing 分发）
+      → 匹配 triggers → 执行 callback ...
+
+timer 到期
+  → TimerTrigger (内部 TimerScheduler)
+    → 匹配 delay/interval/cron triggers
+      → 执行 callback ...
 ```
 
-### TriggerEvaluator API
+### Trigger 接口（可扩展）
+
+每种 trigger 类型独立实现。`TriggerRegistry` 持有注册表，在发生注册、注销、数据变更等事件时通知对应的 Trigger 实现。Trigger 实现只负责评估逻辑和回调执行，不管理注册表。
 
 ```python
-class TriggerEvaluator:
-    def register(self, instance, trigger, callback, tag) -> str
-    def unregister(self, trigger_id)
-    def unregister_instance(self, instance)
+class Trigger(ABC):
+    @property
+    @abstractmethod
+    def trigger_types(self) -> set[str]:
+        """返回本 trigger 支持的类型，如 {"event"}、{"delay", "interval", "cron"}"""
 
-    # 外部触发入口
-    def on_event(self, instance, event_type, payload, source)
-    def on_timer(self, instance, timer_id)
+    def on_registered(self, entry: TriggerEntry) -> None:
+        """TriggerRegistry 完成注册后通知。实现可在此建立内部索引（如 ConditionIndex）。"""
+        pass
 
-    # 数据变更入口
-    def on_property_changed(self, instance, field_path, old_val, new_val)
+    def on_unregistered(self, entry: TriggerEntry) -> None:
+        """TriggerRegistry 完成注销后通知。实现可在此清理内部索引。"""
+        pass
+
+    def on_instance_removed(self, instance) -> None:
+        """某个实例被销毁。实现清理与该实例相关的内部状态（如定时器、索引）。"""
+        pass
+
+```
+
+**内置 Trigger：**
+
+| Trigger | 支持类型 | 职责 |
+|---|---|---|
+| `EventTrigger` | `event` | 订阅 EventBus，事件匹配时通过 reg.callback 回调 |
+| `ValueChangedTrigger` | `valueChanged` | property 值变更时匹配并回调 |
+| `ConditionTrigger` | `condition` | 依赖变更时评估条件表达式，满足窗口条件则回调 |
+| `TimerTrigger` | `delay`, `interval`, `cron` | 管理定时器调度，到期时回调 |
+
+### TriggerRegistry（协调层）
+
+```python
+class TriggerRegistry:
+    def __init__(self):
+        self._triggers: dict[str, Trigger] = {}          # type -> trigger 实现
+        self._registrations: dict[str, TriggerEntry] = {}   # trigger_id -> entry
+
+    def add_trigger(self, trigger: Trigger) -> None:
+        for t in trigger.trigger_types:
+            self._triggers[t] = trigger
+
+    def register(self, instance, trigger_cfg, callback, tag) -> str:
+        trigger_impl = self._triggers.get(trigger_cfg["type"])
+        if trigger_impl is None:
+            raise ValueError(f"Unknown trigger type: {trigger_cfg['type']}")
+        reg = TriggerEntry(instance, trigger_cfg, callback, tag)
+        self._registrations[reg.id] = reg
+        trigger_impl.on_registered(reg)
+        return reg.id
+
+    def unregister(self, trigger_id: str) -> None:
+        reg = self._registrations.pop(trigger_id, None)
+        if reg:
+            trigger_impl = self._triggers.get(reg.trigger["type"])
+            if trigger_impl:
+                trigger_impl.on_unregistered(reg)
+
+    def unregister_instance(self, instance) -> None:
+        for reg in list(self._registrations.values()):
+            if reg.instance is instance:
+                self.unregister(reg.id)
+        for trigger_impl in self._triggers.values():
+            trigger_impl.on_instance_removed(instance)
+
+    # 数据变更入口 —— 只通知关心 value 变更的 trigger 实现（duck typing）
+    def notify_value_change(self, instance, field_path, old_val, new_val):
+        for trigger_impl in self._triggers.values():
+            if hasattr(trigger_impl, "handle_value_change"):
+                trigger_impl.handle_value_change(instance, field_path, old_val, new_val)
 ```
 
 ### 级联触发问题（待后续解决）
@@ -279,13 +350,13 @@ def _extract_condition_deps(condition_expr: str) -> list[str]:
 ```python
 class ConditionIndex:
     def __init__(self):
-        self._by_field: dict[str, list[TriggerReg]] = defaultdict(list)
+        self._by_field: dict[str, list[TriggerEntry]] = defaultdict(list)
 
-    def register(self, trigger_reg):
-        for field in trigger_reg.watch:
-            self._by_field[field].append(trigger_reg)
+    def register(self, entry):
+        for field in entry.watch:
+            self._by_field[field].append(entry)
 
-    def get_affected(self, changed_fields: set[str]) -> list[TriggerReg]:
+    def get_affected(self, changed_fields: set[str]) -> list[TriggerEntry]:
         """返回依赖任一变更字段的 condition trigger。"""
         affected = set()
         for field in changed_fields:
@@ -332,19 +403,23 @@ class TimerScheduler:
 | property 命名 | 全局唯一 | variables/attributes/derivedProperties 不允许重名 |
 | condition watch 范围 | 只检查 property | 不检查 metadata/links 等其他配置节 |
 | metric 实时数据绑定 | 后续独立设计 | 通过实例 `bindings` 字段配置 |
-
-## 向后兼容
-
-当前 `transitions` 有 `trigger` 字段的模型需要处理：
-
-- 过渡期支持旧格式，自动将 `transitions.*.trigger` 提取为隐式 behavior（内部注册时转换）
-- 或者提供迁移脚本，将旧格式转换为新格式
+| 向后兼容 | 不考虑 | 全新项目，设计持续迭代，无需兼容旧格式 |
 
 ## 与现有运行时集成
 
-1. `WorldRegistry.load_world` 中创建 `TriggerEvaluator(im, sandbox)`
+1. `WorldRegistry.load_world` 中创建 `TriggerRegistry()` 并注册所有 trigger：
+   ```python
+   te = TriggerRegistry()
+   te.add_trigger(EventTrigger(event_bus))
+   te.add_trigger(ValueChangedTrigger())
+   te.add_trigger(ConditionTrigger(sandbox))
+   te.add_trigger(TimerTrigger())
+   ```
 2. `IM._register_instance` 调用 `trigger_evaluator.register_instance(inst)`
-3. `IM._on_event` 简化为一行委托：`self._trigger_evaluator.on_event(inst, event_type, payload, source)`
-4. 新增 `IM.transition_state()` 方法供 TriggerEvaluator 调用
-5. `_DictProxy` 增强：记录变更字段列表
-6. `TimerScheduler` 作为 TriggerEvaluator 的内部组件，管理 delay/interval/cron
+   - 遍历 inst.model["behaviors"] 中的每个 behavior
+   - 对每个 behavior 的 trigger 调用 `te.register(inst, trigger, callback, tag)`
+   - callback 为 `lambda inst, behavior=behavior: IM._execute_actions(inst, behavior.actions)`
+3. `IM._on_event` 不再需要：EventTriggerHandler 直接订阅 EventBus
+4. 新增 `IM._transition_state(inst, transition_name)` 方法供 behavior action 调用
+5. `_DictProxy` 增强：记录变更字段列表，变更时调用 `te.notify_value_change(...)`
+6. `TimerScheduler` 作为 `TimerTrigger` 的内部组件，管理 delay/interval/cron
