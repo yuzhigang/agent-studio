@@ -101,6 +101,7 @@ class InstanceManager:
         self._sandbox = sandbox_executor or SandboxExecutor()
         self._world_state = world_state
         self._trigger_registry = trigger_registry
+        self._alarm_manager = None
 
     @staticmethod
     def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
@@ -298,6 +299,10 @@ class InstanceManager:
                 raise
         inst._update_snapshot()
         self._save_to_store(inst)
+        if self._alarm_manager is not None and inst.model:
+            alarm_configs = inst.model.get("alarms")
+            if alarm_configs:
+                self._alarm_manager.register_instance_alarms(inst, alarm_configs)
         return inst
 
     def get(self, world_id: str, instance_id: str, scope: str = "world") -> Instance | None:
@@ -331,6 +336,10 @@ class InstanceManager:
                 if loaded_model is not None:
                     inst.model = loaded_model
             inst._update_snapshot()
+            if self._alarm_manager is not None and inst.model:
+                alarm_configs = inst.model.get("alarms")
+                if alarm_configs:
+                    self._alarm_manager.register_instance_alarms(inst, alarm_configs)
             self._instances[key] = inst
             try:
                 self._register_instance(inst)
@@ -354,6 +363,8 @@ class InstanceManager:
         key = self._make_key(world_id, instance_id, scope)
         with self._lock:
             inst = self._instances.pop(key, None)
+        if inst is not None and self._alarm_manager is not None:
+            self._alarm_manager.unregister_instance_alarms(inst)
         if inst is not None:
             self._unregister_instance(inst)
             if self._store is not None:
@@ -368,6 +379,8 @@ class InstanceManager:
         inst.lifecycle_state = new_state
         inst._update_snapshot()
         self._save_to_store(inst)
+        if inst is not None and self._alarm_manager is not None:
+            self._alarm_manager.unregister_instance_alarms(inst)
         if new_state == "archived":
             with self._lock:
                 self._instances.pop(self._make_key(world_id, instance_id, scope), None)
