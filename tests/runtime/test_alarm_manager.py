@@ -298,3 +298,68 @@ def test_alarm_manager_calls_store_on_trigger():
     am._on_trigger(inst, "a1", config)
     assert len(store._alarms) == 1
     assert store._alarms[0][0] == "save"
+
+
+def test_force_clear_active_alarm():
+    events = []
+
+    class FakeBus:
+        def publish(self, event_type, payload, source=None, scope=None, target=None):
+            events.append((event_type, payload))
+
+    store = FakeAlarmStore()
+    am = AlarmManager(None, FakeBus(), store)
+    inst = FakeInstanceWithProps()
+    inst.model = {
+        "alarms": {
+            "a1": {
+                "category": "temp",
+                "title": "Overheat",
+                "severity": "warning",
+                "level": 1,
+                "triggerMessage": "Hot {temperature}",
+                "clearMessage": "Cooled {temperature}",
+            }
+        }
+    }
+    config = inst.model["alarms"]["a1"]
+
+    # Trigger first
+    am._on_trigger(inst, "a1", config)
+    assert len(events) == 1
+    assert events[0][0] == "alarmTriggered"
+    state = am._get_state(inst, "a1")
+    assert state.state == "active"
+
+    # Force clear
+    result = am.force_clear(inst, "a1")
+    assert result is True
+    assert state.state == "inactive"
+    assert state.cleared_at is not None
+    assert len(events) == 2
+    assert events[1][0] == "alarmCleared"
+    assert events[1][1]["alarmId"] == "a1"
+
+    # Second force_clear should return False (already inactive)
+    result = am.force_clear(inst, "a1")
+    assert result is False
+    assert len(events) == 2  # no new event
+
+
+def test_force_clear_without_model():
+    events = []
+
+    class FakeBus:
+        def publish(self, event_type, payload, source=None, scope=None, target=None):
+            events.append((event_type, payload))
+
+    am = AlarmManager(None, FakeBus(), None)
+    inst = FakeInstanceWithProps()
+    # No model attribute
+    am._on_trigger(inst, "a1", {"severity": "warning", "triggerMessage": "hot"})
+    state = am._get_state(inst, "a1")
+    assert state.state == "active"
+
+    result = am.force_clear(inst, "a1")
+    assert result is True  # should still clear, but without config defaults
+    assert state.state == "inactive"

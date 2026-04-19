@@ -150,6 +150,34 @@ class AlarmManager:
     def _now():
         return datetime.now(timezone.utc).isoformat()
 
+    def force_clear(self, instance, alarm_id: str) -> bool:
+        """Manually clear an active alarm.
+
+        Updates memory state, persists to store, and publishes alarmCleared event.
+        Returns True if the alarm was active and is now cleared.
+        Returns False if the alarm was already inactive.
+        """
+        state = self._get_state(instance, alarm_id)
+        if state.state != "active":
+            return False
+
+        config = self._get_alarm_config(instance, alarm_id)
+
+        state.state = "inactive"
+        state.cleared_at = self._now()
+        state.silence_expires_at = None
+
+        self._notify_clear(state, config, instance)
+        self._persist_alarm_state(instance, alarm_id, config, is_clear=True)
+        return True
+
+    def _get_alarm_config(self, instance, alarm_id: str) -> dict:
+        """Retrieve alarm config from instance model, or return minimal defaults."""
+        model = getattr(instance, "model", None)
+        if model and "alarms" in model:
+            return model["alarms"].get(alarm_id, {})
+        return {}
+
     def _persist_alarm_state(self, instance, alarm_id: str, config: dict, is_clear: bool = False) -> None:
         if self._store is None:
             return
