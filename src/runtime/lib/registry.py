@@ -96,7 +96,7 @@ class LibRegistry:
             # 1) 模块级函数
             meta = getattr(obj, "_lib_meta", None)
             if meta is not None:
-                declared_ns = meta["namespace"]
+                declared_ns = meta["namespace"] or namespace
                 if declared_ns != namespace:
                     raise LibRegistrationError(
                         f"{py_file}",
@@ -113,7 +113,7 @@ class LibRegistry:
                     meta = getattr(method, "_lib_meta", None)
                     if meta is None:
                         continue
-                    declared_ns = meta["namespace"]
+                    declared_ns = meta["namespace"] or namespace
                     if declared_ns != namespace:
                         raise LibRegistrationError(
                             f"{py_file}",

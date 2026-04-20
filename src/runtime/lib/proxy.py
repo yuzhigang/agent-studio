@@ -3,13 +3,14 @@ from src.runtime.lib.exceptions import LibNotFoundError
 
 
 class _LibProxyNode:
-    def __init__(self, registry: LibRegistry, path: list[str], default_namespace: str | None):
+    def __init__(self, registry: LibRegistry, path: list[str], default_namespace: str | None, lib_context: dict | None):
         self._registry = registry
         self._path = path
         self._default_namespace = default_namespace
+        self._lib_context = lib_context
 
     def __getattr__(self, name: str):
-        return _LibProxyNode(self._registry, self._path + [name], self._default_namespace)
+        return _LibProxyNode(self._registry, self._path + [name], self._default_namespace, self._lib_context)
 
     def __call__(self, *args, **kwargs):
         if len(self._path) < 2:
@@ -23,18 +24,28 @@ class _LibProxyNode:
         if len(self._path) >= 3:
             candidates.append(".".join(self._path))
 
+        func = None
         for key in candidates:
             func = self._registry._data.get(key)
             if func is not None:
-                return func(*args, **kwargs)
+                break
 
-        raise LibNotFoundError(".".join(self._path), details="not registered")
+        if func is None:
+            raise LibNotFoundError(".".join(self._path), details="not registered")
+
+        # Inject LibContext into bound method's instance
+        instance = getattr(func, '__self__', None)
+        if instance and self._lib_context is not None:
+            instance._context = self._lib_context
+
+        return func(*args, **kwargs)
 
 
 class LibProxy:
-    def __init__(self, default_namespace: str | None = None, registry: LibRegistry | None = None):
+    def __init__(self, default_namespace: str | None = None, registry: LibRegistry | None = None, lib_context: dict | None = None):
         self._registry = registry or LibRegistry(_singleton=True)
         self._default_namespace = default_namespace
+        self._lib_context = lib_context
 
     def __getattr__(self, name: str):
-        return _LibProxyNode(self._registry, [name], self._default_namespace)
+        return _LibProxyNode(self._registry, [name], self._default_namespace, self._lib_context)

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Callable
 
 from src.runtime.instance import Instance
+from src.runtime.lib.proxy import LibProxy
 from src.runtime.lib.sandbox import SandboxExecutor
 
 
@@ -18,15 +19,19 @@ class _DictProxy:
         object.__setattr__(self, "_path_prefix", path_prefix)
         object.__setattr__(self, "_changed_fields", changed_fields)
 
-    def __getattr__(self, name: str):
-        try:
-            val = self._data[name]
-        except KeyError:
-            raise AttributeError(name)
-        if isinstance(val, dict):
-            nested_prefix = f"{self._path_prefix}.{name}" if self._path_prefix else name
-            return _DictProxy(val, path_prefix=nested_prefix, changed_fields=self._changed_fields)
-        return val
+    def __getattribute__(self, name: str):
+        if name in ("_data", "_path_prefix", "_changed_fields", "__class__"):
+            return object.__getattribute__(self, name)
+        data = object.__getattribute__(self, "_data")
+        if name in data:
+            val = data[name]
+            if isinstance(val, dict):
+                path_prefix = object.__getattribute__(self, "_path_prefix")
+                changed_fields = object.__getattribute__(self, "_changed_fields")
+                nested_prefix = f"{path_prefix}.{name}" if path_prefix else name
+                return _DictProxy(val, path_prefix=nested_prefix, changed_fields=changed_fields)
+            return val
+        return object.__getattribute__(self, name)
 
     def __setattr__(self, name: str, value):
         if name in ("_data", "_path_prefix", "_changed_fields"):
@@ -63,6 +68,15 @@ class _DictProxy:
     def __iter__(self):
         return iter(self._data)
 
+    def items(self):
+        return self._data.items()
+
+    def keys(self):
+        return self._data.keys()
+
+    def values(self):
+        return self._data.values()
+
 
 def _wrap_instance(instance: Instance, changed_fields: list | None = None):
     """Expose an Instance as a namespace compatible with behavior scripts."""
@@ -75,6 +89,7 @@ def _wrap_instance(instance: Instance, changed_fields: list | None = None):
     ns.model_version = instance.model_version
     ns.attributes = _DictProxy(instance.attributes, path_prefix="attributes", changed_fields=changed_fields)
     ns.variables = _DictProxy(instance.variables, path_prefix="variables", changed_fields=changed_fields)
+    ns.bindings = _DictProxy(instance.bindings)
     ns.links = _DictProxy(instance.links)
     ns.memory = _DictProxy(instance.memory)
     ns.state = _DictProxy(instance.state, path_prefix="state", changed_fields=changed_fields)
@@ -123,12 +138,23 @@ class InstanceManager:
         if self._world_state is not None:
             world_state = self._world_state.snapshot()
 
-        return {
-            "this": _wrap_instance(instance, changed_fields=changed_fields),
+        wrapped = _wrap_instance(instance, changed_fields=changed_fields)
+        lib_context = {
+            "this": wrapped,
             "payload": _DictProxy(payload),
             "source": source,
             "dispatch": dispatch,
             "world_state": _DictProxy(world_state),
+        }
+        lib_proxy = LibProxy(default_namespace=instance.model_name, lib_context=lib_context)
+
+        return {
+            "this": wrapped,
+            "payload": _DictProxy(payload),
+            "source": source,
+            "dispatch": dispatch,
+            "world_state": _DictProxy(world_state),
+            "lib": lib_proxy,
         }
 
     def _transition_state(self, instance: Instance, transition_name: str) -> None:
@@ -241,6 +267,7 @@ class InstanceManager:
             "attributes": inst.attributes or {},
             "state": inst.state or {"current": None, "enteredAt": None},
             "variables": inst.variables or {},
+            "bindings": inst.bindings or {},
             "links": inst.links or {},
             "memory": inst.memory or {},
             "audit": inst.audit or {"version": 0, "updatedAt": None, "lastEventId": None},
@@ -264,6 +291,7 @@ class InstanceManager:
         model_version: str | None = None,
         attributes: dict | None = None,
         variables: dict | None = None,
+        bindings: dict | None = None,
         links: dict | None = None,
         memory: dict | None = None,
         state: dict | None = None,
@@ -271,6 +299,7 @@ class InstanceManager:
     ) -> Instance:
         attributes = attributes or {}
         variables = variables or {}
+        bindings = bindings or {}
         links = links or {}
         memory = memory or {}
         state = state or {"current": None, "enteredAt": None}
@@ -282,6 +311,7 @@ class InstanceManager:
             model_version=model_version,
             attributes=copy.deepcopy(attributes),
             variables=copy.deepcopy(variables),
+            bindings=copy.deepcopy(bindings),
             links=copy.deepcopy(links),
             memory=copy.deepcopy(memory),
             state=copy.deepcopy(state),
@@ -324,6 +354,7 @@ class InstanceManager:
                 model_version=snapshot.get("model_version"),
                 attributes=copy.deepcopy(snapshot.get("attributes", {})),
                 variables=copy.deepcopy(snapshot.get("variables", {})),
+                bindings=copy.deepcopy(snapshot.get("bindings", {})),
                 links=copy.deepcopy(snapshot.get("links", {})),
                 memory=copy.deepcopy(snapshot.get("memory", {})),
                 state=copy.deepcopy(snapshot.get("state", {"current": None, "enteredAt": None})),

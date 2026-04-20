@@ -11,6 +11,7 @@ class Instance:
     model_version: str | None = field(default=None)
     attributes: dict = field(default_factory=dict)
     variables: dict = field(default_factory=dict)
+    bindings: dict = field(default_factory=dict)
     links: dict = field(default_factory=dict)
     memory: dict = field(default_factory=dict)
     state: dict = field(default_factory=lambda: {"current": None, "enteredAt": None})
