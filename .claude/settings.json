@@ -1,0 +1,21 @@
+{
+    "permissions": {
+        "deny": [
+            "Read(./node_modules)",
+            "Read(./dist)",
+            "Read(./build)",
+            "Read(./secrets/**)",
+            "Read(./backup)",
+            "Read(./.env)"
+        ],
+        "allow": [
+            "Bash(curl *)",
+            "Bash(python3 -c ':*)",
+            "Bash(xargs wc:*)",
+            "Bash(python -m *)",
+            "Bash(pytest *)",
+            "Read(//c/Users/Zigzag/.claude/plugins/**)",
+            "Bash(git *)"
+        ]
+    }
+}

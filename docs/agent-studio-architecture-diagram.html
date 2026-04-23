@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Studio 架构图</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0f172a;
+    font-family: "Inter", "Roboto", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 24px;
+    color: #cbd5e1;
+    min-height: 100vh;
+  }
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 24px;
+    border: 1px solid #334155;
+  }
+  .arch-title {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin-bottom: 20px;
+    letter-spacing: 1px;
+  }
+  .arch-wrapper {
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+  }
+  .arch-sidebar {
+    width: 170px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .arch-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .arch-layer {
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px solid;
+  }
+  .arch-layer-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+  .arch-grid {
+    display: grid;
+    gap: 8px;
+  }
+  .arch-grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .arch-grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .arch-grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .arch-grid-5 { grid-template-columns: repeat(5, 1fr); }
+  .arch-grid-6 { grid-template-columns: repeat(6, 1fr); }
+
+  .arch-box {
+    border-radius: 6px;
+    padding: 8px 6px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #cbd5e1;
+    background: rgba(51, 65, 85, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    transition: all 0.15s ease;
+  }
+  .arch-box:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .arch-box small {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+    color: #94a3b8;
+    margin-top: 2px;
+  }
+  .arch-box.highlight {
+    background: rgba(59, 130, 246, 0.18);
+    border-color: #60a5fa;
+    color: #93c5fd;
+  }
+  .arch-box.world {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: #fbbf24;
+    color: #fcd34d;
+  }
+  .arch-box.dashed {
+    border-style: dashed;
+    border-color: #f472b6;
+    color: #f9a8d4;
+    background: rgba(236, 72, 153, 0.08);
+  }
+  .arch-box.green {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: #34d399;
+    color: #6ee7b7;
+  }
+  .arch-box.purple {
+    background: rgba(168, 85, 247, 0.1);
+    border-color: #c084fc;
+    color: #d8b4fe;
+  }
+
+  .arch-layer.supervisor {
+    background: rgba(59, 130, 246, 0.06);
+    border-color: #3b82f6;
+  }
+  .arch-layer.supervisor .arch-layer-title { color: #93c5fd; }
+
+  .arch-layer.worker {
+    background: rgba(245, 158, 11, 0.05);
+    border-color: #f59e0b;
+  }
+  .arch-layer.worker .arch-layer-title { color: #fcd34d; }
+
+  .arch-layer.world {
+    background: rgba(16, 185, 129, 0.04);
+    border-color: #10b981;
+  }
+  .arch-layer.world .arch-layer-title { color: #6ee7b7; }
+
+  .arch-layer.external {
+    background: rgba(100, 116, 139, 0.15);
+    border: 1px dashed #475569;
+  }
+  .arch-layer.external .arch-layer-title { color: #94a3b8; }
+
+  .arch-sidebar-panel {
+    border-radius: 8px;
+    padding: 10px;
+    background: rgba(51, 65, 85, 0.3);
+    border: 1px solid #475569;
+  }
+  .arch-sidebar-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    letter-spacing: 0.3px;
+  }
+  .arch-sidebar-item {
+    font-size: 10px;
+    text-align: center;
+    color: #cbd5e1;
+    background: rgba(30, 41, 59, 0.5);
+    padding: 5px 4px;
+    border-radius: 4px;
+    margin: 4px 0;
+    border: 1px solid rgba(51, 65, 85, 0.6);
+    font-weight: 500;
+  }
+  .arch-sidebar-item.metric {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(96, 165, 250, 0.4);
+    color: #93c5fd;
+    font-weight: 600;
+  }
+
+  .sub-panel {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(30, 41, 59, 0.3);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+  }
+  .sub-panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-align: center;
+    margin-bottom: 8px;
+  }
+  .sub-group {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .sub-group-box {
+    flex: 1;
+    border-radius: 6px;
+    padding: 8px;
+    background: rgba(15, 23, 42, 0.35);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+  }
+  .sub-group-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-align: center;
+    margin-bottom: 6px;
+  }
+  .scene-tag {
+    margin-top: 6px;
+    font-size: 10px;
+    color: #94a3b8;
+    text-align: center;
+    border: 1px dashed #475569;
+    border-radius: 4px;
+    padding: 4px 6px;
+  }
+  .scene-tag.isolated {
+    border-color: #f472b6;
+    color: #f9a8d4;
+  }
+
+  .note-section {
+    margin-top: 14px;
+    padding: 14px 16px;
+    background: rgba(30, 41, 59, 0.5);
+    border-radius: 8px;
+    border-left: 3px solid #3b82f6;
+  }
+  .note-section h4 {
+    font-size: 12px;
+    font-weight: 700;
+    color: #93c5fd;
+    margin-bottom: 8px;
+  }
+  .note-section ol {
+    padding-left: 18px;
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1.7;
+  }
+  .note-section li {
+    margin-bottom: 3px;
+  }
+
+  .connector-note {
+    font-size: 10px;
+    color: #64748b;
+    text-align: center;
+    margin: 4px 0;
+    font-style: italic;
+  }
+
+  .inline-panel {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid;
+  }
+  .inline-panel-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .inline-panel.green {
+    background: rgba(16, 185, 129, 0.04);
+    border-color: #10b981;
+  }
+  .inline-panel.green .inline-panel-title { color: #6ee7b7; }
+  .inline-panel.amber {
+    background: rgba(245, 158, 11, 0.04);
+    border-color: #f59e0b;
+  }
+  .inline-panel.amber .inline-panel-title { color: #fcd34d; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="arch-title">Agent Studio 工业多智能体设计</div>
+  <div class="arch-wrapper">
+    <div class="arch-sidebar">
+      <div class="arch-sidebar-panel">
+        <div class="arch-sidebar-title">数据模拟器</div>
+        <div class="arch-sidebar-item metric">模拟数据源</div>
+      </div>
+      <div class="arch-sidebar-panel">
+        <div class="arch-sidebar-title">时序数据</div>
+        <div class="arch-sidebar-item">MQTT</div>
+        <div class="arch-sidebar-item">OPC UA</div>
+        <div class="arch-sidebar-item">Http API</div>
+        <div class="arch-sidebar-item">Modbus</div>
+        <div class="arch-sidebar-item">PLC</div>
+      </div>
+      <div class="arch-sidebar-panel">
+        <div class="arch-sidebar-title">业务数据</div>
+        <div class="arch-sidebar-item">生产事件</div>
+        <div class="arch-sidebar-item">业务数据变更</div>
+      </div>
+    </div>
+
+    <div class="arch-main">
+      <div class="arch-layer supervisor">
+        <div class="arch-layer-title">Supervisor 管理平面 (单例)</div>
+        <div class="arch-grid arch-grid-4">
+          <div class="arch-box">WorkerManager<small>Worker管理器</small></div>
+          <div class="arch-box">Web Http Host<small>Rest API 服务</small></div>
+          <div class="arch-box">WebSocket Host<small>RPC服务</small></div>
+          <div class="arch-box">Cli服务</div>
+        </div>
+      </div>
+
+      <div class="connector-note">WebSocket (ws) 双向通信</div>
+
+      <div class="arch-layer worker">
+        <div class="arch-layer-title">Worker 运行时容器 (多实例)</div>
+        <div class="arch-grid arch-grid-4">
+          <div class="arch-box world">WorldRegister<small>世界注册器</small></div>
+          <div class="arch-box green">WebSocket Client<small>RPC请求</small></div>
+          <div class="arch-box green">Cli 服务</div>
+          <div class="arch-box green">Message Channels<small>消息通道(客户端)</small></div>
+        </div>
+
+        <div class="inline-panel green">
+          <div class="inline-panel-title">MessageHub 消息路由</div>
+          <div class="arch-grid arch-grid-3">
+            <div class="arch-box">InboxProcessor<small>入站处理器</small></div>
+            <div class="arch-box tech">SQLite message.db<small>消息存储</small></div>
+            <div class="arch-box">OutboxProcessor<small>出站处理器</small></div>
+          </div>
+        </div>
+
+        <div class="inline-panel amber">
+          <div class="inline-panel-title">World1 世界实例</div>
+
+          <div class="sub-group">
+            <div class="sub-group-box" style="flex: 2;">
+              <div class="sub-group-title">智能体实例 (Agents)</div>
+              <div class="arch-grid arch-grid-4">
+                <div class="arch-box world">agent1</div>
+                <div class="arch-box world">agent2</div>
+                <div class="arch-box world">agent3</div>
+                <div class="arch-box world">agent4</div>
+              </div>
+              <div class="scene-tag">Scene1 (Shared) — 共享引用</div>
+              <div class="scene-tag isolated">Scene2 (Isolated) — agentX1, agentX2, agent3', agent4'</div>
+            </div>
+
+            <div class="sub-group-box" style="flex: 3;">
+              <div class="sub-group-title">核心服务</div>
+              <div class="arch-grid arch-grid-3">
+                <div class="arch-box purple">SandboxExecutor<small>沙箱执行</small></div>
+                <div class="arch-box world">InstanceManager<small>实例管理器</small></div>
+                <div class="arch-box world">StateManager<small>世界状态管理</small></div>
+                <div class="arch-box world">AlarmManager<small>告警管理</small></div>
+                <div class="arch-box world">SceneManager<small>场景管理</small></div>
+                <div class="arch-box world">TriggerRegistry<small>触发器注册</small></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 10px;">
+            <div class="arch-grid arch-grid-2">
+              <div class="arch-box highlight">EventBus<small>世界内部事件总线</small></div>
+              <div class="arch-box tech">SQLite runtime.db<small>运行时数据存储</small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note-section">
+        <h4>设计要点</h4>
+        <ol>
+          <li>Supervisor 是单例进程，Worker 是多实例进程，Worker 启动时通过 JSON-RPC 向 Supervisor 注册并汇报数据。</li>
+          <li>Worker 是独立运行的进程，通过多 Channel 接受外部 Message，并由 MessageHub 路由到多个 World 实例。</li>
+          <li>Worker 管理多个 World 实例，负责 World 的创建、持久化、启停和销毁。</li>
+          <li>World 是多智能体同时运行的环境，内部通过 EventBus 进行消息通信，同时可直接调用实例 Service 改变状态。</li>
+          <li>Scene 是 World 下多个智能体的聚合：Shared 模式保持对 World 实例的引用；Isolated 模式获得实例状态拷贝，隔离模式下不影响真实 World 状态。</li>
+          <li>脱离 Supervisor 亦可通过 CLI 对 Worker 进行部署和管理。</li>
+          <li>驱动 World 实例变迁的动力：物理世界数据点变化、外部 Channel 发送的 Message、实例自身定时任务。</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="arch-sidebar">
+      <div class="arch-sidebar-panel">
+        <div class="arch-sidebar-title">管理后台</div>
+        <div class="arch-sidebar-item">模型配置</div>
+        <div class="arch-sidebar-item">版本管理</div>
+        <div class="arch-sidebar-item metric">告警历史</div>
+        <div class="arch-sidebar-item">运行事件</div>
+        <div class="arch-sidebar-item">DataSource<small>数据源管理</small></div>
+        <div class="arch-sidebar-item">实例配置下达</div>
+        <div class="arch-sidebar-item">Channel管理</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

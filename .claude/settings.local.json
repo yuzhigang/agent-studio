@@ -6,7 +6,16 @@
       "Bash(xargs wc:*)",
       "Bash(python -m *)",
       "Bash(pytest *)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Read(//c/Users/Zigzag/.claude/skills/architecture-diagram/assets/**)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page",
+      "Read(//c/Users/Zigzag/.claude/skills/architecture/styles/**)",
+      "Read(//c/Users/Zigzag/.claude/skills/architecture/layouts/**)",
+      "WebSearch",
+      "WebFetch(domain:anylogic.help)",
+      "Read(//c/Users/Zigzag/.claude/plugins/cache/superpowers-marketplace/superpowers/**)"
     ]
   }
 }
