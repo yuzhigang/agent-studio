@@ -7,10 +7,10 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser(
-        "run", help="Run a single world in isolated process mode"
+        "run", help="Run worker process loading all worlds from base directory"
     )
     run_parser.add_argument(
-        "--world-dir", required=True, help="Path to world directory"
+        "--base-dir", required=True, help="Base directory containing world subdirectories"
     )
     run_parser.add_argument(
         "--supervisor-ws", default=None, help="Supervisor WebSocket URL to register with"
@@ -35,6 +35,11 @@ def main(argv=None):
         required=True,
         help="Path to world directory (can be repeated)",
     )
+    inline_parser.add_argument(
+        "--supervisor-ws",
+        default=None,
+        help="Supervisor WebSocket URL for loopback registration",
+    )
     inline_parser.set_defaults(func=_run_inline_command)
 
     sup_parser = subparsers.add_parser(
@@ -58,7 +63,7 @@ def main(argv=None):
 def _run_command(args):
     from src.worker.cli.run_command import run_world
     return run_world(
-        world_dir=args.world_dir,
+        base_dir=args.base_dir,
         supervisor_ws=args.supervisor_ws,
         ws_port=args.ws_port,
         force_stop_on_shutdown=args.force_stop_on_shutdown,
@@ -67,7 +72,10 @@ def _run_command(args):
 
 def _run_inline_command(args):
     from src.worker.cli.run_inline import run_inline
-    return run_inline(world_dirs=args.world_dir)
+    return run_inline(
+        world_dirs=args.world_dir,
+        supervisor_ws=args.supervisor_ws,
+    )
 
 
 def _supervisor_command(args):
