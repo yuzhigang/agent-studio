@@ -30,7 +30,6 @@ def run_inline(world_dirs, supervisor_ws=None):
     for world_id, bundle in worker_manager.worlds.items():
         bus = bundle["event_bus_registry"].get_or_create(world_id)
         message_hub.register_world(world_id, bus, bundle.get("model_events", {}))
-        bundle["instance_manager"]._message_hub = message_hub
         bundle["message_hub"] = message_hub
 
     # Start shared scenes for all loaded worlds
@@ -45,41 +44,40 @@ def run_inline(world_dirs, supervisor_ws=None):
                 local_instances = scene_data.get("local_instances", {})
                 sm.start(world_id, scene_id, mode="shared", references=refs, local_instances=local_instances)
 
-    def _shutdown(signum, frame):
-        print("Shutting down inline runtime...")
-        if message_hub is not None:
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(message_hub.stop(), loop)
-                else:
-                    loop.run_until_complete(message_hub.stop())
-            except Exception:
-                pass
-        for world_id in list(worker_manager.worlds.keys()):
-            try:
-                worker_manager.handle_command("world.stop", {"world_id": world_id})
-            except Exception:
-                pass
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
-
     import asyncio
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    main_fut: asyncio.Future | None = None
+
+    def _shutdown(signum, frame):
+        print("Shutting down inline runtime...")
+        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_shutdown_all()))
+
+    async def _shutdown_all():
+        for world_id in list(worker_manager.worlds.keys()):
+            try:
+                await worker_manager.handle_command("world.stop", {"world_id": world_id})
+            except Exception:
+                pass
+        if main_fut is not None and not main_fut.done():
+            main_fut.cancel()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
+
     async def _run():
+        nonlocal main_fut
         await message_hub.start()
+        await worker_manager.start_async()
+        main_fut = asyncio.Future()
         try:
             if supervisor_ws is not None:
                 # WebSocket loopback connection to Supervisor
                 from src.worker.cli.run_command import run_supervisor_client
                 await run_supervisor_client(worker_manager, supervisor_ws)
             else:
-                await asyncio.Event().wait()
+                await main_fut
         finally:
             await message_hub.stop()
 

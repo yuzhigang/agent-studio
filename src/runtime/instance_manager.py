@@ -107,6 +107,7 @@ class InstanceManager:
         sandbox_executor: SandboxExecutor | None = None,
         world_state=None,
         trigger_registry=None,
+        alarm_manager=None,
     ):
         self._instances: dict[tuple[str, str], Instance] = {}
         self._lock = threading.Lock()
@@ -116,7 +117,7 @@ class InstanceManager:
         self._sandbox = sandbox_executor or SandboxExecutor()
         self._world_state = world_state
         self._trigger_registry = trigger_registry
-        self._alarm_manager = None
+        self._alarm_manager = alarm_manager
 
     @staticmethod
     def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
@@ -337,47 +338,61 @@ class InstanceManager:
 
     def get(self, world_id: str, instance_id: str, scope: str = "world") -> Instance | None:
         key = self._make_key(world_id, instance_id, scope)
+
+        # Fast path: already in memory (lock-free check — ok because
+        # _instances is a plain dict and only our own logic mutates it)
+        inst = self._instances.get(key)
+        if inst is not None:
+            return inst
+
+        if self._store is None:
+            return None
+
+        # Slow path: load from store (I/O — do NOT hold lock during this)
+        snapshot = self._store.load_instance(world_id, instance_id, scope)
+        if snapshot is None:
+            return None
+
+        inst = Instance(
+            instance_id=snapshot["instance_id"],
+            model_name=snapshot["model_name"],
+            world_id=snapshot["world_id"],
+            scope=snapshot["scope"],
+            model_version=snapshot.get("model_version"),
+            attributes=copy.deepcopy(snapshot.get("attributes", {})),
+            variables=copy.deepcopy(snapshot.get("variables", {})),
+            bindings=copy.deepcopy(snapshot.get("bindings", {})),
+            links=copy.deepcopy(snapshot.get("links", {})),
+            memory=copy.deepcopy(snapshot.get("memory", {})),
+            state=copy.deepcopy(snapshot.get("state", {"current": None, "enteredAt": None})),
+            audit=copy.deepcopy(snapshot.get("audit", {"version": 0, "updatedAt": None, "lastEventId": None})),
+            lifecycle_state=snapshot.get("lifecycle_state", "active"),
+        )
+        inst.snapshot = copy.deepcopy(snapshot.get("world_state", {}).get("snapshot", {}))
+        if self._model_loader is not None:
+            loaded_model = self._model_loader(inst.model_name)
+            if loaded_model is not None:
+                inst.model = loaded_model
+        inst._update_snapshot()
+
+        # Register under lock (fast path — dict ops only)
         with self._lock:
-            inst = self._instances.get(key)
-            if inst is not None:
-                return inst
-            if self._store is None:
-                return None
-            snapshot = self._store.load_instance(world_id, instance_id, scope)
-            if snapshot is None:
-                return None
-            inst = Instance(
-                instance_id=snapshot["instance_id"],
-                model_name=snapshot["model_name"],
-                world_id=snapshot["world_id"],
-                scope=snapshot["scope"],
-                model_version=snapshot.get("model_version"),
-                attributes=copy.deepcopy(snapshot.get("attributes", {})),
-                variables=copy.deepcopy(snapshot.get("variables", {})),
-                bindings=copy.deepcopy(snapshot.get("bindings", {})),
-                links=copy.deepcopy(snapshot.get("links", {})),
-                memory=copy.deepcopy(snapshot.get("memory", {})),
-                state=copy.deepcopy(snapshot.get("state", {"current": None, "enteredAt": None})),
-                audit=copy.deepcopy(snapshot.get("audit", {"version": 0, "updatedAt": None, "lastEventId": None})),
-                lifecycle_state=snapshot.get("lifecycle_state", "active"),
-            )
-            inst.snapshot = copy.deepcopy(snapshot.get("world_state", {}).get("snapshot", {}))
-            if self._model_loader is not None:
-                loaded_model = self._model_loader(inst.model_name)
-                if loaded_model is not None:
-                    inst.model = loaded_model
-            inst._update_snapshot()
-            if self._alarm_manager is not None and inst.model:
-                alarm_configs = inst.model.get("alarms")
-                if alarm_configs:
-                    self._alarm_manager.register_instance_alarms(inst, alarm_configs)
+            existing = self._instances.get(key)
+            if existing is not None:
+                return existing  # another caller loaded it first
             self._instances[key] = inst
             try:
                 self._register_instance(inst)
             except Exception:
                 self._instances.pop(key, None)
                 raise
-            return inst
+
+        # Alarm registration outside lock
+        if self._alarm_manager is not None and inst.model:
+            alarm_configs = inst.model.get("alarms")
+            if alarm_configs:
+                self._alarm_manager.register_instance_alarms(inst, alarm_configs)
+        return inst
 
     def list_by_world(self, world_id: str) -> list[Instance]:
         with self._lock:

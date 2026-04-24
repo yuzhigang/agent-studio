@@ -5,7 +5,8 @@ from typing import Callable
 
 import websockets
 
-from src.worker.channels.base import Channel, SendResult
+from src.worker.channels.base import Channel
+from src.runtime.messaging import SendResult
 from src.worker.server.jsonrpc_ws import JsonRpcConnection
 
 

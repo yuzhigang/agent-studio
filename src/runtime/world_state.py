@@ -6,6 +6,9 @@ class WorldState:
         self._im = instance_manager
         self._world_id = world_id
 
+    def set_instance_manager(self, instance_manager) -> None:
+        self._im = instance_manager
+
     def snapshot(self) -> dict:
         result: dict[str, list[dict]] = {}
         for inst in self._im.list_by_world(self._world_id):

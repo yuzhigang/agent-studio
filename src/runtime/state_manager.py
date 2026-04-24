@@ -1,5 +1,12 @@
+# src/runtime/state_manager.py
+"""
+StateManager: checkpoint and restore world/scene state.
+
+Auto-checkpoint runs via an asyncio background task (not threading.Thread)
+so that checkpoints and event-loop activity share one thread.
+"""
+import asyncio
 import threading
-import time
 from datetime import datetime, timezone
 
 from src.runtime.instance_manager import InstanceManager
@@ -26,9 +33,8 @@ class StateManager:
         self._loaded_lock = threading.Lock()
         self._world_locks: dict[str, threading.Lock] = {}
         self._world_locks_lock = threading.Lock()
+        self._task: asyncio.Task | None = None
         self._shutdown = False
-        self._thread = threading.Thread(target=self._auto_checkpoint_loop, daemon=True)
-        self._thread.start()
 
     def _get_world_lock(self, world_id: str) -> threading.Lock:
         with self._world_locks_lock:
@@ -44,9 +50,16 @@ class StateManager:
         with self._loaded_lock:
             self._loaded_worlds.discard(world_id)
 
-    def _auto_checkpoint_loop(self) -> None:
+    async def start_async(self) -> None:
+        """Start the auto-checkpoint background task in the current event loop."""
+        if self._task is not None:
+            return
+        self._shutdown = False
+        self._task = asyncio.ensure_future(self._auto_checkpoint_loop())
+
+    async def _auto_checkpoint_loop(self) -> None:
         while not self._shutdown:
-            time.sleep(30)
+            await asyncio.sleep(30)
             if self._shutdown:
                 break
             with self._loaded_lock:
@@ -59,7 +72,6 @@ class StateManager:
                 try:
                     self.checkpoint_world(world_id)
                 except Exception:
-                    # Swallow errors in background thread
                     pass
                 finally:
                     lock.release()
@@ -179,5 +191,8 @@ class StateManager:
         return scene
 
     def shutdown(self) -> None:
+        """Cancel the auto-checkpoint task and wait for it to finish."""
         self._shutdown = True
-        self._thread.join(timeout=5)
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None

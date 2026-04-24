@@ -14,6 +14,7 @@
             "Bash(xargs wc:*)",
             "Bash(python -m *)",
             "Bash(pytest *)",
+            "WebSearch",
             "Read(//c/Users/Zigzag/.claude/plugins/**)",
             "Bash(git *)"
         ]

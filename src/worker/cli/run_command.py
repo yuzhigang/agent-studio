@@ -4,7 +4,7 @@ import os
 import signal
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.runtime.message_hub import MessageHub
 from src.runtime.world_registry import WorldRegistry
@@ -35,40 +35,54 @@ def run_world(base_dir, supervisor_ws=None, ws_port=None, force_stop_on_shutdown
     for world_id, bundle in worker_manager.worlds.items():
         bus = bundle["event_bus_registry"].get_or_create(world_id)
         message_hub.register_world(world_id, bus, bundle.get("model_events", {}))
-        bundle["instance_manager"]._message_hub = message_hub
         bundle["message_hub"] = message_hub
 
     # Start shared scenes for all loaded worlds
     for bundle in worker_manager.worlds.values():
         _start_shared_scenes(bundle)
 
-    # Setup signal handlers
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    main_fut: asyncio.Future | None = None
+
+    # ---- Signal handling ----
+
     def _on_signal(signum, frame):
         print(f"Received signal {signum}, shutting down...")
+        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_shutdown_all()))
+
+    async def _shutdown_all():
         for world_id in list(worker_manager.worlds.keys()):
             try:
-                worker_manager.handle_command("world.stop", {"world_id": world_id})
+                await worker_manager.handle_command("world.stop", {"world_id": world_id})
             except JsonRpcError as e:
                 print(f"Shutdown aborted for {world_id}: {e.message}")
                 return
-        sys.exit(0)
+            except Exception:
+                pass
+        if main_fut is not None and not main_fut.done():
+            main_fut.cancel()
 
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     tasks = []
 
     async def _start_and_run():
+        nonlocal main_fut
         await message_hub.start()
+        main_fut = asyncio.Future()
         try:
-            await asyncio.Future()
+            await main_fut
         finally:
             await message_hub.stop()
 
+    async def _start_state_managers():
+        await worker_manager.start_async()
+
     tasks.append(loop.create_task(_start_and_run()))
+    tasks.append(loop.create_task(_start_state_managers()))
 
     if ws_port is not None:
         # TODO: Worker-level WebSocket server for direct client connections
@@ -194,7 +208,7 @@ async def run_supervisor_client(worker_manager, supervisor_ws):
                 metadata = {
                     "pid": os.getpid(),
                     "hostname": os.uname().nodename if hasattr(os, "uname") else "localhost",
-                    "started_at": datetime.utcnow().isoformat() + "Z",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
                 }
                 await conn.send(conn.build_notification(
                     "notify.worker.activated",
@@ -223,7 +237,7 @@ async def run_supervisor_client(worker_manager, supervisor_ws):
             print("Supervisor unreachable for 15s, initiating self-termination...")
             for world_id in list(worker_manager.worlds.keys()):
                 try:
-                    worker_manager.handle_command("world.stop", {"world_id": world_id})
+                    await worker_manager.handle_command("world.stop", {"world_id": world_id})
                 except Exception:
                     pass
             break
@@ -271,7 +285,7 @@ async def _send_heartbeats(ws, conn, worker_manager):
                 {
                     "worker_id": worker_manager.worker_id,
                     "session_id": worker_manager.session_id,
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "worlds": worlds_status,
                 },
             ))
@@ -281,25 +295,25 @@ async def _send_heartbeats(ws, conn, worker_manager):
 
 def _register_worker_handlers(conn: JsonRpcConnection, worker_manager):
     async def world_stop(params, req_id):
-        return worker_manager.handle_command("world.stop", params)
+        return await worker_manager.handle_command("world.stop", params)
 
     async def world_checkpoint(params, req_id):
-        return worker_manager.handle_command("world.checkpoint", params)
+        return await worker_manager.handle_command("world.checkpoint", params)
 
     async def world_get_status(params, req_id):
-        return worker_manager.handle_command("world.getStatus", params)
+        return await worker_manager.handle_command("world.getStatus", params)
 
     async def scene_start(params, req_id):
-        return worker_manager.handle_command("scene.start", params)
+        return await worker_manager.handle_command("scene.start", params)
 
     async def scene_stop(params, req_id):
-        return worker_manager.handle_command("scene.stop", params)
+        return await worker_manager.handle_command("scene.stop", params)
 
     async def message_hub_publish(params, req_id):
-        return worker_manager.handle_command("messageHub.publish", params)
+        return await worker_manager.handle_command("messageHub.publish", params)
 
     async def message_hub_publish_batch(params, req_id):
-        return worker_manager.handle_command("messageHub.publishBatch", params)
+        return await worker_manager.handle_command("messageHub.publishBatch", params)
 
     conn.register("world.stop", world_stop)
     conn.register("world.checkpoint", world_checkpoint)

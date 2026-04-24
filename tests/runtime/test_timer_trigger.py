@@ -1,10 +1,11 @@
+import asyncio
 import pytest
-import time
 from src.runtime.triggers.timer_trigger import TimerTrigger, TimerScheduler
 from src.runtime.trigger_registry import TriggerEntry
 
 
-def test_delay_trigger_fires_after_delay():
+@pytest.mark.anyio
+async def test_delay_trigger_fires_after_delay():
     scheduler = TimerScheduler()
     tt = TimerTrigger(scheduler)
 
@@ -18,12 +19,13 @@ def test_delay_trigger_fires_after_delay():
     )
     tt.on_registered(entry)
 
-    time.sleep(0.15)  # wait for 50ms delay + margin
+    await asyncio.sleep(0.15)
     assert len(calls) == 1
     assert calls[0] is inst
 
 
-def test_interval_trigger_fires_multiple_times():
+@pytest.mark.anyio
+async def test_interval_trigger_fires_multiple_times():
     scheduler = TimerScheduler()
     tt = TimerTrigger(scheduler)
 
@@ -37,11 +39,12 @@ def test_interval_trigger_fires_multiple_times():
     )
     tt.on_registered(entry)
 
-    time.sleep(0.25)  # wait for 3 intervals + margin
+    await asyncio.sleep(0.25)
     assert len(calls) == 3
 
 
-def test_interval_infinite_count():
+@pytest.mark.anyio
+async def test_interval_infinite_count():
     scheduler = TimerScheduler()
     tt = TimerTrigger(scheduler)
 
@@ -55,15 +58,16 @@ def test_interval_infinite_count():
     )
     tt.on_registered(entry)
 
-    time.sleep(0.13)  # 2 intervals
+    await asyncio.sleep(0.13)
     assert len(calls) == 2
 
     tt.on_unregistered(entry)
-    time.sleep(0.1)
-    assert len(calls) == 2  # should stop after unregistered
+    await asyncio.sleep(0.1)
+    assert len(calls) == 2
 
 
-def test_timer_unregistered_cancels():
+@pytest.mark.anyio
+async def test_timer_unregistered_cancels():
     scheduler = TimerScheduler()
     tt = TimerTrigger(scheduler)
 
@@ -78,11 +82,12 @@ def test_timer_unregistered_cancels():
     tt.on_registered(entry)
     tt.on_unregistered(entry)
 
-    time.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert len(calls) == 0
 
 
-def test_instance_removed_cancels_all():
+@pytest.mark.anyio
+async def test_instance_removed_cancels_all():
     scheduler = TimerScheduler()
     tt = TimerTrigger(scheduler)
 
@@ -97,5 +102,5 @@ def test_instance_removed_cancels_all():
     tt.on_registered(entry)
     tt.on_instance_removed(inst)
 
-    time.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert len(calls) == 0

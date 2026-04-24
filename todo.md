@@ -78,3 +78,66 @@
 - [ ] Alarm history cleanup on instance deletion: when an instance is removed/archived,
       decide whether to cascade-delete its alarm records or keep them for audit.
       Currently alarms table retains records even after instance removal.
+
+---
+
+# 架构漏洞修复清单 (2026-04-24)
+
+按优先级排列，标注涉及文件。
+
+## 🔴 Bug：必须修复
+
+### 1. 级联触发 (Cascading triggers) 无防护
+- **文件**: `src/runtime/instance_manager.py:214-228`, `trigger_registry.py:64-67`
+- **问题**: behavior 修改 property → notify_value_change → 触发下级 behavior → 无限递归。无深度限制、无循环检测。
+- **方向**: notify_value_change 加 `depth > MAX_DEPTH` 拦截，或记录 `(instance_id, trigger_id)` 防重入。
+
+### 2. Alarm 状态重启丢失
+- **文件**: `src/runtime/alarm_manager.py`
+- **问题**: `_states` 纯内存，`_persist_alarm_state` 写了 store 但无 `load/restore` 方法。World 重启后所有 alarm 回到 inactive。
+- **方向**: AlarmManager 增加 `restore(world_id)`，StateManager checkpoint/restore 纳入 alarm 状态。
+
+## 🟠 设计缺口：需要补全
+
+### 3. Worker 端无 WebSocket 重连逻辑
+- **文件**: `src/worker/cli/run_command.py:180-234`
+- **问题**: WebSocket 断开连接后缺少重连初始化确认，导致状态不同步。
+- **方向**: run_supervisor_client 外层已有重试，但重连后需增加完整初始化确认流程。
+
+### 4. Condition window 未实现
+- **文件**: `src/runtime/triggers/condition_trigger.py`
+- **问题**: time-sliding / count-sliding / tumbling 三种 window 均未实现，参数静默忽略。
+- **方向**: 实现 window 逻辑，或注册时检测参数抛 NotImplementedError。
+
+### 5. 缺少可观测性基础设施
+- **文件**: 全局
+- **问题**: 无结构化日志、无事件追踪、无性能指标。调试级联触发和 behavior 执行困难。
+- **方向**: 关键路径加 logging（trigger_registry、alarm_manager、instance_manager._execute_actions）。
+
+### 6. `asyncio.Lock` vs `threading.RLock` 混用 ✅
+- **文件**: `event_bus.py:11`, `instance_manager.py:113`, `supervisor/worker.py:24`, `trigger_registry.py`
+- **已处理**:
+  - `InstanceManager.get()`: 将 I/O（`_store.load_instance`）移到锁外，锁内只保留快速 dict 操作。锁类型保持 `threading.Lock`（被 `to_thread` 回调调用）。
+  - `TriggerRegistry`: 补充了 `threading.Lock`（之前完全无锁）。`notify_value_change` 被同步 sandbox 路径调用，不能用 `asyncio.Lock`。
+  - `EventBus`: `threading.RLock` 保留（`publish()` 经由 sandbox `dispatch()` 以同步方式调用）。
+  - `WorkerController`: 已使用 `asyncio.Lock` ✅
+  - 关键约束：`publish()` / `notify_value_change` / `get()` 等路径同时运行在同步 sandbox 和异步 handler 中，无法统一为 `asyncio.Lock`。
+
+### 7. ValueChangedTrigger 已移除 ✅
+- **变更**: `ValueChangedTrigger` 类、`tests/runtime/test_value_changed_trigger.py` 已删除。
+- **原因**: O(n²) 源于 ValueChangedTrigger 线性扫描所有 entry；O(n) 的 TriggerRegistry 层遍历（仅 4 个 impl）不是瓶颈。
+- **后续**: 配合 `dependOn` 统一路线，条件触发机制在未来重新设计。
+
+## 🟡 可改进
+
+### 8. AlarmManager force_clear 不校验 alarm 存在性
+- **文件**: `alarm_manager.py:154-174`
+- **问题**: `_get_alarm_config` 返回 `{}` 时仍发布残缺的 clear 事件。
+
+### 9. Scene.stop 不等待活跃 behavior
+- **文件**: `scene_manager.py`
+- **问题**: 强制停止可能留下半修改的实例状态。无超时回收。
+
+### 10. InstanceManager.create() 缺少 data_model 校验
+- **文件**: `instance_manager.py`
+- **问题**: 设计规定 `_model_type == "data_model"` 禁止创建实例，但 create() 未做此校验。

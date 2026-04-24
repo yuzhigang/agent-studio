@@ -28,15 +28,12 @@ def test_run_inline_world_loading():
         for world_id, bundle in wm.worlds.items():
             bus = bundle["event_bus_registry"].get_or_create(world_id)
             message_hub.register_world(world_id, bus, bundle.get("model_events", {}))
-            bundle["instance_manager"]._message_hub = message_hub
             bundle["message_hub"] = message_hub
 
         bundle1 = wm.worlds["factory-01"]
         bundle2 = wm.worlds["factory-02"]
         assert bundle1["message_hub"] is message_hub
         assert bundle2["message_hub"] is message_hub
-        assert bundle1["instance_manager"]._message_hub is message_hub
-        assert bundle2["instance_manager"]._message_hub is message_hub
 
         # cleanup
         import asyncio

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.worker.channels.base import SendResult
+from src.runtime.messaging import SendResult
 from src.worker.channels.rabbitmq_channel import RabbitMQChannel
 
 

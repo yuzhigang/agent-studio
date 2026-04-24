@@ -131,52 +131,6 @@ behaviors:
       - type: transition
         transition: recoverFromAlert
 
-  onEnterMonitoringLog:
-    title: 进入监控状态
-    trigger:
-      type: valueChanged
-      name: state.current
-      value: monitoring
-    actions:
-      - type: runScript
-        scriptEngine: python
-        script: |
-          print(f"[{this.id}] >>> 进入监控模式")
-
-  onEnterAlertLog:
-    title: 进入告警状态
-    trigger:
-      type: valueChanged
-      name: state.current
-      value: alert
-    actions:
-      - type: runScript
-        scriptEngine: python
-        script: |
-          this.variables.alertCount += 1
-          print(f"[{this.id}] !!! 告警触发! 温度={this.variables.temperature}°C 超过阈值={this.attributes.threshold}°C (第{this.variables.alertCount}次)")
-      - type: triggerEvent
-        name: alertTriggered
-        payload:
-          sensorId: this.id
-          temperature: this.variables.temperature
-          threshold: this.attributes.threshold
-          timestamp: datetime.now().isoformat()
-
-  onEnterIdleReset:
-    title: 进入空闲复位
-    trigger:
-      type: valueChanged
-      name: state.current
-      value: idle
-    actions:
-      - type: runScript
-        scriptEngine: python
-        script: |
-          this.variables.temperature = 25.0
-          this.variables.count = 0
-          print(f"[{this.id}] --- 复位到空闲状态")
-
   onBeat:
     title: 收到心跳
     trigger:

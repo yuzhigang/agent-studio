@@ -4,7 +4,7 @@ import pytest
 
 from src.runtime.message_hub import MessageHub
 from src.runtime.stores.sqlite_message_store import SQLiteMessageStore
-from src.worker.channels.base import SendResult
+from src.runtime.messaging import SendResult
 
 pytestmark = pytest.mark.anyio(backend="asyncio")
 

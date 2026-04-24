@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from src.worker.channels.base import SendResult
+from src.runtime.messaging import SendResult
 
 logger = logging.getLogger(__name__)
 

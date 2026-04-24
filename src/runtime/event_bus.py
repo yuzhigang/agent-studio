@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 class EventBus:
     def __init__(self):
         self._subscribers: dict[str, list[tuple[str, str, callable]]] = {}
+        # threading.RLock is required here because publish() is called from
+        # sync sandbox dispatch() context — can't use asyncio.Lock.
         self._lock = threading.RLock()
         self._pre_publish_hooks: list[Callable] = []
 

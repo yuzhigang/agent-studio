@@ -15,7 +15,15 @@
       "Read(//c/Users/Zigzag/.claude/skills/architecture/layouts/**)",
       "WebSearch",
       "WebFetch(domain:anylogic.help)",
-      "Read(//c/Users/Zigzag/.claude/plugins/cache/superpowers-marketplace/superpowers/**)"
+      "Read(//c/Users/Zigzag/.claude/plugins/cache/superpowers-marketplace/superpowers/**)",
+      "Bash(rtk git *)",
+      "Bash(cat /tmp/claude*/tasks/bylnbjd07.output)",
+      "Read(//c/Users/Zigzag/AppData/Local/Temp/claude/d--30-Code-AI-Test-agent-studio/5abfd35c-e920-47e1-8361-634f141a5c54/tasks/**)",
+      "Bash(gh pr *)",
+      "Bash(rtk pytest *)",
+      "Bash(python tests/e2e/e2e_test.py)",
+      "Bash(PYTHONPATH=. python tests/e2e/e2e_test.py)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/e2e/e2e_test.py)"
     ]
   }
 }

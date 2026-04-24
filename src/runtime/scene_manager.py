@@ -22,6 +22,9 @@ class SceneManager:
         self._scenes: dict[tuple[str, str], dict] = {}
         self._scene_lock = threading.Lock()
 
+    def set_state_manager(self, state_manager) -> None:
+        self._state_manager = state_manager
+
     def _backfill_metrics(self, world_id: str, scene_id: str, instances: list):
         """Stub metric backfill: in a real system queries the time-series DB."""
         if self._metric_store is None:

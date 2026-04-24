@@ -1,12 +1,7 @@
 from abc import ABC, abstractmethod
-from enum import Enum
 from typing import Callable
 
-
-class SendResult(Enum):
-    SUCCESS = "success"
-    RETRYABLE = "retryable"
-    PERMANENT = "permanent"
+from src.runtime.messaging import SendResult  # noqa: F401 — re-export
 
 
 class Channel(ABC):

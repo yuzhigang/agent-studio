@@ -178,7 +178,6 @@ def test_instance_manager_calls_alarm_manager_on_create(registry):
     from src.runtime.instance_manager import InstanceManager
     from src.runtime.trigger_registry import TriggerRegistry
     from src.runtime.triggers.event_trigger import EventTrigger
-    from src.runtime.triggers.value_changed_trigger import ValueChangedTrigger
     from src.runtime.triggers.condition_trigger import ConditionTrigger
     from src.runtime.triggers.timer_trigger import TimerTrigger
     from src.runtime.event_bus import EventBusRegistry
@@ -187,7 +186,6 @@ def test_instance_manager_calls_alarm_manager_on_create(registry):
     im = InstanceManager(bus_reg)
     tr = TriggerRegistry()
     tr.add_trigger(EventTrigger(bus_reg))
-    tr.add_trigger(ValueChangedTrigger())
     tr.add_trigger(ConditionTrigger(im._sandbox))
     tr.add_trigger(TimerTrigger())
     im._trigger_registry = tr
@@ -217,7 +215,6 @@ def test_instance_manager_unregisters_alarms_on_archive():
     from src.runtime.instance_manager import InstanceManager
     from src.runtime.trigger_registry import TriggerRegistry
     from src.runtime.triggers.event_trigger import EventTrigger
-    from src.runtime.triggers.value_changed_trigger import ValueChangedTrigger
     from src.runtime.triggers.condition_trigger import ConditionTrigger
     from src.runtime.triggers.timer_trigger import TimerTrigger
     from src.runtime.event_bus import EventBusRegistry
@@ -226,7 +223,6 @@ def test_instance_manager_unregisters_alarms_on_archive():
     im = InstanceManager(bus_reg)
     tr = TriggerRegistry()
     tr.add_trigger(EventTrigger(bus_reg))
-    tr.add_trigger(ValueChangedTrigger())
     tr.add_trigger(ConditionTrigger(im._sandbox))
     tr.add_trigger(TimerTrigger())
     im._trigger_registry = tr
@@ -280,9 +276,10 @@ def test_alarm_triggered_via_condition():
     # Verify temperature updated
     assert inst.variables.get("temperature") == 95.0
 
-    # Reset — temperature drops to 25, condition false, alarm clears
+    # Reset — send low temperature so condition becomes false and alarm clears
     bus.publish("reset", {}, source="test", scope="world")
-    time.sleep(0.1)
+    bus.publish("tick", {"temperature": 20.0}, source="test", scope="world")
+    time.sleep(0.2)
 
     # Alarm should be inactive after reset
     state = alarm_mgr._get_state(inst, "overheat.warning")

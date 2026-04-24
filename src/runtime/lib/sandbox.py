@@ -62,6 +62,24 @@ class SandboxExecutor:
             setattr(modules[mod_name], func_name, func)
         return modules
 
+    def evaluate_expression(self, expression: str, context: dict):
+        """Evaluate a single expression safely using ast.parse (eval mode)."""
+        try:
+            tree = ast.parse(expression, mode="eval")
+        except SyntaxError as e:
+            raise ScriptExecutionError(str(e), line=e.lineno)
+
+        safe_builtins = {
+            name: __builtins__[name]
+            for name in SAFE_BUILTINS
+            if name in __builtins__ and name not in FORBIDDEN_BUILTINS
+        }
+        globals_dict = {"__builtins__": safe_builtins, **context}
+        try:
+            return eval(compile(tree, "<sandbox-eval>", "eval"), globals_dict)
+        except Exception as e:
+            raise ScriptExecutionError(str(e)) from e
+
     def execute(self, script: str, context: dict):
         try:
             tree = ast.parse(script, mode="exec")

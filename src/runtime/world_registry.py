@@ -16,7 +16,6 @@ from src.runtime.world_state import WorldState
 from src.runtime.trigger_registry import TriggerRegistry
 from src.runtime.alarm_manager import AlarmManager
 from src.runtime.triggers.event_trigger import EventTrigger
-from src.runtime.triggers.value_changed_trigger import ValueChangedTrigger
 from src.runtime.triggers.condition_trigger import ConditionTrigger
 from src.runtime.triggers.timer_trigger import TimerTrigger
 
@@ -94,26 +93,26 @@ class WorldRegistry:
                     return ModelLoader.load(model_dir.parent)
                 return None
 
+            trigger_registry = TriggerRegistry()
+            trigger_registry.add_trigger(EventTrigger(bus_reg))
+            trigger_registry.add_trigger(TimerTrigger())
+
+            bus = bus_reg.get_or_create(world_id)
+
+            alarm_manager = AlarmManager(trigger_registry, bus, store)
+
             im = InstanceManager(
                 bus_reg,
                 instance_store=store,
                 model_loader=model_loader,
                 world_state=world_state,
+                trigger_registry=trigger_registry,
+                alarm_manager=alarm_manager,
             )
 
-            trigger_registry = TriggerRegistry()
-            trigger_registry.add_trigger(EventTrigger(bus_reg))
-            trigger_registry.add_trigger(ValueChangedTrigger())
             trigger_registry.add_trigger(ConditionTrigger(im._sandbox))
-            trigger_registry.add_trigger(TimerTrigger())
-            im._trigger_registry = trigger_registry
 
-            world_state._im = im
-
-            bus = bus_reg.get_or_create(world_id)
-
-            alarm_manager = AlarmManager(trigger_registry, bus, store)
-            im._alarm_manager = alarm_manager
+            world_state.set_instance_manager(im)
             # This hook only recomputes the publisher (source) instance.
             # Consumers that run scripts will recompute their own snapshot
             # inside InstanceManager._execute_action.
@@ -137,7 +136,7 @@ class WorldRegistry:
                 store,
                 metric_store=metric_store,
             )
-            scene_mgr._state_manager = state_mgr
+            scene_mgr.set_state_manager(state_mgr)
 
             self._load_instance_declarations(world_id, world_dir, im, model_loader)
 

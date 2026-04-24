@@ -5,7 +5,7 @@ import pytest
 import websockets
 
 from src.worker.channels.jsonrpc_channel import JsonRpcChannel
-from src.worker.channels.base import SendResult
+from src.runtime.messaging import SendResult
 
 
 @pytest.mark.anyio

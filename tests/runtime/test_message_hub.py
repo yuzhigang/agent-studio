@@ -34,7 +34,7 @@ class FakeChannel:
         self.messages.append(
             {"event_type": event_type, "payload": payload, "source": source, "scope": scope, "target": target}
         )
-        from src.worker.channels.base import SendResult
+        from src.runtime.messaging import SendResult
         return SendResult.SUCCESS
 
 

@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 from aiohttp import web
-from src.supervisor.gateway import WorkerController
+from src.supervisor.worker import WorkerController
 
 
 def _build_runtime_cmd(world_dir: str, supervisor_ws: str) -> list[str]:
@@ -52,11 +52,11 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080):
 
 
 async def _handle_start(request: web.Request):
-    gateway: SupervisorGateway = request.app["gateway"]
+    gateway: WorkerController = request.app["gateway"]
     ws_port = request.app["ws_port"]
     world_id = request.match_info["world_id"]
-    runtime = gateway.get_runtime(world_id)
-    if runtime is not None:
+    worker = gateway.get_worker_by_world(world_id)
+    if worker is not None:
         return web.json_response({"status": "already_running"})
 
     # Spawn local subprocess
@@ -114,18 +114,6 @@ async def _handle_worker_ws(request: web.Request):
                 if wid:
                     await gateway.unregister_worker(wid)
                     worker_id = None
-
-            # Legacy world-level notifications (backward compat)
-            elif method == "notify.runtimeOnline":
-                world_id = params.get("world_id")
-                session_id = params.get("session_id")
-                if world_id and session_id:
-                    await gateway.register_runtime(world_id, ws, session_id)
-
-            elif method == "notify.runtimeOffline":
-                world_id = params.get("world_id")
-                if world_id:
-                    await gateway.unregister_runtime(world_id)
 
         elif msg.type == web.WSMsgType.ERROR:
             break

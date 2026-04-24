@@ -1,12 +1,17 @@
 import re
-from collections import defaultdict
 
+from src.runtime.lib.sandbox import SandboxExecutor
 from src.runtime.trigger_registry import Trigger
 
 PROPERTY_SECTIONS = {"state", "variables", "attributes", "derivedProperties"}
 
 
 def _extract_condition_deps(condition_expr):
+    """Extract field paths referenced in a condition expression.
+
+    The ConditionTrigger.on_registered hook stores these in entry.watch,
+    which the global DependencyIndex uses for O(1) value-change routing.
+    """
     matches = re.findall(
         r'this\.([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)',
         condition_expr,
@@ -17,58 +22,31 @@ def _extract_condition_deps(condition_expr):
     ))
 
 
-class ConditionIndex:
-    def __init__(self):
-        self._by_field = defaultdict(list)
-
-    def register(self, entry):
-        for field in getattr(entry, "watch", []):
-            self._by_field[field].append(entry)
-
-    def unregister(self, entry):
-        for field in getattr(entry, "watch", []):
-            self._by_field[field] = [e for e in self._by_field[field] if e.id != entry.id]
-
-    def get_affected(self, changed_fields):
-        affected = set()
-        for field in changed_fields:
-            affected.update(self._by_field.get(field, []))
-        return list(affected)
-
-
 class ConditionTrigger(Trigger):
     trigger_types = {"condition"}
 
     def __init__(self, sandbox):
-        self._sandbox = sandbox
-        self._index = ConditionIndex()
+        self._sandbox = sandbox or SandboxExecutor()
 
     def on_registered(self, entry):
         condition_expr = entry.trigger.get("condition", "")
         entry.watch = _extract_condition_deps(condition_expr)
-        self._index.register(entry)
 
-    def on_unregistered(self, entry):
-        self._index.unregister(entry)
+    def handle_value_change(self, entry, instance, field_path, old_val, new_val):
+        """Per-entry handler called by TriggerRegistry.notify_value_change.
 
-    def on_instance_removed(self, instance):
-        for entry in list(self._index.get_affected(set(self._index._by_field.keys()))):
-            if entry.instance is instance:
-                self._index.unregister(entry)
-
-    def handle_value_change(self, instance, field_path, old_val, new_val):
-        affected = self._index.get_affected({field_path})
-        for entry in affected:
-            if entry.instance is not instance:
-                continue
-            condition_expr = entry.trigger.get("condition", "")
-            ctx = {"this": _build_this_proxy(instance)}
-            try:
-                result = eval(condition_expr, {"__builtins__": {}}, ctx)
-            except Exception:
-                continue
-            if result:
-                entry.callback(instance)
+        Receives a single pre-routed entry (already matched by field_path and instance
+        via the global DependencyIndex). Evaluates the condition expression and fires
+        the callback if it holds.
+        """
+        condition_expr = entry.trigger.get("condition", "")
+        context = {"this": _build_this_proxy(instance)}
+        try:
+            result = self._sandbox.evaluate_expression(condition_expr, context)
+        except Exception:
+            return
+        if result:
+            entry.callback(instance)
 
 
 class _DictProxy:

@@ -4,7 +4,8 @@ from typing import Callable
 import aio_pika
 from aio_pika import DeliveryMode, ExchangeType
 
-from src.worker.channels.base import Channel, SendResult
+from src.worker.channels.base import Channel
+from src.runtime.messaging import SendResult
 
 
 class RabbitMQChannel(Channel):

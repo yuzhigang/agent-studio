@@ -1,6 +1,6 @@
 import pytest
 
-from src.supervisor.gateway import WorkerController
+from src.supervisor.worker import WorkerController
 
 
 @pytest.mark.anyio
