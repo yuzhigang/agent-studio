@@ -48,17 +48,16 @@ class TimerScheduler:
         self._tasks[timer_id] = task
         return timer_id
 
-    def schedule_cron(self, cron_expr: str, callback, *, count: int = -1) -> str:
+    def schedule_cron(self, cron_expr: str, callback) -> str:
         """Schedule a callback to fire according to a cron expression.
 
         The callback is invoked each time the cron expression matches the
-        current local time. If count > 0, it stops after that many firings.
+        current local time.
         """
         self._counter += 1
         timer_id = f"timer_{self._counter}"
 
         async def _runner():
-            fired = 0
             try:
                 while timer_id in self._tasks:
                     try:
@@ -79,11 +78,6 @@ class TimerScheduler:
                         callback()
                     except Exception:
                         pass
-
-                    fired += 1
-                    if count > 0 and fired >= count:
-                        self.cancel(timer_id)
-                        return
             except asyncio.CancelledError:
                 pass
 
@@ -168,7 +162,6 @@ class TimerTrigger(Trigger):
             timer_id = self._scheduler.schedule_cron(
                 cron_expr,
                 callback,
-                count=-1,
             )
             self._timers[entry.id] = timer_id
             self._entries[timer_id] = {"entry": entry, "instance": entry.instance}

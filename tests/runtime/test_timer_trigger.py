@@ -144,6 +144,7 @@ async def test_cron_trigger_fires_at_next_tick():
             assert len(calls) == 2
 
     tt.on_unregistered(entry)
+    assert entry.id not in tt._timers
 
 
 @pytest.mark.anyio
@@ -174,9 +175,11 @@ async def test_cron_trigger_with_count_stops_after_n():
             ]
 
             tt.on_registered(entry)
+            timer_id = tt._timers[entry.id]
             await asyncio.sleep(0.20)
             assert len(calls) == 2
             assert entry.id not in tt._timers
+            assert timer_id not in scheduler._tasks
 
 
 @pytest.mark.anyio
