@@ -6,6 +6,9 @@ Does NOT use threading.Timer. Schedules asyncio tasks so that all callback
 execution stays on the same event-loop thread as the rest of the runtime.
 """
 import asyncio
+from datetime import datetime
+
+from croniter import croniter
 
 from src.runtime.trigger_registry import Trigger
 
@@ -38,6 +41,48 @@ class TimerScheduler:
                         callback()
                     except Exception:
                         pass
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.ensure_future(_runner())
+        self._tasks[timer_id] = task
+        return timer_id
+
+    def schedule_cron(self, cron_expr: str, callback, *, count: int = -1) -> str:
+        """Schedule a callback to fire according to a cron expression.
+
+        The callback is invoked each time the cron expression matches the
+        current local time. If count > 0, it stops after that many firings.
+        """
+        self._counter += 1
+        timer_id = f"timer_{self._counter}"
+
+        async def _runner():
+            fired = 0
+            try:
+                while timer_id in self._tasks:
+                    try:
+                        itr = croniter(cron_expr, datetime.now())
+                        next_time = itr.get_next(datetime)
+                    except (ValueError, KeyError):
+                        break
+
+                    wait_seconds = (next_time - datetime.now()).total_seconds()
+                    if wait_seconds > 0:
+                        await asyncio.sleep(wait_seconds)
+
+                    if timer_id not in self._tasks:
+                        return
+
+                    try:
+                        callback()
+                    except Exception:
+                        pass
+
+                    fired += 1
+                    if count > 0 and fired >= count:
+                        self.cancel(timer_id)
+                        return
             except asyncio.CancelledError:
                 pass
 
@@ -99,8 +144,17 @@ class TimerTrigger(Trigger):
             self._entries[timer_id] = {"entry": entry, "instance": entry.instance}
 
         elif trigger_type == "cron":
-            # Deferred: cron support requires croniter.
-            pass
+            cron_expr = trigger.get("cron")
+            if not cron_expr:
+                raise ValueError("cron trigger requires a 'cron' expression")
+            count = trigger.get("count", -1)
+            timer_id = self._scheduler.schedule_cron(
+                cron_expr,
+                lambda e=entry: e.callback(e.instance),
+                count=count,
+            )
+            self._timers[entry.id] = timer_id
+            self._entries[timer_id] = {"entry": entry, "instance": entry.instance}
 
     def on_unregistered(self, entry):
         timer_id = self._timers.pop(entry.id, None)
