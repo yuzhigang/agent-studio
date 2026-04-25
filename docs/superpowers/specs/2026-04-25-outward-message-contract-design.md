@@ -373,6 +373,7 @@ class MessageEnvelope:
   - `target_world = null`
 - inbound 定向投递按 `target_world`
 - inbound 广播按 `target_world = "*"`
+- inbound 消息经过 `Channel -> MessageHub -> InboxProcessor -> WorldMessageIngress -> EventBus` 全链路后，`source_world` 仍被正确保留
 - `target` 在 `WorldMessageIngress -> EventBus` 路径中仍表示实例目标
 - `scope = scene:sceneId1` 时消息仅在对应 scene 内传播
 
