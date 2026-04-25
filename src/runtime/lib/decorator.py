@@ -1,9 +1,8 @@
-def lib_function(*, name: str, namespace: str | None = None, readonly: bool = False):
+def lib_function(*, name: str, namespace: str | None = None):
     def decorator(func):
         func._lib_meta = {
             "name": name,
             "namespace": namespace,
-            "readonly": readonly,
             "entrypoint": func.__name__,
             "func": func,
         }

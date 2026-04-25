@@ -1,5 +1,5 @@
 from src.runtime.lib.decorator import lib_function
 
-@lib_function(name="plan", namespace="converter", readonly=True)
+@lib_function(name="plan", namespace="converter")
 def plan(args: dict) -> dict:
     return {"plan": args["target"]}

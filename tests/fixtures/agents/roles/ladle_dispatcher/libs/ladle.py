@@ -22,7 +22,7 @@ class LadleDispatcher:
             },
         ]
 
-    @lib_function(name="getCandidates", namespace="ladle_dispatcher", readonly=True)
+    @lib_function(name="getCandidates", namespace="ladle_dispatcher")
     def get_candidates(self, args: dict) -> dict:
         grade = args.get("grade", "")
         tonnage = float(args.get("tonnage", 250))
