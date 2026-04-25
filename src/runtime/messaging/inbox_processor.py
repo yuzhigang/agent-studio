@@ -1,7 +1,10 @@
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from src.runtime.messaging.errors import PermanentDeliveryError, RetryableDeliveryError
+
+logger = logging.getLogger(__name__)
 
 
 class InboxProcessor:
@@ -79,10 +82,13 @@ class InboxProcessor:
         for delivery in deliveries:
             by_world.setdefault(delivery.target_world_id, []).append(delivery)
 
-        await asyncio.gather(*[
+        results = await asyncio.gather(*[
             self._deliver_for_world(world_id, world_deliveries)
             for world_id, world_deliveries in by_world.items()
-        ])
+        ], return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.exception("Unexpected inbox delivery task failure", exc_info=result)
 
     async def _deliver_for_world(self, world_id: str, deliveries: list) -> None:
         store = self._hub._store
@@ -93,6 +99,7 @@ class InboxProcessor:
                 self._mark_receiver_unavailable(
                     message_id=delivery.message_id,
                     world_id=delivery.target_world_id,
+                    error_count=delivery.error_count,
                 )
                 continue
             try:
@@ -111,6 +118,18 @@ class InboxProcessor:
                     error_count=delivery.error_count + 1,
                     last_error=str(exc),
                 )
+            except Exception as exc:
+                logger.exception(
+                    "Unexpected exception delivering message %s to world %s",
+                    delivery.message_id,
+                    delivery.target_world_id,
+                )
+                self._mark_retry_or_dead(
+                    message_id=delivery.message_id,
+                    world_id=delivery.target_world_id,
+                    error_count=delivery.error_count + 1,
+                    last_error=f"unexpected error: {exc}",
+                )
             else:
                 store.inbox_mark_delivery_delivered(
                     delivery.message_id,
@@ -122,6 +141,7 @@ class InboxProcessor:
         *,
         message_id: str,
         world_id: str,
+        error_count: int,
     ) -> None:
         store = self._hub._store
         if store is None:
@@ -129,15 +149,10 @@ class InboxProcessor:
         retry_after = (
             datetime.now(timezone.utc) + timedelta(seconds=self._retry_delay)
         ).isoformat()
-        current_error_count = 0
-        for delivery in store.inbox_read_pending_deliveries(self._batch_size):
-            if delivery.message_id == message_id and delivery.target_world_id == world_id:
-                current_error_count = delivery.error_count
-                break
         store.inbox_mark_delivery_retry(
             message_id,
             world_id,
-            error_count=current_error_count,
+            error_count=error_count,
             retry_after=retry_after,
             last_error="world receiver unavailable",
         )

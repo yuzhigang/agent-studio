@@ -120,9 +120,9 @@ class WorldRegistry:
                 source=f"world:{world_id}",
             )
             event_emitter = WorldEventEmitter(bus, im, message_sender)
-            im._event_emitter = event_emitter
+            im.bind_world_event_emitter(event_emitter)
             alarm_manager = AlarmManager(trigger_registry, event_emitter, store)
-            im._alarm_manager = alarm_manager
+            im.bind_alarm_manager(alarm_manager)
             message_receiver = WorldMessageIngress(event_emitter)
 
             scene_mgr = SceneManager(im, bus_reg, scene_store=store)

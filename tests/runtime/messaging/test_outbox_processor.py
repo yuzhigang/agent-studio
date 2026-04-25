@@ -28,6 +28,30 @@ class _FakeChannel:
         return True
 
 
+class _SlowFirstChannel:
+    def __init__(self):
+        self.sent = []
+        self.fast_sent = asyncio.Event()
+        self._slow_gate = asyncio.Event()
+
+    async def start(self, inbound_callback):
+        return None
+
+    async def send(self, envelope):
+        if envelope.message_id == "msg-slow":
+            await self._slow_gate.wait()
+        else:
+            self.fast_sent.set()
+        self.sent.append(envelope.message_id)
+        return SendResult.SUCCESS
+
+    async def stop(self):
+        return None
+
+    def is_ready(self):
+        return True
+
+
 @pytest.mark.anyio
 async def test_outbox_processor_sends_enqueued_envelope(tmp_path):
     store = SQLiteMessageStore(str(tmp_path))
@@ -126,3 +150,46 @@ async def test_outbox_processor_marks_permanent_send_dead(tmp_path):
 
     assert channel.sent == ["msg-11"]
     assert row == ("dead", 3, "permanent failure")
+
+
+@pytest.mark.anyio
+async def test_outbox_processor_slow_send_does_not_block_following_message(tmp_path):
+    store = SQLiteMessageStore(str(tmp_path))
+    channel = _SlowFirstChannel()
+    hub = MessageHub(
+        message_store=store,
+        channel=channel,
+        poll_interval=0.01,
+    )
+    hub.enqueue_outbound(
+        MessageEnvelope(
+            message_id="msg-slow",
+            world_id="factory-b",
+            event_type="order.created",
+            payload={"order_id": "slow"},
+        )
+    )
+    hub.enqueue_outbound(
+        MessageEnvelope(
+            message_id="msg-fast",
+            world_id="factory-b",
+            event_type="order.created",
+            payload={"order_id": "fast"},
+        )
+    )
+
+    try:
+        await hub.start()
+        await asyncio.wait_for(channel.fast_sent.wait(), timeout=1.0)
+        channel._slow_gate.set()
+        await asyncio.sleep(0.05)
+    finally:
+        await hub.stop()
+
+    rows = store._conn.execute(
+        "SELECT message_id, status FROM outbox ORDER BY message_id"
+    ).fetchall()
+    store.close()
+
+    assert ("msg-fast", "sent") in rows
+    assert ("msg-slow", "sent") in rows

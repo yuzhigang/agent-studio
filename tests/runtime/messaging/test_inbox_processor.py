@@ -145,3 +145,66 @@ async def test_inbox_processor_handles_retryable_and_permanent_errors(tmp_path):
     assert attempts == {"retry": 1, "dead": 1}
     assert retry_row == ("retry", 1, "temporary")
     assert dead_row == ("dead", 1, "rejected")
+
+
+@pytest.mark.anyio
+async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds(tmp_path):
+    store = SQLiteMessageStore(str(tmp_path))
+    seen = []
+    delivered = asyncio.Event()
+
+    class _BoomReceiver:
+        async def receive(self, envelope):
+            raise RuntimeError("boom")
+
+    class _OkReceiver:
+        async def receive(self, envelope):
+            seen.append((envelope.world_id, envelope.message_id))
+            delivered.set()
+
+    hub = MessageHub(
+        message_store=store,
+        channel=None,
+        poll_interval=0.01,
+        max_retries=2,
+    )
+    hub.register_world("factory-a", _BoomReceiver())
+    hub.register_world("factory-b", _OkReceiver())
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-5",
+            world_id="factory-a",
+            event_type="order.created",
+            payload={"order_id": "O5"},
+        )
+    )
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-6",
+            world_id="factory-b",
+            event_type="order.created",
+            payload={"order_id": "O6"},
+        )
+    )
+
+    try:
+        await hub.start()
+        await asyncio.wait_for(delivered.wait(), timeout=1.0)
+    finally:
+        await hub.stop()
+
+    bad_row = store._conn.execute(
+        "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-5",),
+    ).fetchone()
+    good_row = store._conn.execute(
+        "SELECT status FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-6",),
+    ).fetchone()
+    store.close()
+
+    assert seen == [("factory-b", "msg-6")]
+    assert bad_row[0] == "retry"
+    assert bad_row[1] == 1
+    assert "unexpected error: boom" == bad_row[2]
+    assert good_row == ("delivered",)

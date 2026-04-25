@@ -121,6 +121,12 @@ class InstanceManager:
         self._trigger_registry = trigger_registry
         self._alarm_manager = alarm_manager
 
+    def bind_world_event_emitter(self, world_event_emitter) -> None:
+        self._event_emitter = world_event_emitter
+
+    def bind_alarm_manager(self, alarm_manager) -> None:
+        self._alarm_manager = alarm_manager
+
     @staticmethod
     def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
         if scope.startswith("scene:"):
