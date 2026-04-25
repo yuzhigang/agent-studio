@@ -73,7 +73,7 @@ class LibRegistry:
                     libs_dir = agent_dir / "libs"
                     if not libs_dir.exists():
                         continue
-                    namespace = agent_dir.name
+                    namespace = f"{group_dir.name}.{agent_dir.name}"
                     for py_file in libs_dir.glob("*.py"):
                         self._load_module(namespace, py_file)
 
@@ -152,7 +152,7 @@ class LibRegistry:
         if parts[0] == "shared" and parts[1] == "libs":
             namespace = "shared"
         else:
-            namespace = parts[1]  # agent name
+            namespace = f"{parts[0]}.{parts[1]}"  # group.agent
 
         prefix = f"{namespace}.{py_file.stem}."
         with self._rlock:

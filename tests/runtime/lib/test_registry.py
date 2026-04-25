@@ -5,16 +5,28 @@ from src.runtime.lib.exceptions import LibNotFoundError, LibRegistrationError
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures")
 
-def test_registry_scan_and_lookup(registry: LibRegistry):
+
+def test_registry_scan_uses_group_agent_namespace(registry: LibRegistry):
     agents_dir = os.path.join(FIXTURES, "agents")
     registry.scan(agents_dir)
 
-    func = registry.lookup("ladle", "dispatcher", "getCandidates")
+    # logistics/ladle/libs/dispatcher.py now declares namespace="logistics.ladle"
+    func = registry.lookup("logistics.ladle", "dispatcher", "getCandidates")
     assert func({"x": 1}) == {"candidates": []}
 
-def test_registry_lookup_missing_raises(registry: LibRegistry):
+    # shared/libs/utils.py declares namespace="shared"
+    func = registry.lookup("shared", "utils", "uppercase")
+    assert func({"text": "hello"}) == {"text": "HELLO"}
+
+
+def test_registry_lookup_old_namespace_missing(registry: LibRegistry):
+    agents_dir = os.path.join(FIXTURES, "agents")
+    registry.scan(agents_dir)
+
+    # Old namespace "ladle" should no longer exist
     with pytest.raises(LibNotFoundError):
-        registry.lookup("ladle", "dispatcher", "missing")
+        registry.lookup("ladle", "dispatcher", "getCandidates")
+
 
 def test_registry_namespace_mismatch_raises():
     reg = LibRegistry()

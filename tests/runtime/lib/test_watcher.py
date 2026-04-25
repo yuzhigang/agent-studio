@@ -17,7 +17,7 @@ def test_watcher_detects_file_change():
         with open(py_path, "w", encoding="utf-8") as f:
             f.write('''
 from src.runtime.lib.decorator import lib_function
-@lib_function(name="demo", namespace="ladle")
+@lib_function(name="demo", namespace="group.ladle")
 def demo(args: dict) -> dict:
     return {"version": 1}
 ''')
@@ -25,7 +25,7 @@ def demo(args: dict) -> dict:
         registry = LibRegistry()
         registry.clear()
         registry.scan(tmpdir)
-        assert registry.lookup("ladle", "demo", "demo")({}) == {"version": 1}
+        assert registry.lookup("group.ladle", "demo", "demo")({}) == {"version": 1}
 
         watcher = LibWatcher(tmpdir, registry=registry, observer_class=PollingObserver)
         watcher.start()
@@ -35,13 +35,13 @@ def demo(args: dict) -> dict:
         with open(py_path, "w", encoding="utf-8") as f:
             f.write('''
 from src.runtime.lib.decorator import lib_function
-@lib_function(name="demo", namespace="ladle")
+@lib_function(name="demo", namespace="group.ladle")
 def demo(args: dict) -> dict:
     return {"version": 2}
 ''')
 
         for _ in range(50):
-            if registry.lookup("ladle", "demo", "demo")({}) == {"version": 2}:
+            if registry.lookup("group.ladle", "demo", "demo")({}) == {"version": 2}:
                 break
             time.sleep(0.1)
         else:
