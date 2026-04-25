@@ -337,6 +337,32 @@ class MessageEnvelope:
 
 这样数据库状态与运行时语义保持一致，不再出现同一字段在不同链路中表达不同含义的问题。
 
+### 9.1 Outbox 语义反转说明
+
+这一轮迁移不只是字段重命名，还包含一处必须显式说明的语义反转：
+
+- 旧设计中，`outbox.world_id` 存的是“目标 world”
+- 新设计中，`outbox.source_world` 存的是“来源 world”
+- 新设计中的 `outbox.target_world` 对于普通 outward publish 默认是 `null`
+
+也就是说，旧 outbox 记录里的：
+
+- `world_id`
+
+不能直接按“同名迁移”方式映射成：
+
+- `source_world`
+
+否则会把旧数据中的“去向”误读成新数据里的“来源”。
+
+迁移时必须按旧行为语义重新解释：
+
+- 旧 `outbox.world_id` 是旧模型里的目标 world
+- 新 `outbox.source_world` 应来自发送时的当前 world
+- 新 `outbox.target_world` 对于默认 outward publish 应为 `null`
+
+如果需要做历史数据迁移，必须单独定义旧 outbox 记录的转换策略，不能做机械列映射。
+
 ## 10. 测试要求
 
 至少覆盖以下场景：
