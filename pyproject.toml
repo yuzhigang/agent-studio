@@ -13,6 +13,7 @@ dependencies = [
     "fasteners>=0.19",
     "websockets>=12.0",
     "aiohttp>=3.9",
+    "croniter>=2.0",
 ]
 
 [tool.setuptools.packages.find]
