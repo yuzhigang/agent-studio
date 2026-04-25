@@ -144,3 +144,126 @@ async def test_cron_trigger_fires_at_next_tick():
             assert len(calls) == 2
 
     tt.on_unregistered(entry)
+
+
+@pytest.mark.anyio
+async def test_cron_trigger_with_count_stops_after_n():
+    scheduler = TimerScheduler()
+    tt = TimerTrigger(scheduler)
+
+    calls = []
+    inst = object()
+    entry = TriggerEntry(
+        inst,
+        {"type": "cron", "name": "tick", "cron": "*/1 * * * *", "count": 2},
+        lambda i: calls.append(i),
+        "b1",
+    )
+
+    fake_now = datetime(2024, 1, 1, 0, 0, 0)
+    with mock.patch("src.runtime.triggers.timer_trigger.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+
+        with mock.patch("src.runtime.triggers.timer_trigger.croniter") as mock_cron:
+            mock_iter = mock_cron.return_value
+            mock_iter.get_next.side_effect = [
+                fake_now + timedelta(seconds=0.05),
+                fake_now + timedelta(seconds=0.10),
+                fake_now + timedelta(seconds=0.15),
+            ]
+
+            tt.on_registered(entry)
+            await asyncio.sleep(0.20)
+            assert len(calls) == 2
+            assert entry.id not in tt._timers
+
+
+@pytest.mark.anyio
+async def test_cron_trigger_unregistered_cancels():
+    scheduler = TimerScheduler()
+    tt = TimerTrigger(scheduler)
+
+    calls = []
+    inst = object()
+    entry = TriggerEntry(
+        inst,
+        {"type": "cron", "name": "tick", "cron": "*/1 * * * *"},
+        lambda i: calls.append(i),
+        "b1",
+    )
+
+    fake_now = datetime(2024, 1, 1, 0, 0, 0)
+    with mock.patch("src.runtime.triggers.timer_trigger.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+
+        with mock.patch("src.runtime.triggers.timer_trigger.croniter") as mock_cron:
+            mock_iter = mock_cron.return_value
+            mock_iter.get_next.return_value = fake_now + timedelta(seconds=0.20)
+
+            tt.on_registered(entry)
+            tt.on_unregistered(entry)
+            await asyncio.sleep(0.05)
+            assert len(calls) == 0
+
+
+@pytest.mark.anyio
+async def test_cron_trigger_instance_removed_cancels():
+    scheduler = TimerScheduler()
+    tt = TimerTrigger(scheduler)
+
+    calls = []
+    inst = object()
+    entry = TriggerEntry(
+        inst,
+        {"type": "cron", "name": "tick", "cron": "*/1 * * * *"},
+        lambda i: calls.append(i),
+        "b1",
+    )
+
+    fake_now = datetime(2024, 1, 1, 0, 0, 0)
+    with mock.patch("src.runtime.triggers.timer_trigger.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+
+        with mock.patch("src.runtime.triggers.timer_trigger.croniter") as mock_cron:
+            mock_iter = mock_cron.return_value
+            mock_iter.get_next.return_value = fake_now + timedelta(seconds=0.20)
+
+            tt.on_registered(entry)
+            tt.on_instance_removed(inst)
+            await asyncio.sleep(0.05)
+            assert len(calls) == 0
+
+
+def test_cron_invalid_expression_raises():
+    scheduler = TimerScheduler()
+    tt = TimerTrigger(scheduler)
+
+    inst = object()
+    entry = TriggerEntry(
+        inst,
+        {"type": "cron", "name": "bad", "cron": "not-a-cron"},
+        lambda i: None,
+        "b1",
+    )
+
+    with pytest.raises(ValueError, match="Invalid cron expression"):
+        tt.on_registered(entry)
+
+
+def test_cron_missing_expression_raises():
+    scheduler = TimerScheduler()
+    tt = TimerTrigger(scheduler)
+
+    inst = object()
+    entry = TriggerEntry(
+        inst,
+        {"type": "cron", "name": "bad"},
+        lambda i: None,
+        "b1",
+    )
+
+    with pytest.raises(ValueError, match="cron trigger requires a 'cron' expression"):
+        tt.on_registered(entry)

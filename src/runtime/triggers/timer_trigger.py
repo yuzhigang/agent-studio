@@ -153,10 +153,22 @@ class TimerTrigger(Trigger):
             except (ValueError, KeyError) as exc:
                 raise ValueError(f"Invalid cron expression: {cron_expr}") from exc
             count = trigger.get("count", -1)
+            fired = [0]
+
+            def callback():
+                fired[0] += 1
+                entry.callback(entry.instance)
+                if count > 0 and fired[0] >= count:
+                    tid = self._timers.get(entry.id)
+                    if tid is not None:
+                        self._scheduler.cancel(tid)
+                        self._timers.pop(entry.id, None)
+                        self._entries.pop(tid, None)
+
             timer_id = self._scheduler.schedule_cron(
                 cron_expr,
-                lambda e=entry: e.callback(e.instance),
-                count=count,
+                callback,
+                count=-1,
             )
             self._timers[entry.id] = timer_id
             self._entries[timer_id] = {"entry": entry, "instance": entry.instance}
