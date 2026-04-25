@@ -61,13 +61,15 @@ class InboxProcessor:
         for envelope in store.inbox_read_pending(self._batch_size):
             world_ids = (
                 self._hub.registered_worlds()
-                if envelope.world_id == "*"
-                else [envelope.world_id]
+                if envelope.target_world == "*"
+                else [envelope.target_world]
+                if envelope.target_world is not None
+                else []
             )
             store.inbox_create_deliveries(envelope.message_id, world_ids)
             if world_ids:
                 store.inbox_mark_expanded(envelope.message_id)
-            else:
+            elif envelope.target_world is not None:
                 store.inbox_mark_failed(envelope.message_id)
 
     async def _deliver_pending(self) -> None:
@@ -80,7 +82,7 @@ class InboxProcessor:
 
         by_world: dict[str, list] = {}
         for delivery in deliveries:
-            by_world.setdefault(delivery.target_world_id, []).append(delivery)
+            by_world.setdefault(delivery.target_world, []).append(delivery)
 
         results = await asyncio.gather(*[
             self._deliver_for_world(world_id, world_deliveries)
@@ -95,11 +97,11 @@ class InboxProcessor:
         for delivery in deliveries:
             try:
                 envelope = store.inbox_load(delivery.message_id)
-                receiver = self._hub.get_receiver(delivery.target_world_id)
+                receiver = self._hub.get_receiver(delivery.target_world)
                 if receiver is None:
                     self._mark_receiver_unavailable(
                         message_id=delivery.message_id,
-                        world_id=delivery.target_world_id,
+                        world_id=delivery.target_world,
                         error_count=delivery.error_count,
                     )
                     continue
@@ -107,21 +109,21 @@ class InboxProcessor:
             except KeyError:
                 store.inbox_mark_delivery_dead(
                     delivery.message_id,
-                    delivery.target_world_id,
+                    delivery.target_world,
                     error_count=delivery.error_count,
                     last_error="missing inbox message",
                 )
             except RetryableDeliveryError as exc:
                 self._mark_retry_or_dead(
                     message_id=delivery.message_id,
-                    world_id=delivery.target_world_id,
+                    world_id=delivery.target_world,
                     error_count=delivery.error_count + 1,
                     last_error=str(exc),
                 )
             except PermanentDeliveryError as exc:
                 store.inbox_mark_delivery_dead(
                     delivery.message_id,
-                    delivery.target_world_id,
+                    delivery.target_world,
                     error_count=delivery.error_count + 1,
                     last_error=str(exc),
                 )
@@ -129,18 +131,18 @@ class InboxProcessor:
                 logger.exception(
                     "Unexpected exception delivering message %s to world %s",
                     delivery.message_id,
-                    delivery.target_world_id,
+                    delivery.target_world,
                 )
                 self._mark_retry_or_dead(
                     message_id=delivery.message_id,
-                    world_id=delivery.target_world_id,
+                    world_id=delivery.target_world,
                     error_count=delivery.error_count + 1,
                     last_error=f"unexpected error: {exc}",
                 )
             else:
                 store.inbox_mark_delivery_delivered(
                     delivery.message_id,
-                    delivery.target_world_id,
+                    delivery.target_world,
                 )
 
     def _mark_receiver_unavailable(

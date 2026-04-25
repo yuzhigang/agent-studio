@@ -54,7 +54,6 @@ class WorldEventEmitter:
     def publish_external(
         self,
         *,
-        target_world_id: str,
         event_type: str,
         payload: dict,
         scope: str = "world",
@@ -67,7 +66,6 @@ class WorldEventEmitter:
         return self._sender.send(
             event_type,
             payload,
-            target_world_id=target_world_id,
             scope=scope,
             target=target,
             trace_id=trace_id,

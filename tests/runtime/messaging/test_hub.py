@@ -31,7 +31,8 @@ def test_hub_unregister_world_permanent_marks_pending_deliveries_dead(tmp_path):
         hub.on_inbound(
             MessageEnvelope(
                 message_id="msg-1",
-                world_id="factory-a",
+                source_world="erp",
+                target_world="factory-a",
                 event_type="order.created",
                 payload={"order_id": "O1001"},
             )
@@ -86,7 +87,8 @@ async def test_hub_starts_and_stops_processors_and_channel(tmp_path):
         hub.on_inbound(
             MessageEnvelope(
                 message_id="msg-1",
-                world_id="factory-a",
+                source_world="erp",
+                target_world="factory-a",
                 event_type="order.created",
                 payload={"order_id": "O1001"},
             )
@@ -102,3 +104,55 @@ async def test_hub_starts_and_stops_processors_and_channel(tmp_path):
 def test_hub_is_ready_without_channel():
     hub = MessageHub(message_store=None, channel=None)
     assert hub.is_ready() is True
+
+
+def test_hub_is_ready_true_even_with_pending_outbox_and_no_channel(tmp_path):
+    """When channel is None but outbox has pending messages, is_ready()
+    still returns True. This documents a semantic gap: messages will
+    never be sent without a channel but the hub reports readiness.
+    """
+    store = SQLiteMessageStore(str(tmp_path))
+    try:
+        hub = MessageHub(message_store=store, channel=None)
+        hub.enqueue_outbound(
+            MessageEnvelope(
+                message_id="msg-stuck",
+                source_world="factory-a",
+                target_world=None,
+                event_type="order.created",
+                payload={"order_id": "stuck"},
+            )
+        )
+        assert hub.is_ready() is True
+        pending = store.outbox_read_pending(limit=10)
+        assert len(pending) == 1
+    finally:
+        store.close()
+
+
+def test_hub_on_inbound_propagates_store_exception(tmp_path):
+    """If the store raises on inbox_append, on_inbound lets the exception
+    propagate. Documents the current lack of error handling in the
+    inbound ingestion path.
+    """
+    store = SQLiteMessageStore(str(tmp_path))
+    try:
+        hub = MessageHub(message_store=store, channel=None)
+
+        class _BrokenStore:
+            def inbox_append(self, envelope):
+                raise RuntimeError("disk full")
+
+        broken_hub = MessageHub(message_store=_BrokenStore(), channel=None)
+        with pytest.raises(RuntimeError, match="disk full"):
+            broken_hub.on_inbound(
+                MessageEnvelope(
+                    message_id="msg-broken",
+                    source_world="erp",
+                    target_world="factory-a",
+                    event_type="order.created",
+                    payload={"order_id": "broken"},
+                )
+            )
+    finally:
+        store.close()

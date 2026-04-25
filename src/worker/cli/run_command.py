@@ -363,7 +363,8 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
         hub.on_inbound(
             MessageEnvelope(
                 message_id=params.get("message_id") or params.get("id") or str(uuid.uuid4()),
-                world_id=params.get("world_id", world_id),
+                source_world=params.get("source_world"),
+                target_world=params.get("target_world"),
                 event_type=params.get("event_type", ""),
                 payload=params.get("payload", {}),
                 source=params.get("source"),
@@ -384,7 +385,8 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
             hub.on_inbound(
                 MessageEnvelope(
                     message_id=record.get("message_id") or record.get("id") or str(uuid.uuid4()),
-                    world_id=record.get("world_id", params.get("world_id", world_id)),
+                    source_world=record.get("source_world"),
+                    target_world=record.get("target_world", params.get("target_world")),
                     event_type=record.get("event_type", ""),
                     payload=record.get("payload", {}),
                     source=record.get("source"),

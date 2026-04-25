@@ -25,21 +25,23 @@ class SQLiteMessageStore(MessageStore):
     def _decode_envelope_row(self, row: tuple[object, ...]) -> MessageEnvelope:
         return MessageEnvelope(
             message_id=str(row[0]),
-            world_id=str(row[1]),
-            event_type=str(row[2]),
-            payload=json.loads(str(row[3])),
-            source=row[4] if row[4] is None else str(row[4]),
-            scope=str(row[5]),
-            target=row[6] if row[6] is None else str(row[6]),
-            trace_id=row[7] if row[7] is None else str(row[7]),
-            headers=json.loads(str(row[8])),
+            source_world=row[1] if row[1] is None else str(row[1]),
+            target_world=row[2] if row[2] is None else str(row[2]),
+            event_type=str(row[3]),
+            payload=json.loads(str(row[4])),
+            source=row[5] if row[5] is None else str(row[5]),
+            scope=str(row[6]),
+            target=row[7] if row[7] is None else str(row[7]),
+            trace_id=row[8] if row[8] is None else str(row[8]),
+            headers=json.loads(str(row[9])),
         )
 
     def _ensure_schema(self) -> None:
         schema = """
         CREATE TABLE IF NOT EXISTS inbox (
             message_id TEXT PRIMARY KEY,
-            world_id TEXT NOT NULL,
+            source_world TEXT,
+            target_world TEXT,
             event_type TEXT NOT NULL,
             payload TEXT NOT NULL,
             source TEXT,
@@ -70,7 +72,8 @@ class SQLiteMessageStore(MessageStore):
 
         CREATE TABLE IF NOT EXISTS outbox (
             message_id TEXT PRIMARY KEY,
-            world_id TEXT NOT NULL,
+            source_world TEXT,
+            target_world TEXT,
             event_type TEXT NOT NULL,
             payload TEXT NOT NULL,
             source TEXT,
@@ -98,7 +101,8 @@ class SQLiteMessageStore(MessageStore):
                 """
                 INSERT OR IGNORE INTO inbox (
                     message_id,
-                    world_id,
+                    source_world,
+                    target_world,
                     event_type,
                     payload,
                     source,
@@ -108,11 +112,12 @@ class SQLiteMessageStore(MessageStore):
                     headers,
                     received_at,
                     status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     envelope.message_id,
-                    envelope.world_id,
+                    envelope.source_world,
+                    envelope.target_world,
                     envelope.event_type,
                     json.dumps(envelope.payload, ensure_ascii=False),
                     envelope.source,
@@ -128,7 +133,7 @@ class SQLiteMessageStore(MessageStore):
     def inbox_read_pending(self, limit: int) -> list[MessageEnvelope]:
         rows = self._conn.execute(
             """
-            SELECT message_id, world_id, event_type, payload, source, scope, target, trace_id, headers
+            SELECT message_id, source_world, target_world, event_type, payload, source, scope, target, trace_id, headers
             FROM inbox
             WHERE status = 'pending'
             ORDER BY received_at ASC, message_id ASC
@@ -141,7 +146,7 @@ class SQLiteMessageStore(MessageStore):
     def inbox_load(self, message_id: str) -> MessageEnvelope:
         row = self._conn.execute(
             """
-            SELECT message_id, world_id, event_type, payload, source, scope, target, trace_id, headers
+            SELECT message_id, source_world, target_world, event_type, payload, source, scope, target, trace_id, headers
             FROM inbox
             WHERE message_id = ?
             """,
@@ -175,8 +180,8 @@ class SQLiteMessageStore(MessageStore):
             )
             self._conn.commit()
 
-    def inbox_create_deliveries(self, message_id: str, world_ids: list[str]) -> None:
-        rows = [(message_id, world_id) for world_id in world_ids]
+    def inbox_create_deliveries(self, message_id: str, target_worlds: list[str]) -> None:
+        rows = [(message_id, target_world) for target_world in target_worlds]
         with self._lock:
             self._conn.executemany(
                 """
@@ -202,7 +207,7 @@ class SQLiteMessageStore(MessageStore):
         return [
             InboxDelivery(
                 message_id=str(row[0]),
-                target_world_id=str(row[1]),
+                target_world=str(row[1]),
                 status=str(row[2]),
                 error_count=int(row[3]),
                 retry_after=row[4] if row[4] is None else str(row[4]),
@@ -211,7 +216,7 @@ class SQLiteMessageStore(MessageStore):
             for row in rows
         ]
 
-    def inbox_mark_delivery_delivered(self, message_id: str, world_id: str) -> None:
+    def inbox_mark_delivery_delivered(self, message_id: str, target_world: str) -> None:
         with self._lock:
             self._conn.execute(
                 """
@@ -222,14 +227,14 @@ class SQLiteMessageStore(MessageStore):
                     last_error = NULL
                 WHERE message_id = ? AND target_world_id = ?
                 """,
-                (self._now(), message_id, world_id),
+                (self._now(), message_id, target_world),
             )
             self._conn.commit()
 
     def inbox_mark_delivery_retry(
         self,
         message_id: str,
-        world_id: str,
+        target_world: str,
         *,
         error_count: int,
         retry_after: str | None,
@@ -245,14 +250,14 @@ class SQLiteMessageStore(MessageStore):
                     last_error = ?
                 WHERE message_id = ? AND target_world_id = ?
                 """,
-                (error_count, retry_after, last_error, message_id, world_id),
+                (error_count, retry_after, last_error, message_id, target_world),
             )
             self._conn.commit()
 
     def inbox_mark_delivery_dead(
         self,
         message_id: str,
-        world_id: str,
+        target_world: str,
         *,
         error_count: int,
         last_error: str | None,
@@ -267,7 +272,7 @@ class SQLiteMessageStore(MessageStore):
                     last_error = ?
                 WHERE message_id = ? AND target_world_id = ?
                 """,
-                (error_count, last_error, message_id, world_id),
+                (error_count, last_error, message_id, target_world),
             )
             self._conn.commit()
 
@@ -298,7 +303,7 @@ class SQLiteMessageStore(MessageStore):
                     )
             self._conn.commit()
 
-    def inbox_mark_world_deliveries_dead(self, world_id: str, *, last_error: str) -> None:
+    def inbox_mark_world_deliveries_dead(self, target_world: str, *, last_error: str) -> None:
         with self._lock:
             self._conn.execute(
                 """
@@ -309,7 +314,7 @@ class SQLiteMessageStore(MessageStore):
                 WHERE target_world_id = ?
                   AND status IN ('pending', 'retry')
                 """,
-                (last_error, world_id),
+                (last_error, target_world),
             )
             self._conn.commit()
 
@@ -319,7 +324,8 @@ class SQLiteMessageStore(MessageStore):
                 """
                 INSERT OR IGNORE INTO outbox (
                     message_id,
-                    world_id,
+                    source_world,
+                    target_world,
                     event_type,
                     payload,
                     source,
@@ -329,11 +335,12 @@ class SQLiteMessageStore(MessageStore):
                     headers,
                     created_at,
                     status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     envelope.message_id,
-                    envelope.world_id,
+                    envelope.source_world,
+                    envelope.target_world,
                     envelope.event_type,
                     json.dumps(envelope.payload, ensure_ascii=False),
                     envelope.source,
@@ -349,7 +356,7 @@ class SQLiteMessageStore(MessageStore):
     def outbox_read_pending(self, limit: int) -> list[MessageEnvelope]:
         rows = self._conn.execute(
             """
-            SELECT message_id, world_id, event_type, payload, source, scope, target, trace_id, headers
+            SELECT message_id, source_world, target_world, event_type, payload, source, scope, target, trace_id, headers
             FROM outbox
             WHERE status IN ('pending', 'retry')
               AND (retry_after IS NULL OR retry_after <= ?)

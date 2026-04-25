@@ -26,7 +26,8 @@ async def test_eventbus_message_adapter_publishes_to_event_bus():
     await adapter.receive(
         MessageEnvelope(
             message_id="msg-1",
-            world_id="factory-a",
+            source_world="erp-world",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "O1001"},
             source="erp",
@@ -53,7 +54,8 @@ async def test_world_ingress_uses_same_task_context_as_caller():
     await adapter.receive(
         MessageEnvelope(
             message_id="msg-2",
-            world_id="factory-a",
+            source_world="erp-world",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "O1002"},
             source="erp",
@@ -80,7 +82,8 @@ async def test_world_ingress_uses_strict_internal_delivery():
         await adapter.receive(
             MessageEnvelope(
                 message_id="msg-3",
-                world_id="factory-a",
+                source_world="erp-world",
+                target_world="factory-a",
                 event_type="order.created",
                 payload={"order_id": "O1003"},
                 source="erp",
@@ -97,3 +100,25 @@ async def test_world_ingress_uses_strict_internal_delivery():
             "raise_on_error": True,
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_world_ingress_preserves_source_world_on_envelope():
+    class _Emitter:
+        def publish_internal(self, **kwargs):
+            return None
+
+    envelope = MessageEnvelope(
+        message_id="msg-4",
+        source_world="erp-world",
+        target_world="factory-a",
+        event_type="order.created",
+        payload={"order_id": "O1004"},
+        source="erp",
+    )
+
+    adapter = WorldMessageIngress(_Emitter())
+    await adapter.receive(envelope)
+
+    assert envelope.source_world == "erp-world"
+    assert envelope.target_world == "factory-a"

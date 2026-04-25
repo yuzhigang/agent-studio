@@ -7,6 +7,8 @@ class WorldMessageIngress(WorldMessageReceiver):
         self._event_emitter = event_emitter
 
     async def receive(self, envelope: MessageEnvelope) -> None:
+        # source_world stays on the envelope for message-plane tracking; EventBus
+        # still only consumes the finer-grained source identifier.
         self._event_emitter.publish_internal(
             event_type=envelope.event_type,
             payload=envelope.payload,

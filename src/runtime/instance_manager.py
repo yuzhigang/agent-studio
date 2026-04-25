@@ -128,6 +128,37 @@ class InstanceManager:
         self._alarm_manager = alarm_manager
 
     @staticmethod
+    def _validate_external_trigger_scope(scope: str) -> str:
+        if scope == "world":
+            return scope
+        if isinstance(scope, str) and scope.startswith("scene:") and scope.split(":", 1)[1]:
+            return scope
+        raise ValueError("External triggerEvent scope must be 'world' or 'scene:<scene_id>'")
+
+    @staticmethod
+    def _validate_external_trigger_target(target):
+        if target is None or isinstance(target, str):
+            return target
+        raise ValueError("External triggerEvent target must be a string when provided")
+
+    @staticmethod
+    def _validate_external_trigger_trace_id(trace_id):
+        if trace_id is None or isinstance(trace_id, str):
+            return trace_id
+        raise ValueError("External triggerEvent traceId must be a string when provided")
+
+    @staticmethod
+    def _validate_external_trigger_headers(headers):
+        if headers is None:
+            return {}
+        if not isinstance(headers, dict):
+            raise ValueError("External triggerEvent headers must be a dict[str, str]")
+        for key, value in headers.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ValueError("External triggerEvent headers must be a dict[str, str]")
+        return headers
+
+    @staticmethod
     def _make_key(world_id: str, instance_id: str, scope: str = "world") -> tuple[str, str]:
         if scope.startswith("scene:"):
             scene_id = scope.split(":", 1)[1]
@@ -221,6 +252,10 @@ class InstanceManager:
         elif action_type == "triggerEvent":
             event_name = action.get("name")
             action_payload = action.get("payload", {})
+            if action_payload is None:
+                action_payload = {}
+            if not isinstance(action_payload, dict):
+                raise ValueError("triggerEvent payload must be an object")
             evaluated: dict = {}
             for k, v in action_payload.items():
                 if isinstance(v, str):
@@ -233,22 +268,21 @@ class InstanceManager:
             if action.get("external") is True:
                 if self._event_emitter is None:
                     raise RuntimeError("External triggerEvent requires a configured WorldEventEmitter")
-                target_world_id = action.get("targetWorldId")
-                if not target_world_id:
-                    raise ValueError("External triggerEvent requires targetWorldId")
-                if isinstance(target_world_id, str):
-                    try:
-                        target_world_id = self._sandbox.execute(f"result = {target_world_id}", context)
-                    except Exception:
-                        pass
+                if not event_name:
+                    raise ValueError("External triggerEvent requires name")
+                if "targetWorldId" in action:
+                    raise ValueError("External triggerEvent does not support targetWorldId")
+                scope = self._validate_external_trigger_scope(action.get("scope", instance.scope))
+                target = self._validate_external_trigger_target(action.get("target"))
+                trace_id = self._validate_external_trigger_trace_id(action.get("traceId"))
+                headers = self._validate_external_trigger_headers(action.get("headers"))
                 self._event_emitter.publish_external(
-                    target_world_id=target_world_id,
                     event_type=event_name,
                     payload=evaluated,
-                    scope=action.get("scope", instance.scope),
-                    target=action.get("target"),
-                    trace_id=action.get("traceId"),
-                    headers=action.get("headers"),
+                    scope=scope,
+                    target=target,
+                    trace_id=trace_id,
+                    headers=headers,
                 )
             else:
                 dispatch_fn = context.get("dispatch")

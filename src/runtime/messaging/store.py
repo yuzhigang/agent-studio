@@ -7,7 +7,7 @@ from src.runtime.messaging.envelope import MessageEnvelope
 @dataclass(slots=True)
 class InboxDelivery:
     message_id: str
-    target_world_id: str
+    target_world: str
     status: str
     error_count: int = 0
     retry_after: str | None = None
@@ -40,7 +40,7 @@ class MessageStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def inbox_create_deliveries(self, message_id: str, world_ids: list[str]) -> None:
+    def inbox_create_deliveries(self, message_id: str, target_worlds: list[str]) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -48,14 +48,14 @@ class MessageStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def inbox_mark_delivery_delivered(self, message_id: str, world_id: str) -> None:
+    def inbox_mark_delivery_delivered(self, message_id: str, target_world: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def inbox_mark_delivery_retry(
         self,
         message_id: str,
-        world_id: str,
+        target_world: str,
         *,
         error_count: int,
         retry_after: str | None,
@@ -67,7 +67,7 @@ class MessageStore(ABC):
     def inbox_mark_delivery_dead(
         self,
         message_id: str,
-        world_id: str,
+        target_world: str,
         *,
         error_count: int,
         last_error: str | None,
@@ -79,7 +79,7 @@ class MessageStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def inbox_mark_world_deliveries_dead(self, world_id: str, *, last_error: str) -> None:
+    def inbox_mark_world_deliveries_dead(self, target_world: str, *, last_error: str) -> None:
         raise NotImplementedError
 
     @abstractmethod

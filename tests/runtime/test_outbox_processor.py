@@ -48,7 +48,8 @@ async def test_outbox_processor_sends_and_marks_sent(msg_store):
     msg_store.outbox_append(
         MessageEnvelope(
             message_id="msg-success",
-            world_id="world-2",
+            source_world="world-2",
+            target_world=None,
             event_type="order.created",
             payload={"id": "123"},
             source="src-1",
@@ -64,6 +65,8 @@ async def test_outbox_processor_sends_and_marks_sent(msg_store):
 
     assert len(channel.messages) == 1
     assert channel.messages[0].event_type == "order.created"
+    assert channel.messages[0].source_world == "world-2"
+    assert channel.messages[0].target_world is None
 
     pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 0
@@ -83,7 +86,8 @@ async def test_outbox_processor_retries_on_retryable(msg_store):
     msg_store.outbox_append(
         MessageEnvelope(
             message_id="msg-retry",
-            world_id="world-2",
+            source_world="world-2",
+            target_world=None,
             event_type="order.created",
             payload={"id": "456"},
             source="src-1",
@@ -97,6 +101,8 @@ async def test_outbox_processor_retries_on_retryable(msg_store):
         await hub.stop()
 
     assert len(channel.messages) == 1
+    assert channel.messages[0].source_world == "world-2"
+    assert channel.messages[0].target_world is None
 
     pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 0
@@ -120,7 +126,8 @@ async def test_outbox_processor_permanent_failure(msg_store):
     msg_store.outbox_append(
         MessageEnvelope(
             message_id="msg-dead",
-            world_id="world-2",
+            source_world="world-2",
+            target_world=None,
             event_type="order.created",
             payload={"id": "789"},
             source="src-1",
@@ -134,6 +141,8 @@ async def test_outbox_processor_permanent_failure(msg_store):
         await hub.stop()
 
     assert len(channel.messages) == 1
+    assert channel.messages[0].source_world == "world-2"
+    assert channel.messages[0].target_world is None
 
     pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 0
@@ -156,7 +165,8 @@ async def test_outbox_processor_no_channel_does_not_crash(msg_store):
     msg_store.outbox_append(
         MessageEnvelope(
             message_id="msg-pending",
-            world_id="world-2",
+            source_world="world-2",
+            target_world=None,
             event_type="order.created",
             payload={"id": "000"},
             source="src-1",
@@ -172,3 +182,5 @@ async def test_outbox_processor_no_channel_does_not_crash(msg_store):
     pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 1
     assert pending[0].payload == {"id": "000"}
+    assert pending[0].source_world == "world-2"
+    assert pending[0].target_world is None

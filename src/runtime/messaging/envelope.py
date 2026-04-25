@@ -5,9 +5,10 @@ from typing import Any
 @dataclass(slots=True)
 class MessageEnvelope:
     message_id: str
-    world_id: str
-    event_type: str
-    payload: dict[str, Any]
+    source_world: str | None = None
+    target_world: str | None = None
+    event_type: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
     source: str | None = None
     scope: str = "world"
     target: str | None = None

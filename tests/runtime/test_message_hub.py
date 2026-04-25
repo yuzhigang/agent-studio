@@ -54,7 +54,8 @@ def test_on_inbound_writes_inbox_envelope(msg_store):
     hub = MessageHub(msg_store, channel=None)
     envelope = MessageEnvelope(
         message_id="msg-1",
-        world_id="world-1",
+        source_world="external-world",
+        target_world="world-1",
         event_type="notify.alert",
         payload={"level": "high"},
         source="ext-1",

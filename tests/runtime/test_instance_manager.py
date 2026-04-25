@@ -319,7 +319,6 @@ def test_on_event_trigger_event_action_external_publish():
         def publish_external(
             self,
             *,
-            target_world_id,
             event_type,
             payload,
             scope="world",
@@ -329,7 +328,6 @@ def test_on_event_trigger_event_action_external_publish():
         ):
             self.external.append(
                 {
-                    "target_world_id": target_world_id,
                     "event_type": event_type,
                     "payload": payload,
                     "scope": scope,
@@ -360,7 +358,6 @@ def test_on_event_trigger_event_action_external_publish():
                             "type": "triggerEvent",
                             "name": "ladleLoaded",
                             "external": True,
-                            "targetWorldId": "factory-b",
                             "headers": {"priority": "high"},
                             "payload": {
                                 "ladleId": "this.id",
@@ -379,7 +376,6 @@ def test_on_event_trigger_event_action_external_publish():
     assert received == []
     assert emitter.external == [
         {
-            "target_world_id": "factory-b",
             "event_type": "ladleLoaded",
             "payload": {"ladleId": "ladle-001", "steelAmount": 180},
             "scope": "world",
@@ -405,7 +401,7 @@ def test_on_event_trigger_event_action_external_writes_outbox(tmp_path):
     sender = WorldMessageSender(world_id="world-01", hub=hub, source="world:world-01")
     mgr = InstanceManager(bus_reg, world_event_emitter=None, trigger_registry=te)
     emitter = WorldEventEmitter(bus_reg.get_or_create("world-01"), mgr, sender)
-    mgr._event_emitter = emitter
+    mgr.bind_world_event_emitter(emitter)
 
     mgr.create(
         world_id="world-01",
@@ -422,7 +418,6 @@ def test_on_event_trigger_event_action_external_writes_outbox(tmp_path):
                             "type": "triggerEvent",
                             "name": "ladleLoaded",
                             "external": True,
-                            "targetWorldId": "factory-b",
                             "headers": {"priority": "high"},
                             "payload": {
                                 "ladleId": "this.id",
@@ -442,10 +437,51 @@ def test_on_event_trigger_event_action_external_writes_outbox(tmp_path):
     store.close()
 
     assert len(pending) == 1
-    assert pending[0].world_id == "factory-b"
+    assert pending[0].source_world == "world-01"
+    assert pending[0].target_world is None
     assert pending[0].event_type == "ladleLoaded"
     assert pending[0].payload == {"ladleId": "ladle-001", "steelAmount": 180}
     assert pending[0].source == "world:world-01"
+
+
+@pytest.mark.parametrize(
+    ("action_patch", "message"),
+    [
+        ({"targetWorldId": "factory-b"}, "does not support targetWorldId"),
+        ({"scope": "scene:"}, "scope must be 'world' or 'scene:<scene_id>'"),
+        ({"target": 123}, "target must be a string"),
+        ({"traceId": 123}, "traceId must be a string"),
+        ({"headers": {"priority": 1}}, "headers must be a dict"),
+        ({"headers": "priority=high"}, "headers must be a dict"),
+    ],
+)
+def test_external_trigger_event_validates_new_contract(action_patch, message):
+    class FakeEmitter:
+        def publish_external(self, **kwargs):
+            raise AssertionError("publish_external should not be called when validation fails")
+
+    mgr = InstanceManager(EventBusRegistry(), world_event_emitter=FakeEmitter())
+    inst = mgr.create(
+        world_id="world-a",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="scene:scene-a",
+        model={},
+    )
+
+    action = {
+        "type": "triggerEvent",
+        "name": "ladle.loaded",
+        "external": True,
+        "scope": "scene:scene-a",
+        "target": "ladle-002",
+        "payload": {"ladleId": "this.id"},
+        "headers": {"priority": "high"},
+    }
+    action.update(action_patch)
+
+    with pytest.raises(ValueError, match=message):
+        mgr._execute_action(inst, action, {}, "external")
 
 
 def test_on_event_ignores_non_event_trigger():

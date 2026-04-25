@@ -102,14 +102,12 @@ class WorkerManager:
     def _message_envelope_from_params(
         params: dict,
         *,
-        default_world_id: str | None = None,
+        default_target_world: str | None = None,
     ) -> MessageEnvelope:
-        world_id = params.get("world_id", default_world_id)
-        if not world_id:
-            raise JsonRpcError(-32602, "world_id required")
         return MessageEnvelope(
             message_id=params.get("message_id") or params.get("id") or str(uuid.uuid4()),
-            world_id=world_id,
+            source_world=params.get("source_world"),
+            target_world=params.get("target_world", default_target_world),
             event_type=params.get("event_type", ""),
             payload=params.get("payload", {}),
             source=params.get("source"),
@@ -289,7 +287,7 @@ class WorkerManager:
                 hub.on_inbound(
                     self._message_envelope_from_params(
                         record,
-                        default_world_id=params.get("world_id"),
+                        default_target_world=params.get("target_world"),
                     )
                 )
             return {

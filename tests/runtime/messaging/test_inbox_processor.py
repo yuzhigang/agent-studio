@@ -32,7 +32,8 @@ async def test_inbox_processor_expands_broadcast_and_delivers(tmp_path):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-1",
-            world_id="*",
+            source_world="erp",
+            target_world="*",
             event_type="shift.changed",
             payload={"shift": "night"},
         )
@@ -60,7 +61,8 @@ async def test_inbox_processor_marks_retry_for_unavailable_world(tmp_path):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-2",
-            world_id="factory-a",
+            source_world="erp",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "O2"},
         )
@@ -79,6 +81,45 @@ async def test_inbox_processor_marks_retry_for_unavailable_world(tmp_path):
     store.close()
 
     assert row == ("retry", 0, "world receiver unavailable")
+
+
+@pytest.mark.anyio
+async def test_inbox_processor_leaves_targetless_messages_pending(tmp_path):
+    store = SQLiteMessageStore(str(tmp_path))
+    hub = MessageHub(
+        message_store=store,
+        channel=None,
+        poll_interval=0.01,
+        max_retries=2,
+    )
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-no-target",
+            source_world="erp",
+            target_world=None,
+            event_type="order.created",
+            payload={"order_id": "O-no-target"},
+        )
+    )
+
+    try:
+        await hub.start()
+        await asyncio.sleep(0.05)
+    finally:
+        await hub.stop()
+
+    inbox_row = store._conn.execute(
+        "SELECT status, source_world, target_world FROM inbox WHERE message_id = ?",
+        ("msg-no-target",),
+    ).fetchone()
+    delivery_count = store._conn.execute(
+        "SELECT COUNT(*) FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-no-target",),
+    ).fetchone()[0]
+    store.close()
+
+    assert inbox_row == ("pending", "erp", None)
+    assert delivery_count == 0
 
 
 @pytest.mark.anyio
@@ -111,7 +152,8 @@ async def test_inbox_processor_handles_retryable_and_permanent_errors(tmp_path):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-3",
-            world_id="factory-a",
+            source_world="erp",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "O3"},
         )
@@ -119,7 +161,8 @@ async def test_inbox_processor_handles_retryable_and_permanent_errors(tmp_path):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-4",
-            world_id="factory-b",
+            source_world="erp",
+            target_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O4"},
         )
@@ -159,7 +202,7 @@ async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds
 
     class _OkReceiver:
         async def receive(self, envelope):
-            seen.append((envelope.world_id, envelope.message_id))
+            seen.append((envelope.source_world, envelope.target_world, envelope.message_id))
             delivered.set()
 
     hub = MessageHub(
@@ -173,7 +216,8 @@ async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-5",
-            world_id="factory-a",
+            source_world="erp-a",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "O5"},
         )
@@ -181,7 +225,8 @@ async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-6",
-            world_id="factory-b",
+            source_world="erp-b",
+            target_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O6"},
         )
@@ -203,7 +248,7 @@ async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds
     ).fetchone()
     store.close()
 
-    assert seen == [("factory-b", "msg-6")]
+    assert seen == [("erp-b", "factory-b", "msg-6")]
     assert bad_row[0] == "retry"
     assert bad_row[1] == 1
     assert "unexpected error: boom" == bad_row[2]
@@ -232,7 +277,8 @@ async def test_inbox_processor_missing_inbox_message_does_not_block_same_world_f
     store.inbox_append(
         MessageEnvelope(
             message_id="msg-missing",
-            world_id="factory-a",
+            source_world="erp",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "missing"},
         )
@@ -240,7 +286,8 @@ async def test_inbox_processor_missing_inbox_message_does_not_block_same_world_f
     store.inbox_append(
         MessageEnvelope(
             message_id="msg-good",
-            world_id="factory-a",
+            source_world="erp",
+            target_world="factory-a",
             event_type="order.created",
             payload={"order_id": "good"},
         )
@@ -278,3 +325,131 @@ async def test_inbox_processor_missing_inbox_message_does_not_block_same_world_f
     assert seen == ["msg-good"]
     assert missing_row == ("dead", "missing inbox message")
     assert good_row == ("delivered",)
+
+
+@pytest.mark.anyio
+async def test_inbox_handler_failure_is_not_visible_to_processor(tmp_path):
+    """EventBus swallows handler exceptions, so WorldMessageIngress.receive()
+    returns normally even if an internal handler crashed. InboxProcessor
+    therefore marks the delivery as delivered, not retry/dead.
+    This documents the current architecture gap: inbox retry does not
+    reflect world-internal handler failures.
+    """
+    store = SQLiteMessageStore(str(tmp_path))
+    from src.runtime.event_bus import EventBus
+    from src.runtime.world_event_emitter import WorldEventEmitter
+    from src.runtime.messaging.world_ingress import WorldMessageIngress
+
+    bus = EventBus()
+    received = asyncio.Event()
+
+    def _failing_handler(event_type, payload, source):
+        received.set()
+        raise RuntimeError("handler crashed internally")
+
+    bus.register("inst-1", "world", "order.created", _failing_handler)
+
+    emitter = WorldEventEmitter(bus)
+    ingress = WorldMessageIngress(emitter)
+
+    hub = MessageHub(
+        message_store=store,
+        channel=None,
+        poll_interval=0.01,
+        max_retries=2,
+    )
+    hub.register_world("factory-a", ingress)
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-handler-boom",
+            source_world="erp",
+            target_world="factory-a",
+            event_type="order.created",
+            payload={"order_id": "boom"},
+        )
+    )
+
+    try:
+        await hub.start()
+        await asyncio.wait_for(received.wait(), timeout=1.0)
+        await asyncio.sleep(0.05)
+    finally:
+        await hub.stop()
+
+    row = store._conn.execute(
+        "SELECT status, error_count FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-handler-boom",),
+    ).fetchone()
+    store.close()
+
+    # Because WorldMessageIngress passes raise_on_error=True, the handler
+    # exception propagates to InboxProcessor and is treated as retryable.
+    assert row[0] == "retry"
+    assert row[1] == 1
+
+
+@pytest.mark.anyio
+async def test_inbox_delivery_resumes_after_world_re_registration(tmp_path):
+    """When a world is unregistered (non-permanent) and later re-registered,
+    pending deliveries should be retried and eventually delivered.
+    """
+    store = SQLiteMessageStore(str(tmp_path))
+    seen = []
+    delivered = asyncio.Event()
+
+    class _Receiver:
+        async def receive(self, envelope):
+            seen.append(envelope.message_id)
+            delivered.set()
+
+    hub = MessageHub(
+        message_store=store,
+        channel=None,
+        poll_interval=0.01,
+        max_retries=3,
+    )
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-backlog",
+            source_world="erp",
+            target_world="factory-a",
+            event_type="order.created",
+            payload={"order_id": "backlog"},
+        )
+    )
+
+    try:
+        await hub.start()
+        # Wait for the delivery to hit retry because receiver is missing
+        await asyncio.sleep(0.05)
+        # Manually set retry_after to the past so the next poll picks it up
+        store._conn.execute(
+            """
+            UPDATE inbox_deliveries
+            SET retry_after = '2000-01-01T00:00:00+00:00'
+            WHERE message_id = ?
+            """,
+            ("msg-backlog",),
+        )
+        store._conn.commit()
+        # Now register the world
+        hub.register_world("factory-a", _Receiver())
+        await asyncio.wait_for(delivered.wait(), timeout=1.0)
+        # Give reconcile a chance to run before checking status
+        await asyncio.sleep(0.05)
+    finally:
+        await hub.stop()
+
+    row = store._conn.execute(
+        "SELECT status FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-backlog",),
+    ).fetchone()
+    inbox_row = store._conn.execute(
+        "SELECT status FROM inbox WHERE message_id = ?",
+        ("msg-backlog",),
+    ).fetchone()
+    store.close()
+
+    assert row == ("delivered",)
+    assert inbox_row == ("completed",)
+    assert seen == ["msg-backlog"]

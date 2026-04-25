@@ -86,7 +86,8 @@ async def test_unload_world_marks_pending_deliveries_dead_when_world_is_removed(
         hub.on_inbound(
             MessageEnvelope(
                 message_id="msg-1",
-                world_id="factory-01",
+                source_world="external-erp",
+                target_world="factory-01",
                 event_type="order.created",
                 payload={"order_id": "O1001"},
             )
@@ -248,13 +249,15 @@ async def test_worker_manager_handle_command_message_hub_publish():
 
         result = await wm.handle_command("messageHub.publish", {
             "message_id": "msg-1",
-            "world_id": "factory-01",
+            "source_world": "external-erp",
+            "target_world": "factory-01",
             "event_type": "test.event",
             "payload": {},
         })
         assert result["acked"] is True
         assert seen[0].message_id == "msg-1"
-        assert seen[0].world_id == "factory-01"
+        assert seen[0].source_world == "external-erp"
+        assert seen[0].target_world == "factory-01"
         assert seen[0].event_type == "test.event"
 
         wm.unload_world("factory-01")
@@ -274,7 +277,12 @@ async def test_worker_manager_handle_command_message_hub_publish_batch():
 
         class _MockHub:
             def on_inbound(self, envelope: MessageEnvelope):
-                seen_events.append((envelope.message_id, envelope.event_type, envelope.world_id))
+                seen_events.append((
+                    envelope.message_id,
+                    envelope.event_type,
+                    envelope.source_world,
+                    envelope.target_world,
+                ))
 
             def unregister_world(self, world_id: str, *, permanent: bool = False):
                 return None
@@ -283,11 +291,26 @@ async def test_worker_manager_handle_command_message_hub_publish_batch():
 
         result = await wm.handle_command("messageHub.publishBatch", {
             "records": [
-                {"message_id": "r1", "world_id": "factory-01", "event_type": "e1", "payload": {}},
-                {"message_id": "r2", "world_id": "*", "event_type": "e2", "payload": {}},
+                {
+                    "message_id": "r1",
+                    "source_world": "external-erp",
+                    "target_world": "factory-01",
+                    "event_type": "e1",
+                    "payload": {},
+                },
+                {
+                    "message_id": "r2",
+                    "source_world": "external-erp",
+                    "target_world": "*",
+                    "event_type": "e2",
+                    "payload": {},
+                },
             ],
         })
         assert result["acked_ids"] == ["r1", "r2"]
-        assert seen_events == [("r1", "e1", "factory-01"), ("r2", "e2", "*")]
+        assert seen_events == [
+            ("r1", "e1", "external-erp", "factory-01"),
+            ("r2", "e2", "external-erp", "*"),
+        ]
 
         wm.unload_world("factory-01")

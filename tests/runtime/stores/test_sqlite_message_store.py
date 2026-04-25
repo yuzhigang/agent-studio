@@ -14,7 +14,8 @@ def store(tmp_path):
 def test_inbox_append_and_read_pending(store):
     envelope = MessageEnvelope(
         message_id="msg-1",
-        world_id="factory-a",
+        source_world="factory-upstream",
+        target_world="factory-a",
         event_type="evt.a",
         payload={"x": 1},
         source="src-1",
@@ -25,12 +26,15 @@ def test_inbox_append_and_read_pending(store):
     pending = store.inbox_read_pending(limit=10)
     assert len(pending) == 1
     assert pending[0] == envelope
+    assert pending[0].source_world == "factory-upstream"
+    assert pending[0].target_world == "factory-a"
 
 
 def test_inbox_deliveries_reconcile_to_completed(store):
     envelope = MessageEnvelope(
         message_id="msg-2",
-        world_id="factory-a",
+        source_world="factory-upstream",
+        target_world="factory-a",
         event_type="evt.b",
         payload={},
         source="src-1",
@@ -51,7 +55,8 @@ def test_inbox_deliveries_reconcile_to_completed(store):
 def test_outbox_append_and_read_pending(store):
     envelope = MessageEnvelope(
         message_id="msg-3",
-        world_id="factory-b",
+        source_world="factory-b",
+        target_world=None,
         event_type="evt.c",
         payload={"y": 2},
         source="src-2",
@@ -63,13 +68,16 @@ def test_outbox_append_and_read_pending(store):
     pending = store.outbox_read_pending(limit=10)
     assert len(pending) == 1
     assert pending[0] == envelope
+    assert pending[0].source_world == "factory-b"
+    assert pending[0].target_world is None
 
 
 def test_outbox_mark_sent(store):
     store.outbox_append(
         MessageEnvelope(
             message_id="msg-4",
-            world_id="factory-b",
+            source_world="factory-b",
+            target_world=None,
             event_type="evt.d",
             payload={},
             source="src-2",
@@ -86,7 +94,8 @@ def test_outbox_mark_retry_with_retry_after(store):
     store.outbox_append(
         MessageEnvelope(
             message_id="msg-5",
-            world_id="factory-b",
+            source_world="factory-b",
+            target_world=None,
             event_type="evt.e",
             payload={},
             source="src-3",
@@ -113,6 +122,8 @@ def test_outbox_mark_retry_with_retry_after(store):
     pending = store.outbox_read_pending(limit=10)
     assert len(pending) == 1
     assert pending[0].message_id == "msg-5"
+    assert pending[0].source_world == "factory-b"
+    assert pending[0].target_world is None
     row = store._conn.execute(
         "SELECT status, error_count, last_error FROM outbox WHERE message_id = ?",
         ("msg-5",),

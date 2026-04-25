@@ -27,7 +27,6 @@ class WorldMessageSender:
         event_type: str,
         payload: dict,
         *,
-        target_world_id: str,
         scope: str = "world",
         target: str | None = None,
         trace_id: str | None = None,
@@ -41,7 +40,8 @@ class WorldMessageSender:
         message_id = str(uuid4())
         envelope = MessageEnvelope(
             message_id=message_id,
-            world_id=target_world_id,
+            source_world=self._world_id,
+            target_world=None,
             event_type=event_type,
             payload=payload,
             source=self._source,

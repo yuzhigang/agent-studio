@@ -73,7 +73,8 @@ class JsonRpcChannel(Channel):
             "method": "messageHub.publish",
             "params": {
                 "message_id": envelope.message_id,
-                "world_id": envelope.world_id,
+                "source_world": envelope.source_world,
+                "target_world": envelope.target_world,
                 "event_type": envelope.event_type,
                 "payload": envelope.payload,
                 "source": envelope.source,
@@ -135,7 +136,8 @@ class JsonRpcChannel(Channel):
                 self._inbound_callback(
                     MessageEnvelope(
                         message_id=params["message_id"],
-                        world_id=params["world_id"],
+                        source_world=params.get("source_world"),
+                        target_world=params.get("target_world"),
                         event_type=params["event_type"],
                         payload=params.get("payload", {}),
                         source=params.get("source"),

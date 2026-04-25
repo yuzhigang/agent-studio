@@ -34,7 +34,8 @@ async def test_inbox_processor_injects_events_into_event_bus(msg_store):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-1",
-            world_id="world-1",
+            source_world="external-a",
+            target_world="world-1",
             event_type="order.created",
             payload={"id": "123"},
             source="ext-1",
@@ -72,7 +73,8 @@ async def test_inbox_processor_no_outbox_loop(msg_store):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-2",
-            world_id="world-1",
+            source_world="external-a",
+            target_world="world-1",
             event_type="order.created",
             payload={"id": "456"},
             source="ext-1",
@@ -116,7 +118,8 @@ async def test_inbox_processor_target_routing(msg_store):
     hub.on_inbound(
         MessageEnvelope(
             message_id="msg-3",
-            world_id="world-1",
+            source_world="external-a",
+            target_world="world-1",
             event_type="notify.alert",
             payload={"level": "high"},
             source="ext-1",

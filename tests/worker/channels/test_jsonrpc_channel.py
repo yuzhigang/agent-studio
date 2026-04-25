@@ -35,7 +35,8 @@ async def test_jsonrpc_channel_send_uses_message_envelope():
     result = await channel.send(
         MessageEnvelope(
             message_id="msg-1",
-            world_id="factory-b",
+            source_world="factory-a",
+            target_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O1"},
             source="world:factory-a",
@@ -45,7 +46,8 @@ async def test_jsonrpc_channel_send_uses_message_envelope():
     assert len(received) == 1
     assert received[0]["method"] == "messageHub.publish"
     assert received[0]["params"]["message_id"] == "msg-1"
-    assert received[0]["params"]["world_id"] == "factory-b"
+    assert received[0]["params"]["source_world"] == "factory-a"
+    assert received[0]["params"]["target_world"] == "factory-b"
     assert received[0]["params"]["event_type"] == "order.created"
 
     await channel.stop()
@@ -60,7 +62,8 @@ async def test_jsonrpc_channel_send_retryable_when_not_ready():
     result = await channel.send(
         MessageEnvelope(
             message_id="msg-2",
-            world_id="factory-b",
+            source_world="factory-a",
+            target_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O2"},
             source="world:factory-a",
@@ -80,7 +83,8 @@ async def test_jsonrpc_channel_receives_external_event():
             "method": "notify.externalEvent",
             "params": {
                 "message_id": "msg-3",
-                "world_id": "factory-a",
+                "source_world": "external-erp",
+                "target_world": "factory-a",
                 "event_type": "ext.event",
                 "payload": {"val": 42},
                 "source": "supervisor",
@@ -111,7 +115,8 @@ async def test_jsonrpc_channel_receives_external_event():
     assert len(inbound_events) == 1
     assert inbound_events[0] == MessageEnvelope(
         message_id="msg-3",
-        world_id="factory-a",
+        source_world="external-erp",
+        target_world="factory-a",
         event_type="ext.event",
         payload={"val": 42},
         source="supervisor",

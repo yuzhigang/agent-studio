@@ -60,7 +60,7 @@ async def test_outbox_processor_sends_enqueued_envelope(tmp_path):
     hub.enqueue_outbound(
         MessageEnvelope(
             message_id="msg-9",
-            world_id="factory-b",
+            source_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O9"},
         )
@@ -73,13 +73,13 @@ async def test_outbox_processor_sends_enqueued_envelope(tmp_path):
         await hub.stop()
 
     row = store._conn.execute(
-        "SELECT status FROM outbox WHERE message_id = ?",
+        "SELECT status, source_world, target_world FROM outbox WHERE message_id = ?",
         ("msg-9",),
     ).fetchone()
     store.close()
 
     assert channel.sent == ["msg-9"]
-    assert row == ("sent",)
+    assert row == ("sent", "factory-b", None)
 
 
 @pytest.mark.anyio
@@ -95,7 +95,7 @@ async def test_outbox_processor_marks_retryable_send_for_retry(tmp_path):
     hub.enqueue_outbound(
         MessageEnvelope(
             message_id="msg-10",
-            world_id="factory-b",
+            source_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O10"},
         )
@@ -108,13 +108,13 @@ async def test_outbox_processor_marks_retryable_send_for_retry(tmp_path):
         await hub.stop()
 
     row = store._conn.execute(
-        "SELECT status, error_count, last_error FROM outbox WHERE message_id = ?",
+        "SELECT status, error_count, last_error, source_world, target_world FROM outbox WHERE message_id = ?",
         ("msg-10",),
     ).fetchone()
     store.close()
 
     assert channel.sent == ["msg-10"]
-    assert row == ("retry", 1, "retryable failure")
+    assert row == ("retry", 1, "retryable failure", "factory-b", None)
 
 
 @pytest.mark.anyio
@@ -130,7 +130,7 @@ async def test_outbox_processor_marks_permanent_send_dead(tmp_path):
     hub.enqueue_outbound(
         MessageEnvelope(
             message_id="msg-11",
-            world_id="factory-b",
+            source_world="factory-b",
             event_type="order.created",
             payload={"order_id": "O11"},
         )
@@ -143,13 +143,13 @@ async def test_outbox_processor_marks_permanent_send_dead(tmp_path):
         await hub.stop()
 
     row = store._conn.execute(
-        "SELECT status, error_count, last_error FROM outbox WHERE message_id = ?",
+        "SELECT status, error_count, last_error, source_world, target_world FROM outbox WHERE message_id = ?",
         ("msg-11",),
     ).fetchone()
     store.close()
 
     assert channel.sent == ["msg-11"]
-    assert row == ("dead", 3, "permanent failure")
+    assert row == ("dead", 3, "permanent failure", "factory-b", None)
 
 
 @pytest.mark.anyio
@@ -164,7 +164,7 @@ async def test_outbox_processor_slow_send_does_not_block_following_message(tmp_p
     hub.enqueue_outbound(
         MessageEnvelope(
             message_id="msg-slow",
-            world_id="factory-b",
+            source_world="factory-b",
             event_type="order.created",
             payload={"order_id": "slow"},
         )
@@ -172,7 +172,7 @@ async def test_outbox_processor_slow_send_does_not_block_following_message(tmp_p
     hub.enqueue_outbound(
         MessageEnvelope(
             message_id="msg-fast",
-            world_id="factory-b",
+            source_world="factory-b",
             event_type="order.created",
             payload={"order_id": "fast"},
         )
