@@ -360,11 +360,14 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
         hub = bundle.get("message_hub")
         if hub is None:
             raise JsonRpcError(-32102, "message hub not initialized")
+        target_world = params.get("target_world")
+        if not target_world:
+            raise JsonRpcError(-32602, "target_world required")
         hub.on_inbound(
             MessageEnvelope(
                 message_id=params.get("message_id") or params.get("id") or str(uuid.uuid4()),
                 source_world=params.get("source_world"),
-                target_world=params.get("target_world"),
+                target_world=target_world,
                 event_type=params.get("event_type", ""),
                 payload=params.get("payload", {}),
                 source=params.get("source"),
@@ -382,11 +385,14 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
             raise JsonRpcError(-32102, "message hub not initialized")
         records = params.get("records", [])
         for record in records:
+            target_world = record.get("target_world", params.get("target_world"))
+            if not target_world:
+                raise JsonRpcError(-32602, "target_world required")
             hub.on_inbound(
                 MessageEnvelope(
                     message_id=record.get("message_id") or record.get("id") or str(uuid.uuid4()),
                     source_world=record.get("source_world"),
-                    target_world=record.get("target_world", params.get("target_world")),
+                    target_world=target_world,
                     event_type=record.get("event_type", ""),
                     payload=record.get("payload", {}),
                     source=record.get("source"),

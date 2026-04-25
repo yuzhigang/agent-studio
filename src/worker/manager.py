@@ -104,10 +104,13 @@ class WorkerManager:
         *,
         default_target_world: str | None = None,
     ) -> MessageEnvelope:
+        target_world = params.get("target_world", default_target_world)
+        if not target_world:
+            raise JsonRpcError(-32602, "target_world required")
         return MessageEnvelope(
             message_id=params.get("message_id") or params.get("id") or str(uuid.uuid4()),
             source_world=params.get("source_world"),
-            target_world=params.get("target_world", default_target_world),
+            target_world=target_world,
             event_type=params.get("event_type", ""),
             payload=params.get("payload", {}),
             source=params.get("source"),

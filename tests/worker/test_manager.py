@@ -21,6 +21,7 @@ if "websockets" not in sys.modules:
     sys.modules["websockets.protocol"] = protocol_module
 
 from src.worker.manager import WorkerManager
+from src.worker.server.jsonrpc_ws import JsonRpcError
 
 
 def test_worker_manager_init():
@@ -264,6 +265,36 @@ async def test_worker_manager_handle_command_message_hub_publish():
 
 
 @pytest.mark.anyio
+async def test_worker_manager_handle_command_message_hub_publish_requires_target_world():
+    """messageHub.publish is a routed inbound entrypoint and must name a target world."""
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = WorldRegistry(base_dir=tmp)
+        reg.create_world("factory-01")
+
+        wm = WorkerManager(worker_id="wk-1")
+        wm.load_worlds(tmp)
+
+        class _MockHub:
+            def on_inbound(self, envelope: MessageEnvelope):
+                raise AssertionError("on_inbound should not be called when target_world is missing")
+
+            def unregister_world(self, world_id: str, *, permanent: bool = False):
+                return None
+
+        wm._message_hub = _MockHub()
+
+        with pytest.raises(JsonRpcError, match="target_world required"):
+            await wm.handle_command("messageHub.publish", {
+                "message_id": "msg-1",
+                "source_world": "external-erp",
+                "event_type": "test.event",
+                "payload": {},
+            })
+
+        wm.unload_world("factory-01")
+
+
+@pytest.mark.anyio
 async def test_worker_manager_handle_command_message_hub_publish_batch():
     """Verify messageHub.publishBatch works when bundle has a message_hub."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -312,5 +343,39 @@ async def test_worker_manager_handle_command_message_hub_publish_batch():
             ("r1", "e1", "external-erp", "factory-01"),
             ("r2", "e2", "external-erp", "*"),
         ]
+
+        wm.unload_world("factory-01")
+
+
+@pytest.mark.anyio
+async def test_worker_manager_handle_command_message_hub_publish_batch_requires_target_world():
+    """Every publishBatch record must resolve to a concrete target_world."""
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = WorldRegistry(base_dir=tmp)
+        reg.create_world("factory-01")
+
+        wm = WorkerManager(worker_id="wk-1")
+        wm.load_worlds(tmp)
+
+        class _MockHub:
+            def on_inbound(self, envelope: MessageEnvelope):
+                raise AssertionError("on_inbound should not be called when target_world is missing")
+
+            def unregister_world(self, world_id: str, *, permanent: bool = False):
+                return None
+
+        wm._message_hub = _MockHub()
+
+        with pytest.raises(JsonRpcError, match="target_world required"):
+            await wm.handle_command("messageHub.publishBatch", {
+                "records": [
+                    {
+                        "message_id": "r1",
+                        "source_world": "external-erp",
+                        "event_type": "e1",
+                        "payload": {},
+                    }
+                ],
+            })
 
         wm.unload_world("factory-01")
