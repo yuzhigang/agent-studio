@@ -305,6 +305,149 @@ def test_on_event_trigger_event_action():
     assert received[0][2] == "ladle-001"
 
 
+def test_on_event_trigger_event_action_external_publish():
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+
+    class FakeEmitter:
+        def __init__(self):
+            self.external = []
+
+        def publish_from_instance(self, **kwargs):
+            raise AssertionError("internal emitter path should not be used for external triggerEvent")
+
+        def publish_external(
+            self,
+            *,
+            target_world_id,
+            event_type,
+            payload,
+            scope="world",
+            target=None,
+            trace_id=None,
+            headers=None,
+        ):
+            self.external.append(
+                {
+                    "target_world_id": target_world_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                    "scope": scope,
+                    "target": target,
+                    "trace_id": trace_id,
+                    "headers": headers,
+                }
+            )
+            return "msg-1"
+
+    bus_reg = EventBusRegistry()
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+    emitter = FakeEmitter()
+    mgr = InstanceManager(bus_reg, world_event_emitter=emitter, trigger_registry=te)
+    mgr.create(
+        world_id="world-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        variables={"steelAmount": 180},
+        model={
+            "behaviors": {
+                "notifyLoaded": {
+                    "trigger": {"type": "event", "name": "beginLoad"},
+                    "actions": [
+                        {
+                            "type": "triggerEvent",
+                            "name": "ladleLoaded",
+                            "external": True,
+                            "targetWorldId": "factory-b",
+                            "headers": {"priority": "high"},
+                            "payload": {
+                                "ladleId": "this.id",
+                                "steelAmount": "this.variables.steelAmount",
+                            },
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    bus = bus_reg.get_or_create("world-01")
+    received = []
+    bus.register("observer", "world", "ladleLoaded", lambda t, p, s: received.append((t, p, s)))
+    bus.publish("beginLoad", {}, source="external", scope="world")
+    assert received == []
+    assert emitter.external == [
+        {
+            "target_world_id": "factory-b",
+            "event_type": "ladleLoaded",
+            "payload": {"ladleId": "ladle-001", "steelAmount": 180},
+            "scope": "world",
+            "target": None,
+            "trace_id": None,
+            "headers": {"priority": "high"},
+        }
+    ]
+
+
+def test_on_event_trigger_event_action_external_writes_outbox(tmp_path):
+    from src.runtime.trigger_registry import TriggerRegistry
+    from src.runtime.triggers.event_trigger import EventTrigger
+    from src.runtime.messaging import MessageHub, WorldMessageSender
+    from src.runtime.messaging.sqlite_store import SQLiteMessageStore
+    from src.runtime.world_event_emitter import WorldEventEmitter
+
+    bus_reg = EventBusRegistry()
+    te = TriggerRegistry()
+    te.add_trigger(EventTrigger(bus_reg))
+    store = SQLiteMessageStore(str(tmp_path / "messagebox"))
+    hub = MessageHub(message_store=store, channel=None, poll_interval=0.01)
+    sender = WorldMessageSender(world_id="world-01", hub=hub, source="world:world-01")
+    mgr = InstanceManager(bus_reg, world_event_emitter=None, trigger_registry=te)
+    emitter = WorldEventEmitter(bus_reg.get_or_create("world-01"), mgr, sender)
+    mgr._event_emitter = emitter
+
+    mgr.create(
+        world_id="world-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        variables={"steelAmount": 180},
+        model={
+            "behaviors": {
+                "notifyLoaded": {
+                    "trigger": {"type": "event", "name": "beginLoad"},
+                    "actions": [
+                        {
+                            "type": "triggerEvent",
+                            "name": "ladleLoaded",
+                            "external": True,
+                            "targetWorldId": "factory-b",
+                            "headers": {"priority": "high"},
+                            "payload": {
+                                "ladleId": "this.id",
+                                "steelAmount": "this.variables.steelAmount",
+                            },
+                        }
+                    ],
+                }
+            }
+        },
+    )
+
+    bus = bus_reg.get_or_create("world-01")
+    bus.publish("beginLoad", {}, source="external", scope="world")
+
+    pending = store.outbox_read_pending(limit=10)
+    store.close()
+
+    assert len(pending) == 1
+    assert pending[0].world_id == "factory-b"
+    assert pending[0].event_type == "ladleLoaded"
+    assert pending[0].payload == {"ladleId": "ladle-001", "steelAmount": 180}
+    assert pending[0].source == "world:world-01"
+
+
 def test_on_event_ignores_non_event_trigger():
     bus_reg = EventBusRegistry()
     mgr = InstanceManager(bus_reg)

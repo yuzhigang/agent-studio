@@ -2,9 +2,7 @@ import os
 import signal
 import sys
 
-from src.runtime.message_hub import MessageHub
 from src.runtime.world_registry import WorldRegistry
-from src.runtime.stores.sqlite_message_store import SQLiteMessageStore
 from src.worker.manager import WorkerManager
 
 
@@ -24,13 +22,7 @@ def run_inline(world_dirs, supervisor_ws=None):
 
     # Setup shared MessageHub
     worker_dir = os.path.join(os.path.expanduser("~"), ".agent-studio", "workers", "inline")
-    msg_store = SQLiteMessageStore(worker_dir)
-    message_hub = MessageHub(msg_store, None)
-
-    for world_id, bundle in worker_manager.worlds.items():
-        bus = bundle["event_bus_registry"].get_or_create(world_id)
-        message_hub.register_world(world_id, bus, bundle.get("model_events", {}))
-        bundle["message_hub"] = message_hub
+    message_hub = worker_manager.build_message_hub(worker_dir=worker_dir, channel=None)
 
     # Start shared scenes for all loaded worlds
     for world_id, bundle in worker_manager.worlds.items():
@@ -57,7 +49,7 @@ def run_inline(world_dirs, supervisor_ws=None):
     async def _shutdown_all():
         for world_id in list(worker_manager.worlds.keys()):
             try:
-                await worker_manager.handle_command("world.stop", {"world_id": world_id})
+                await worker_manager.handle_command("world.remove", {"world_id": world_id})
             except Exception:
                 pass
         if main_fut is not None and not main_fut.done():

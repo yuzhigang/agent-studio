@@ -38,7 +38,7 @@ class EventTrigger(Trigger):
         info = self._handlers.pop(entry.id, None)
         if info:
             bus = self._bus_reg.get_or_create(info.world_id)
-            bus.unregister(self._inst_attr(entry.instance, "id"))
+            bus.unregister(self._inst_attr(entry.instance, "id"), entry.trigger["name"])
 
     def on_instance_removed(self, instance):
         removed = []

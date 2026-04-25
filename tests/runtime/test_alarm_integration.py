@@ -17,10 +17,11 @@ def test_alarm_persisted_to_database(tmp_path):
     # Manually wire up an AlarmManager with this store
     from src.runtime.alarm_manager import AlarmManager
     from src.runtime.event_bus import EventBusRegistry
+    from src.runtime.world_event_emitter import WorldEventEmitter
 
     bus_reg = EventBusRegistry()
     bus = bus_reg.get_or_create("test-world")
-    am = AlarmManager(trigger_registry=None, event_bus=bus, store=store)
+    am = AlarmManager(trigger_registry=None, event_emitter=WorldEventEmitter(bus), store=store)
 
     class FakeInst:
         def __init__(self):
@@ -110,13 +111,14 @@ def test_force_clear_via_store(tmp_path):
     from src.runtime.stores.sqlite_store import SQLiteStore
     from src.runtime.alarm_manager import AlarmManager
     from src.runtime.event_bus import EventBusRegistry
+    from src.runtime.world_event_emitter import WorldEventEmitter
 
     world_dir = tmp_path / "test-world"
     world_dir.mkdir()
     store = SQLiteStore(str(world_dir))
     bus_reg = EventBusRegistry()
     bus = bus_reg.get_or_create("test-world")
-    am = AlarmManager(None, bus, store)
+    am = AlarmManager(None, WorldEventEmitter(bus), store)
 
     class FakeInst:
         def __init__(self):
@@ -181,6 +183,7 @@ def test_instance_manager_calls_alarm_manager_on_create(registry):
     from src.runtime.triggers.condition_trigger import ConditionTrigger
     from src.runtime.triggers.timer_trigger import TimerTrigger
     from src.runtime.event_bus import EventBusRegistry
+    from src.runtime.world_event_emitter import WorldEventEmitter
 
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
@@ -190,7 +193,7 @@ def test_instance_manager_calls_alarm_manager_on_create(registry):
     tr.add_trigger(TimerTrigger())
     im._trigger_registry = tr
 
-    alarm_mgr = AlarmManager(tr, bus_reg.get_or_create("w1"))
+    alarm_mgr = AlarmManager(tr, WorldEventEmitter(bus_reg.get_or_create("w1")))
     im._alarm_manager = alarm_mgr
 
     model = {
@@ -218,6 +221,7 @@ def test_instance_manager_unregisters_alarms_on_archive():
     from src.runtime.triggers.condition_trigger import ConditionTrigger
     from src.runtime.triggers.timer_trigger import TimerTrigger
     from src.runtime.event_bus import EventBusRegistry
+    from src.runtime.world_event_emitter import WorldEventEmitter
 
     bus_reg = EventBusRegistry()
     im = InstanceManager(bus_reg)
@@ -227,7 +231,7 @@ def test_instance_manager_unregisters_alarms_on_archive():
     tr.add_trigger(TimerTrigger())
     im._trigger_registry = tr
 
-    alarm_mgr = AlarmManager(tr, bus_reg.get_or_create("w1"))
+    alarm_mgr = AlarmManager(tr, WorldEventEmitter(bus_reg.get_or_create("w1")))
     im._alarm_manager = alarm_mgr
 
     model = {

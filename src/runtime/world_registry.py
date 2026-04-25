@@ -5,6 +5,7 @@ import yaml
 
 from src.runtime.instance_loader import InstanceLoader
 from src.runtime.locks.world_lock import WorldLock
+from src.runtime.messaging import WorldMessageIngress, WorldMessageSender
 from src.runtime.model_loader import ModelLoader
 from src.runtime.model_resolver import ModelResolver
 from src.runtime.stores.sqlite_store import SQLiteStore
@@ -18,6 +19,7 @@ from src.runtime.alarm_manager import AlarmManager
 from src.runtime.triggers.event_trigger import EventTrigger
 from src.runtime.triggers.condition_trigger import ConditionTrigger
 from src.runtime.triggers.timer_trigger import TimerTrigger
+from src.runtime.world_event_emitter import WorldEventEmitter
 
 logger = logging.getLogger(__name__)
 
@@ -99,28 +101,29 @@ class WorldRegistry:
 
             bus = bus_reg.get_or_create(world_id)
 
-            alarm_manager = AlarmManager(trigger_registry, bus, store)
-
             im = InstanceManager(
                 bus_reg,
                 instance_store=store,
                 model_loader=model_loader,
                 world_state=world_state,
+                world_event_emitter=None,
                 trigger_registry=trigger_registry,
-                alarm_manager=alarm_manager,
+                alarm_manager=None,
             )
 
             trigger_registry.add_trigger(ConditionTrigger(im._sandbox))
 
             world_state.set_instance_manager(im)
-            # This hook only recomputes the publisher (source) instance.
-            # Consumers that run scripts will recompute their own snapshot
-            # inside InstanceManager._execute_action.
-            def world_event_hook(event_type, payload, source, scope, target):
-                inst = im.get(world_id, source, scope=scope)
-                if inst is not None:
-                    inst._update_snapshot()
-            bus.add_pre_publish_hook(world_event_hook)
+            message_sender = WorldMessageSender(
+                world_id=world_id,
+                hub=None,
+                source=f"world:{world_id}",
+            )
+            event_emitter = WorldEventEmitter(bus, im, message_sender)
+            im._event_emitter = event_emitter
+            alarm_manager = AlarmManager(trigger_registry, event_emitter, store)
+            im._alarm_manager = alarm_manager
+            message_receiver = WorldMessageIngress(event_emitter)
 
             scene_mgr = SceneManager(im, bus_reg, scene_store=store)
             metric_store = (
@@ -135,6 +138,7 @@ class WorldRegistry:
                 store,
                 store,
                 metric_store=metric_store,
+                world_event_emitter=event_emitter,
             )
             scene_mgr.set_state_manager(state_mgr)
 
@@ -157,6 +161,10 @@ class WorldRegistry:
                 "alarm_manager": alarm_manager,
                 "_registry": self,
                 "force_stop_on_shutdown": False,
+                "runtime_status": "running",
+                "event_emitter": event_emitter,
+                "message_receiver": message_receiver,
+                "message_sender": message_sender,
             }
             self._loaded[world_id] = bundle
             return bundle

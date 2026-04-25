@@ -7,6 +7,9 @@ class FakeInstance:
         self.instance_id = "inst-01"
         self.world_id = "demo-world"
         self.id = "inst-01"
+        self.variables = {}
+        self.attributes = {}
+        self.state = {}
 
 
 def test_alarm_state_dataclass():
@@ -19,7 +22,7 @@ def test_alarm_state_dataclass():
 
 
 def test_alarm_manager_init():
-    am = AlarmManager(trigger_registry=None, event_bus=None, store=None)
+    am = AlarmManager(trigger_registry=None, event_emitter=None, store=None)
     assert am is not None
 
 
@@ -185,11 +188,11 @@ def test_interpolate_message_fallback():
 def test_publish_alarm_triggered_event():
     events = []
 
-    class FakeBus:
-        def publish(self, event_type, payload, source=None, scope=None, target=None):
+    class FakeEmitter:
+        def publish_from_instance(self, *, world_id, source_instance_id, scope, event_type, payload, target=None):
             events.append((event_type, payload))
 
-    am = AlarmManager(None, FakeBus(), None)
+    am = AlarmManager(None, FakeEmitter(), None)
     inst = FakeInstanceWithProps()
     config = {
         "category": "temp",
@@ -212,11 +215,11 @@ def test_publish_alarm_triggered_event():
 def test_publish_alarm_triggered_repeated_event():
     events = []
 
-    class FakeBus:
-        def publish(self, event_type, payload, source=None, scope=None, target=None):
+    class FakeEmitter:
+        def publish_from_instance(self, *, world_id, source_instance_id, scope, event_type, payload, target=None):
             events.append((event_type, payload))
 
-    am = AlarmManager(None, FakeBus(), None)
+    am = AlarmManager(None, FakeEmitter(), None)
     inst = FakeInstanceWithProps()
     config = {
         "category": "temp",
@@ -240,11 +243,11 @@ def test_publish_alarm_triggered_repeated_event():
 def test_publish_alarm_cleared_event():
     events = []
 
-    class FakeBus:
-        def publish(self, event_type, payload, source=None, scope=None, target=None):
+    class FakeEmitter:
+        def publish_from_instance(self, *, world_id, source_instance_id, scope, event_type, payload, target=None):
             events.append((event_type, payload))
 
-    am = AlarmManager(None, FakeBus(), None)
+    am = AlarmManager(None, FakeEmitter(), None)
     inst = FakeInstanceWithProps()
     config = {
         "category": "temp",
@@ -303,12 +306,12 @@ def test_alarm_manager_calls_store_on_trigger():
 def test_force_clear_active_alarm():
     events = []
 
-    class FakeBus:
-        def publish(self, event_type, payload, source=None, scope=None, target=None):
+    class FakeEmitter:
+        def publish_from_instance(self, *, world_id, source_instance_id, scope, event_type, payload, target=None):
             events.append((event_type, payload))
 
     store = FakeAlarmStore()
-    am = AlarmManager(None, FakeBus(), store)
+    am = AlarmManager(None, FakeEmitter(), store)
     inst = FakeInstanceWithProps()
     inst.model = {
         "alarms": {
@@ -349,11 +352,11 @@ def test_force_clear_active_alarm():
 def test_force_clear_without_model():
     events = []
 
-    class FakeBus:
-        def publish(self, event_type, payload, source=None, scope=None, target=None):
+    class FakeEmitter:
+        def publish_from_instance(self, *, world_id, source_instance_id, scope, event_type, payload, target=None):
             events.append((event_type, payload))
 
-    am = AlarmManager(None, FakeBus(), None)
+    am = AlarmManager(None, FakeEmitter(), None)
     inst = FakeInstanceWithProps()
     # No model attribute
     am._on_trigger(inst, "a1", {"severity": "warning", "triggerMessage": "hot"})

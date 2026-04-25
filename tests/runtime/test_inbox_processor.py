@@ -3,8 +3,8 @@ import asyncio
 import pytest
 
 from src.runtime.event_bus import EventBus
-from src.runtime.message_hub import MessageHub
-from src.runtime.stores.sqlite_message_store import SQLiteMessageStore
+from src.runtime.messaging import MessageEnvelope, MessageHub, WorldEventEmitter, WorldMessageIngress
+from src.runtime.messaging.sqlite_store import SQLiteMessageStore
 
 
 @pytest.fixture
@@ -29,9 +29,17 @@ async def test_inbox_processor_injects_events_into_event_bus(msg_store):
     )
 
     hub = MessageHub(msg_store, channel=None)
-    hub.register_world("world-1", bus, {"order.created": {"external": True}})
+    hub.register_world("world-1", WorldMessageIngress(WorldEventEmitter(bus)))
 
-    msg_store.inbox_enqueue("order.created", {"id": "123"}, "ext-1", "world", None)
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-1",
+            world_id="world-1",
+            event_type="order.created",
+            payload={"id": "123"},
+            source="ext-1",
+        )
+    )
 
     await hub.start()
     try:
@@ -59,9 +67,17 @@ async def test_inbox_processor_no_outbox_loop(msg_store):
     )
 
     hub = MessageHub(msg_store, channel=None)
-    hub.register_world("world-1", bus, {"order.created": {"external": True}})
+    hub.register_world("world-1", WorldMessageIngress(WorldEventEmitter(bus)))
 
-    msg_store.inbox_enqueue("order.created", {"id": "456"}, "ext-1", "world", None)
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-2",
+            world_id="world-1",
+            event_type="order.created",
+            payload={"id": "456"},
+            source="ext-1",
+        )
+    )
 
     await hub.start()
     try:
@@ -95,10 +111,17 @@ async def test_inbox_processor_target_routing(msg_store):
     )
 
     hub = MessageHub(msg_store, channel=None)
-    hub.register_world("world-1", bus, {"notify.alert": {"external": True}})
+    hub.register_world("world-1", WorldMessageIngress(WorldEventEmitter(bus)))
 
-    msg_store.inbox_enqueue(
-        "notify.alert", {"level": "high"}, "ext-1", "world", "inst-target"
+    hub.on_inbound(
+        MessageEnvelope(
+            message_id="msg-3",
+            world_id="world-1",
+            event_type="notify.alert",
+            payload={"level": "high"},
+            source="ext-1",
+            target="inst-target",
+        )
     )
 
     await hub.start()

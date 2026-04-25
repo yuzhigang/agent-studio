@@ -22,6 +22,7 @@ class StateManager:
         scene_store,
         event_log_store,
         metric_store=None,
+        world_event_emitter=None,
     ):
         self._im = instance_manager
         self._sm = scene_manager
@@ -29,6 +30,7 @@ class StateManager:
         self._scene_store = scene_store
         self._event_log_store = event_log_store
         self._metric_store = metric_store
+        self._event_emitter = world_event_emitter
         self._loaded_worlds: set[str] = set()
         self._loaded_lock = threading.Lock()
         self._world_locks: dict[str, threading.Lock] = {}
@@ -107,11 +109,16 @@ class StateManager:
                 last_event_id = ps.get("last_event_id")
 
         events = self._event_log_store.replay_after(world_id, last_event_id)
-        bus = None
-        if self._im._bus_reg is not None:
-            bus = self._im._bus_reg.get_or_create(world_id)
         for evt in events:
-            if bus is not None:
+            if self._event_emitter is not None:
+                self._event_emitter.publish_internal(
+                    event_type=evt["event_type"],
+                    payload=evt["payload"],
+                    source=evt["source"],
+                    scope=evt["scope"],
+                )
+            elif self._im._bus_reg is not None:
+                bus = self._im._bus_reg.get_or_create(world_id)
                 bus.publish(
                     evt["event_type"],
                     evt["payload"],

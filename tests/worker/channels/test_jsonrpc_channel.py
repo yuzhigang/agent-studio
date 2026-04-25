@@ -4,18 +4,18 @@ import json
 import pytest
 import websockets
 
+from src.runtime.messaging import MessageEnvelope, SendResult
 from src.worker.channels.jsonrpc_channel import JsonRpcChannel
-from src.runtime.messaging import SendResult
 
 
 @pytest.mark.anyio
-async def test_jsonrpc_channel_send_success():
-    received_messages = []
+async def test_jsonrpc_channel_send_uses_message_envelope():
+    received = []
 
     async def handler(websocket):
         async for message in websocket:
             data = json.loads(message)
-            received_messages.append(data)
+            received.append(data)
             if "id" in data:
                 response = {"jsonrpc": "2.0", "id": data["id"], "result": {"acked": True}}
                 await websocket.send(json.dumps(response))
@@ -25,18 +25,28 @@ async def test_jsonrpc_channel_send_success():
     url = f"ws://127.0.0.1:{port}"
 
     channel = JsonRpcChannel(url)
-    await channel.start(lambda *args: None)
+    await channel.start(lambda envelope: None)
     for _ in range(50):
         if channel.is_ready():
             break
         await asyncio.sleep(0.05)
     assert channel.is_ready()
 
-    result = await channel.send("order.shipped", {"id": "1"}, "inst-1", "world", None)
+    result = await channel.send(
+        MessageEnvelope(
+            message_id="msg-1",
+            world_id="factory-b",
+            event_type="order.created",
+            payload={"order_id": "O1"},
+            source="world:factory-a",
+        )
+    )
     assert result == SendResult.SUCCESS
-    assert len(received_messages) == 1
-    assert received_messages[0]["method"] == "messageHub.publish"
-    assert received_messages[0]["params"]["event_type"] == "order.shipped"
+    assert len(received) == 1
+    assert received[0]["method"] == "messageHub.publish"
+    assert received[0]["params"]["message_id"] == "msg-1"
+    assert received[0]["params"]["world_id"] == "factory-b"
+    assert received[0]["params"]["event_type"] == "order.created"
 
     await channel.stop()
     server.close()
@@ -47,13 +57,21 @@ async def test_jsonrpc_channel_send_success():
 async def test_jsonrpc_channel_send_retryable_when_not_ready():
     channel = JsonRpcChannel("ws://127.0.0.1:1")
     # Do not start
-    result = await channel.send("order.shipped", {"id": "1"}, "inst-1", "world", None)
+    result = await channel.send(
+        MessageEnvelope(
+            message_id="msg-2",
+            world_id="factory-b",
+            event_type="order.created",
+            payload={"order_id": "O2"},
+            source="world:factory-a",
+        )
+    )
     assert result == SendResult.RETRYABLE
 
 
 @pytest.mark.anyio
 async def test_jsonrpc_channel_receives_external_event():
-    inbound_events = []
+    inbound_events: list[MessageEnvelope] = []
 
     async def handler(websocket):
         await asyncio.sleep(0.2)
@@ -61,11 +79,15 @@ async def test_jsonrpc_channel_receives_external_event():
             "jsonrpc": "2.0",
             "method": "notify.externalEvent",
             "params": {
+                "message_id": "msg-3",
+                "world_id": "factory-a",
                 "event_type": "ext.event",
                 "payload": {"val": 42},
                 "source": "supervisor",
                 "scope": "world",
                 "target": None,
+                "trace_id": "trace-1",
+                "headers": {"x-origin": "test"},
             },
         }
         await websocket.send(json.dumps(notification))
@@ -75,7 +97,7 @@ async def test_jsonrpc_channel_receives_external_event():
     url = f"ws://127.0.0.1:{port}"
 
     channel = JsonRpcChannel(url)
-    await channel.start(lambda et, pl, src, sc, tgt: inbound_events.append((et, pl, src, sc, tgt)))
+    await channel.start(lambda envelope: inbound_events.append(envelope))
 
     for _ in range(50):
         if len(inbound_events) > 0:
@@ -87,4 +109,14 @@ async def test_jsonrpc_channel_receives_external_event():
     await server.wait_closed()
 
     assert len(inbound_events) == 1
-    assert inbound_events[0] == ("ext.event", {"val": 42}, "supervisor", "world", None)
+    assert inbound_events[0] == MessageEnvelope(
+        message_id="msg-3",
+        world_id="factory-a",
+        event_type="ext.event",
+        payload={"val": 42},
+        source="supervisor",
+        scope="world",
+        target=None,
+        trace_id="trace-1",
+        headers={"x-origin": "test"},
+    )

@@ -6,9 +6,8 @@ import sys
 import uuid
 from datetime import datetime, timezone
 
-from src.runtime.message_hub import MessageHub
+from src.runtime.messaging import MessageEnvelope
 from src.runtime.world_registry import WorldRegistry
-from src.runtime.stores.sqlite_message_store import SQLiteMessageStore
 from src.worker.channels.jsonrpc_channel import JsonRpcChannel
 from src.worker.manager import WorkerManager
 from src.worker.server.jsonrpc_ws import JsonRpcConnection, JsonRpcError
@@ -28,14 +27,8 @@ def run_world(base_dir, supervisor_ws=None, ws_port=None, force_stop_on_shutdown
 
     # Create worker-level MessageHub and register all worlds
     worker_dir = os.path.join(os.path.expanduser("~"), ".agent-studio", "workers", str(os.getpid()))
-    msg_store = SQLiteMessageStore(worker_dir)
     channel = JsonRpcChannel(supervisor_ws) if supervisor_ws else None
-    message_hub = MessageHub(msg_store, channel)
-
-    for world_id, bundle in worker_manager.worlds.items():
-        bus = bundle["event_bus_registry"].get_or_create(world_id)
-        message_hub.register_world(world_id, bus, bundle.get("model_events", {}))
-        bundle["message_hub"] = message_hub
+    message_hub = worker_manager.build_message_hub(worker_dir=worker_dir, channel=channel)
 
     # Start shared scenes for all loaded worlds
     for bundle in worker_manager.worlds.values():
@@ -55,7 +48,7 @@ def run_world(base_dir, supervisor_ws=None, ws_port=None, force_stop_on_shutdown
     async def _shutdown_all():
         for world_id in list(worker_manager.worlds.keys()):
             try:
-                await worker_manager.handle_command("world.stop", {"world_id": world_id})
+                await worker_manager.handle_command("world.remove", {"world_id": world_id})
             except JsonRpcError as e:
                 print(f"Shutdown aborted for {world_id}: {e.message}")
                 return
@@ -103,16 +96,7 @@ def run_world(base_dir, supervisor_ws=None, ws_port=None, force_stop_on_shutdown
 
 
 def _start_shared_scenes(bundle):
-    store = bundle["store"]
-    sm = bundle["scene_manager"]
-    world_id = bundle["world_id"]
-    scenes = store.list_scenes(world_id)
-    for scene_data in scenes:
-        if scene_data.get("mode") == "shared":
-            scene_id = scene_data["scene_id"]
-            refs = scene_data.get("refs", [])
-            local_instances = scene_data.get("local_instances", {})
-            sm.start(world_id, scene_id, mode="shared", references=refs, local_instances=local_instances)
+    WorkerManager._start_shared_scenes_for_bundle(bundle)
 
 
 def _graceful_shutdown(bundle, force_stop_on_shutdown=None):
@@ -136,17 +120,9 @@ def _graceful_shutdown(bundle, force_stop_on_shutdown=None):
     for scene in shared_scenes:
         sm.stop(world_id, scene["scene_id"])
 
-    # 3. Stop MessageHub
     message_hub = bundle.get("message_hub")
     if message_hub is not None:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.run_coroutine_threadsafe(message_hub.stop(), loop)
-            else:
-                loop.run_until_complete(message_hub.stop())
-        except Exception:
-            pass
+        message_hub.unregister_world(world_id, permanent=True)
 
     # 4. Untrack and checkpoint
     state_mgr.untrack_world(world_id)
@@ -272,7 +248,7 @@ async def _send_heartbeats(ws, conn, worker_manager):
             for world_id, bundle in worker_manager.worlds.items():
                 sm = bundle["scene_manager"]
                 worlds_status[world_id] = {
-                    "status": "loaded",
+                    "status": bundle.get("runtime_status", "running"),
                     "scene_count": len(sm.list_by_world(world_id)),
                     "instance_count": len(bundle["instance_manager"].list_by_world(world_id)),
                     "isolated_scenes": [
@@ -297,6 +273,9 @@ def _register_worker_handlers(conn: JsonRpcConnection, worker_manager):
     async def world_stop(params, req_id):
         return await worker_manager.handle_command("world.stop", params)
 
+    async def world_remove(params, req_id):
+        return await worker_manager.handle_command("world.remove", params)
+
     async def world_checkpoint(params, req_id):
         return await worker_manager.handle_command("world.checkpoint", params)
 
@@ -316,6 +295,7 @@ def _register_worker_handlers(conn: JsonRpcConnection, worker_manager):
         return await worker_manager.handle_command("messageHub.publishBatch", params)
 
     conn.register("world.stop", world_stop)
+    conn.register("world.remove", world_remove)
     conn.register("world.checkpoint", world_checkpoint)
     conn.register("world.getStatus", world_get_status)
     conn.register("scene.start", scene_start)
@@ -333,6 +313,13 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
     state_mgr = bundle["state_manager"]
 
     async def world_stop(params, req_id):
+        bundle["runtime_status"] = "stopped"
+        message_hub = bundle.get("message_hub")
+        if message_hub is not None:
+            message_hub.unregister_world(world_id)
+        return {"status": "stopped"}
+
+    async def world_remove(params, req_id):
         _graceful_shutdown(bundle)
         return {"status": "stopped"}
 
@@ -346,6 +333,7 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
         return {
             "world_id": world_id,
             "loaded": True,
+            "status": bundle.get("runtime_status", "running"),
             "scenes": [s["scene_id"] for s in sm.list_by_world(world_id)],
         }
 
@@ -372,12 +360,18 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
         hub = bundle.get("message_hub")
         if hub is None:
             raise JsonRpcError(-32102, "message hub not initialized")
-        hub.on_channel_message(
-            params.get("event_type", ""),
-            params.get("payload", {}),
-            params.get("source", ""),
-            params.get("scope", "world"),
-            params.get("target"),
+        hub.on_inbound(
+            MessageEnvelope(
+                message_id=params.get("message_id") or params.get("id") or str(uuid.uuid4()),
+                world_id=params.get("world_id", world_id),
+                event_type=params.get("event_type", ""),
+                payload=params.get("payload", {}),
+                source=params.get("source"),
+                scope=params.get("scope", "world"),
+                target=params.get("target"),
+                trace_id=params.get("trace_id"),
+                headers=params.get("headers") or {},
+            )
         )
         return {"acked": True}
 
@@ -387,16 +381,28 @@ def _register_runtime_handlers(conn: JsonRpcConnection, bundle: dict):
             raise JsonRpcError(-32102, "message hub not initialized")
         records = params.get("records", [])
         for record in records:
-            hub.on_channel_message(
-                record.get("event_type", ""),
-                record.get("payload", {}),
-                record.get("source", ""),
-                record.get("scope", "world"),
-                record.get("target"),
+            hub.on_inbound(
+                MessageEnvelope(
+                    message_id=record.get("message_id") or record.get("id") or str(uuid.uuid4()),
+                    world_id=record.get("world_id", params.get("world_id", world_id)),
+                    event_type=record.get("event_type", ""),
+                    payload=record.get("payload", {}),
+                    source=record.get("source"),
+                    scope=record.get("scope", "world"),
+                    target=record.get("target"),
+                    trace_id=record.get("trace_id"),
+                    headers=record.get("headers") or {},
+                )
             )
-        return {"acked_ids": [r.get("id") for r in records]}
+        return {
+            "acked_ids": [
+                record.get("message_id") or record.get("id")
+                for record in records
+            ]
+        }
 
     conn.register("world.stop", world_stop)
+    conn.register("world.remove", world_remove)
     conn.register("world.checkpoint", world_checkpoint)
     conn.register("world.getStatus", world_get_status)
     conn.register("scene.start", scene_start)

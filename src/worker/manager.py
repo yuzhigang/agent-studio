@@ -3,6 +3,8 @@ import os
 import uuid
 from datetime import datetime
 
+from src.runtime.messaging import MessageEnvelope, MessageHub
+from src.runtime.messaging.sqlite_store import SQLiteMessageStore
 from src.worker.server.jsonrpc_ws import JsonRpcError
 from src.runtime.world_registry import WorldRegistry
 
@@ -25,6 +27,7 @@ class WorkerManager:
         self.worlds: dict[str, dict] = {}  # world_id -> bundle
         self._heartbeat_task: asyncio.Task | None = None
         self._base_dir: str | None = None
+        self._message_hub: MessageHub | None = None
 
     def load_worlds(self, base_dir: str) -> list[str]:
         """Load all worlds found under base_dir and persist worker_id."""
@@ -72,23 +75,64 @@ class WorkerManager:
             if state_mgr is not None and state_mgr._task is None:
                 await state_mgr.start_async()
 
+    def build_message_hub(self, worker_dir: str, channel) -> MessageHub:
+        if self._message_hub is None:
+            store = SQLiteMessageStore(worker_dir)
+            self._message_hub = MessageHub(store, channel, poll_interval=0.05)
+        elif channel is not None and self._message_hub._channel is not channel:
+            raise RuntimeError("MessageHub already exists with a different channel binding")
+
+        for world_id, bundle in self.worlds.items():
+            self._bind_world_bundle(world_id, bundle)
+
+        return self._message_hub
+
+    def _bind_world_bundle(self, world_id: str, bundle: dict) -> None:
+        if self._message_hub is None:
+            return
+        receiver = bundle.get("message_receiver")
+        if receiver is not None:
+            self._message_hub.register_world(world_id, receiver)
+        sender = bundle.get("message_sender")
+        if sender is not None:
+            sender.bind_hub(self._message_hub)
+        bundle["message_hub"] = self._message_hub
+
+    @staticmethod
+    def _message_envelope_from_params(
+        params: dict,
+        *,
+        default_world_id: str | None = None,
+    ) -> MessageEnvelope:
+        world_id = params.get("world_id", default_world_id)
+        if not world_id:
+            raise JsonRpcError(-32602, "world_id required")
+        return MessageEnvelope(
+            message_id=params.get("message_id") or params.get("id") or str(uuid.uuid4()),
+            world_id=world_id,
+            event_type=params.get("event_type", ""),
+            payload=params.get("payload", {}),
+            source=params.get("source"),
+            scope=params.get("scope", "world"),
+            target=params.get("target"),
+            trace_id=params.get("trace_id"),
+            headers=params.get("headers") or {},
+        )
+
     def unload_world(self, world_id: str) -> bool:
         """Unload a single world and clean up resources."""
         bundle = self.worlds.pop(world_id, None)
         if bundle is None:
             return False
 
-        # Stop MessageHub if present
-        message_hub = bundle.get("message_hub")
-        if message_hub is not None:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(message_hub.stop(), loop)
-                else:
-                    loop.run_until_complete(message_hub.stop())
-            except Exception:
-                pass
+        if self._message_hub is not None:
+            self._message_hub.unregister_world(world_id, permanent=True)
+
+        registry = bundle.get("_registry")
+        if registry is not None:
+            loaded_bundle = registry.get_loaded_world(world_id)
+            if loaded_bundle is not None:
+                return registry.unload_world(world_id)
 
         state_mgr = bundle["state_manager"]
         state_mgr.untrack_world(world_id)
@@ -105,6 +149,27 @@ class WorkerManager:
 
         return True
 
+    @staticmethod
+    def _start_shared_scenes_for_bundle(bundle: dict) -> None:
+        store = bundle["store"]
+        sm = bundle["scene_manager"]
+        world_id = bundle["world_id"]
+        scenes = store.list_scenes(world_id)
+        for scene_data in scenes:
+            if scene_data.get("mode") == "shared":
+                scene_id = scene_data["scene_id"]
+                if sm.get(world_id, scene_id) is not None:
+                    continue
+                refs = scene_data.get("refs", [])
+                local_instances = scene_data.get("local_instances", {})
+                sm.start(
+                    world_id,
+                    scene_id,
+                    mode="shared",
+                    references=refs,
+                    local_instances=local_instances,
+                )
+
     async def handle_command(self, method: str, params: dict) -> dict:
         """Handle a command from Supervisor asynchronously.
 
@@ -119,9 +184,24 @@ class WorkerManager:
             if bundle is None:
                 raise JsonRpcError(-32004, f"World {world_id} not loaded")
             force = params.get("force_stop_on_shutdown")
-            await self._graceful_shutdown(bundle, force_stop_on_shutdown=force)
-            self.worlds.pop(world_id, None)
+            await self._graceful_shutdown(
+                bundle,
+                force_stop_on_shutdown=force,
+                permanent=False,
+            )
             return {"status": "stopped"}
+
+        if method == "world.remove":
+            if bundle is None:
+                raise JsonRpcError(-32004, f"World {world_id} not loaded")
+            force = params.get("force_stop_on_shutdown")
+            await self._graceful_shutdown(
+                bundle,
+                force_stop_on_shutdown=force,
+                permanent=True,
+            )
+            self.worlds.pop(world_id, None)
+            return {"status": "removed"}
 
         if method == "world.checkpoint":
             if bundle is None:
@@ -135,10 +215,21 @@ class WorkerManager:
             return {
                 "world_id": world_id,
                 "loaded": True,
+                "status": bundle.get("runtime_status", "running"),
                 "scenes": [s["scene_id"] for s in bundle["scene_manager"].list_by_world(world_id)],
             }
 
         if method == "world.start":
+            if bundle is not None:
+                if bundle.get("runtime_status", "running") == "running":
+                    return {"status": "already_running"}
+                self._bind_world_bundle(world_id, bundle)
+                self._start_shared_scenes_for_bundle(bundle)
+                state_mgr = bundle.get("state_manager")
+                if state_mgr is not None and state_mgr._task is None:
+                    await state_mgr.start_async()
+                bundle["runtime_status"] = "running"
+                return {"status": "started"}
             world_dir = params.get("world_dir")
             if world_dir is None:
                 raise JsonRpcError(-32602, "world_dir required for world.start")
@@ -146,6 +237,12 @@ class WorkerManager:
             registry = WorldRegistry(base_dir=base_dir)
             new_bundle = await asyncio.to_thread(registry.load_world, world_id)
             self.worlds[world_id] = new_bundle
+            self._bind_world_bundle(world_id, new_bundle)
+            self._start_shared_scenes_for_bundle(new_bundle)
+            state_mgr = new_bundle.get("state_manager")
+            if state_mgr is not None and state_mgr._task is None:
+                await state_mgr.start_async()
+            new_bundle["runtime_status"] = "running"
             return {"status": "started"}
 
         if method == "world.reload":
@@ -177,40 +274,40 @@ class WorkerManager:
             return {"status": "stopped"}
 
         if method == "messageHub.publish":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            hub = bundle.get("message_hub")
+            hub = self._message_hub
             if hub is None:
                 raise JsonRpcError(-32102, "message hub not initialized")
-            hub.on_channel_message(
-                params.get("event_type", ""),
-                params.get("payload", {}),
-                params.get("source", ""),
-                params.get("scope", "world"),
-                params.get("target"),
-            )
+            hub.on_inbound(self._message_envelope_from_params(params))
             return {"acked": True}
 
         if method == "messageHub.publishBatch":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            hub = bundle.get("message_hub")
+            hub = self._message_hub
             if hub is None:
                 raise JsonRpcError(-32102, "message hub not initialized")
             records = params.get("records", [])
             for record in records:
-                hub.on_channel_message(
-                    record.get("event_type", ""),
-                    record.get("payload", {}),
-                    record.get("source", ""),
-                    record.get("scope", "world"),
-                    record.get("target"),
+                hub.on_inbound(
+                    self._message_envelope_from_params(
+                        record,
+                        default_world_id=params.get("world_id"),
+                    )
                 )
-            return {"acked_ids": [r.get("id") for r in records]}
+            return {
+                "acked_ids": [
+                    record.get("message_id") or record.get("id")
+                    for record in records
+                ]
+            }
 
         raise JsonRpcError(-32601, f"Unknown method: {method}")
 
-    async def _graceful_shutdown(self, bundle: dict, force_stop_on_shutdown: bool | None = None) -> None:
+    async def _graceful_shutdown(
+        self,
+        bundle: dict,
+        force_stop_on_shutdown: bool | None = None,
+        *,
+        permanent: bool = False,
+    ) -> None:
         world_id = bundle["world_id"]
         sm = bundle["scene_manager"]
         state_mgr = bundle["state_manager"]
@@ -231,18 +328,15 @@ class WorkerManager:
         for scene in shared_scenes:
             await asyncio.to_thread(sm.stop, world_id, scene["scene_id"])
 
-        # 3. Stop MessageHub (already async, await directly)
-        message_hub = bundle.get("message_hub")
-        if message_hub is not None:
-            try:
-                await message_hub.stop()
-            except Exception:
-                pass
+        if self._message_hub is not None:
+            self._message_hub.unregister_world(world_id, permanent=permanent)
 
-        # 4. Untrack and checkpoint
+        # 3. Untrack and checkpoint
         state_mgr.untrack_world(world_id)
         await asyncio.to_thread(state_mgr.checkpoint_world, world_id)
+        state_mgr.shutdown()
+        bundle["runtime_status"] = "stopped"
 
-        # 5. Unload world and release file lock
-        if registry is not None:
+        # 4. Unload world and release file lock
+        if permanent and registry is not None:
             await asyncio.to_thread(registry.unload_world, world_id)

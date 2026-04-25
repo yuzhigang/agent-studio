@@ -106,6 +106,7 @@ class InstanceManager:
         model_loader: Callable[[str], dict | None] | None = None,
         sandbox_executor: SandboxExecutor | None = None,
         world_state=None,
+        world_event_emitter=None,
         trigger_registry=None,
         alarm_manager=None,
     ):
@@ -116,6 +117,7 @@ class InstanceManager:
         self._model_loader = model_loader
         self._sandbox = sandbox_executor or SandboxExecutor()
         self._world_state = world_state
+        self._event_emitter = world_event_emitter
         self._trigger_registry = trigger_registry
         self._alarm_manager = alarm_manager
 
@@ -132,8 +134,23 @@ class InstanceManager:
             bus = self._bus_reg.get_or_create(instance.world_id)
 
         def dispatch(event_type: str, payload_dict: dict, target: str | None = None):
-            if bus is not None:
-                bus.publish(event_type, payload_dict, source=instance.id, scope=instance.scope, target=target)
+            if self._event_emitter is not None:
+                self._event_emitter.publish_from_instance(
+                    world_id=instance.world_id,
+                    source_instance_id=instance.id,
+                    scope=instance.scope,
+                    event_type=event_type,
+                    payload=payload_dict,
+                    target=target,
+                )
+            elif bus is not None:
+                bus.publish(
+                    event_type,
+                    payload_dict,
+                    source=instance.id,
+                    scope=instance.scope,
+                    target=target,
+                )
 
         world_state = {}
         if self._world_state is not None:
@@ -207,9 +224,30 @@ class InstanceManager:
                         evaluated[k] = v
                 else:
                     evaluated[k] = v
-            dispatch_fn = context.get("dispatch")
-            if dispatch_fn and event_name:
-                dispatch_fn(event_name, evaluated)
+            if action.get("external") is True:
+                if self._event_emitter is None:
+                    raise RuntimeError("External triggerEvent requires a configured WorldEventEmitter")
+                target_world_id = action.get("targetWorldId")
+                if not target_world_id:
+                    raise ValueError("External triggerEvent requires targetWorldId")
+                if isinstance(target_world_id, str):
+                    try:
+                        target_world_id = self._sandbox.execute(f"result = {target_world_id}", context)
+                    except Exception:
+                        pass
+                self._event_emitter.publish_external(
+                    target_world_id=target_world_id,
+                    event_type=event_name,
+                    payload=evaluated,
+                    scope=action.get("scope", instance.scope),
+                    target=action.get("target"),
+                    trace_id=action.get("traceId"),
+                    headers=action.get("headers"),
+                )
+            else:
+                dispatch_fn = context.get("dispatch")
+                if dispatch_fn and event_name:
+                    dispatch_fn(event_name, evaluated)
 
     def _execute_actions(self, instance: Instance, actions: list, payload: dict, source: str) -> None:
         changed_fields = []

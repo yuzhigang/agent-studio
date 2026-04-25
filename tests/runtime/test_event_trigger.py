@@ -111,3 +111,35 @@ def test_event_trigger_removes_only_same_instance():
     assert len(calls_a) == 0
     assert len(calls_b) == 1
     assert calls_b[0] is inst_b
+
+
+def test_event_trigger_unregistered_does_not_remove_other_behaviors():
+    """Unregistering one behavior must not affect other behaviors on the same instance."""
+    bus_reg = EventBusRegistry()
+    bus = bus_reg.get_or_create("w1")
+    et = EventTrigger(bus_reg)
+
+    calls_start = []
+    calls_stop = []
+    inst = {"id": "i1", "world_id": "w1", "scope": "world"}
+    entry_start = TriggerEntry(inst, {"type": "event", "name": "start"}, lambda i, **kw: calls_start.append(i), "b_start")
+    entry_stop = TriggerEntry(inst, {"type": "event", "name": "stop"}, lambda i, **kw: calls_stop.append(i), "b_stop")
+    et.on_registered(entry_start)
+    et.on_registered(entry_stop)
+
+    # Both handlers active
+    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("stop", {}, source="ext", scope="world")
+    assert len(calls_start) == 1
+    assert len(calls_stop) == 1
+
+    # Unregister only the "start" behavior
+    et.on_unregistered(entry_start)
+
+    # "stop" behavior must still receive events
+    calls_start.clear()
+    calls_stop.clear()
+    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("stop", {}, source="ext", scope="world")
+    assert len(calls_start) == 0
+    assert len(calls_stop) == 1

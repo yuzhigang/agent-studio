@@ -127,7 +127,7 @@ def test_unload_world_releases_lock(registry):
     registry.unload_world("world-a")
 
 
-def test_load_world_wires_world_state_and_pre_publish_hook(registry):
+def test_load_world_wires_world_state_and_event_emitter(registry):
     registry.create_world("ladle-proj")
 
     bundle = registry.load_world("ladle-proj")
@@ -149,10 +149,16 @@ def test_load_world_wires_world_state_and_pre_publish_hook(registry):
     # snapshot should already be computed by InstanceManager.create
     assert inst.snapshot["temperature"] == 1500
 
-    # Publish an event from the instance and verify pre_publish_hook updates snapshot
-    bus = bundle["event_bus_registry"].get_or_create("ladle-proj")
+    # Publish an event through the emitter and verify it updates the source snapshot first.
+    emitter = bundle["event_emitter"]
     inst.variables["temperature"] = 1600
-    bus.publish("heat", {}, source="ladle-001", scope="world")
+    emitter.publish_from_instance(
+        world_id="ladle-proj",
+        source_instance_id="ladle-001",
+        scope="world",
+        event_type="heat",
+        payload={},
+    )
     assert inst.snapshot["temperature"] == 1600
 
     # Verify WorldState snapshot structure

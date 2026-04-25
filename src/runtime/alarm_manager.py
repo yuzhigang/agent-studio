@@ -16,9 +16,9 @@ class AlarmState:
 
 
 class AlarmManager:
-    def __init__(self, trigger_registry, event_bus, store=None):
+    def __init__(self, trigger_registry, event_emitter, store=None):
         self._trigger_registry = trigger_registry
-        self._event_bus = event_bus
+        self._event_emitter = event_emitter
         self._store = store
         self._states: dict[tuple[str, str, str], AlarmState] = {}
         self._trigger_ids: dict[tuple[str, str, str], list[str]] = {}
@@ -86,8 +86,14 @@ class AlarmManager:
             "triggerCount": state.trigger_count,
             "repeated": repeated,
         }
-        if self._event_bus is not None:
-            self._event_bus.publish("alarmTriggered", payload, source=instance.instance_id, scope="world")
+        if self._event_emitter is not None:
+            self._event_emitter.publish_from_instance(
+                world_id=instance.world_id,
+                source_instance_id=instance.instance_id,
+                scope="world",
+                event_type="alarmTriggered",
+                payload=payload,
+            )
 
     def _notify_clear(self, state: AlarmState, config: dict, instance) -> None:
         message = self._interpolate_message(config.get("clearMessage", ""), instance)
@@ -102,8 +108,14 @@ class AlarmManager:
             "worldId": instance.world_id,
             "timestamp": state.cleared_at,
         }
-        if self._event_bus is not None:
-            self._event_bus.publish("alarmCleared", payload, source=instance.instance_id, scope="world")
+        if self._event_emitter is not None:
+            self._event_emitter.publish_from_instance(
+                world_id=instance.world_id,
+                source_instance_id=instance.instance_id,
+                scope="world",
+                event_type="alarmCleared",
+                payload=payload,
+            )
 
     def _on_trigger(self, instance, alarm_id: str, config: dict) -> None:
         state = self._get_state(instance, alarm_id)

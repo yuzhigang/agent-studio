@@ -5,9 +5,27 @@ from typing import Callable
 
 import websockets
 
+from src.runtime.messaging import MessageEnvelope, SendResult
 from src.worker.channels.base import Channel
-from src.runtime.messaging import SendResult
 from src.worker.server.jsonrpc_ws import JsonRpcConnection
+
+
+# RPC error codes that indicate a permanent (non-retryable) failure.
+_PERMANENT_RPC_CODES = frozenset({
+    -32600,  # Invalid Request
+    -32601,  # Method not found
+    -32602,  # Invalid params
+    -32004,  # World not loaded
+    -32102,  # Message hub not initialized
+})
+
+
+class ChannelError(RuntimeError):
+    """Transient channel failure (retryable)."""
+
+
+class PermanentChannelError(RuntimeError):
+    """Permanent channel failure (should not be retried)."""
 
 
 class JsonRpcChannel(Channel):
@@ -22,7 +40,7 @@ class JsonRpcChannel(Channel):
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
 
-    async def start(self, inbound_callback: Callable[[str, dict, str, str, str | None], None]) -> None:
+    async def start(self, inbound_callback: Callable[[MessageEnvelope], None]) -> None:
         self._inbound_callback = inbound_callback
         self._stop_event.clear()
         self._task = asyncio.create_task(self._connect_loop())
@@ -45,14 +63,7 @@ class JsonRpcChannel(Channel):
     def is_ready(self) -> bool:
         return self._ready
 
-    async def send(
-        self,
-        event_type: str,
-        payload: dict,
-        source: str,
-        scope: str,
-        target: str | None,
-    ) -> SendResult:
+    async def send(self, envelope: MessageEnvelope) -> SendResult:
         if not self._ready or self._conn is None:
             return SendResult.RETRYABLE
         req_id = str(uuid.uuid4())
@@ -61,16 +72,28 @@ class JsonRpcChannel(Channel):
             "id": req_id,
             "method": "messageHub.publish",
             "params": {
-                "event_type": event_type,
-                "payload": payload,
-                "source": source,
-                "scope": scope,
-                "target": target,
+                "message_id": envelope.message_id,
+                "world_id": envelope.world_id,
+                "event_type": envelope.event_type,
+                "payload": envelope.payload,
+                "source": envelope.source,
+                "scope": envelope.scope,
+                "target": envelope.target,
+                "trace_id": envelope.trace_id,
+                "headers": envelope.headers,
             },
         }
         try:
             result = await self._send_and_wait(req_id, message)
-            return SendResult.SUCCESS if result else SendResult.RETRYABLE
+            return (
+                SendResult.SUCCESS
+                if isinstance(result, dict) and result.get("acked") is True
+                else SendResult.RETRYABLE
+            )
+        except PermanentChannelError:
+            return SendResult.PERMANENT
+        except ChannelError:
+            return SendResult.RETRYABLE
         except Exception:
             return SendResult.RETRYABLE
 
@@ -110,27 +133,32 @@ class JsonRpcChannel(Channel):
         async def on_external_event(params, _req_id):
             if self._inbound_callback is not None:
                 self._inbound_callback(
-                    params.get("event_type", ""),
-                    params.get("payload", {}),
-                    params.get("source", ""),
-                    params.get("scope", "world"),
-                    params.get("target"),
+                    MessageEnvelope(
+                        message_id=params["message_id"],
+                        world_id=params["world_id"],
+                        event_type=params["event_type"],
+                        payload=params.get("payload", {}),
+                        source=params.get("source"),
+                        scope=params.get("scope", "world"),
+                        target=params.get("target"),
+                        trace_id=params.get("trace_id"),
+                        headers=params.get("headers") or {},
+                    )
                 )
 
         if self._conn is not None:
             self._conn.register("notify.externalEvent", on_external_event)
 
-    async def _send_and_wait(self, req_id: str, message: dict) -> bool:
+    async def _send_and_wait(self, req_id: str, message: dict) -> dict:
         if self._conn is None:
-            return False
+            raise ChannelError("connection not ready")
         fut = asyncio.get_running_loop().create_future()
         self._pending_requests[req_id] = fut
         try:
             await self._conn.send(message)
-            result = await asyncio.wait_for(fut, timeout=5.0)
-            return isinstance(result, dict) and result.get("acked") is True
-        except Exception:
-            return False
+            return await asyncio.wait_for(fut, timeout=5.0)
+        except asyncio.TimeoutError:
+            raise ChannelError("timeout waiting for response")
         finally:
             self._pending_requests.pop(req_id, None)
 
@@ -143,6 +171,13 @@ class JsonRpcChannel(Channel):
             result = data.get("result", {})
             error = data.get("error")
             if error is not None:
-                fut.set_exception(Exception(error.get("message", "rpc error")))
+                code = error.get("code", 0)
+                msg = error.get("message", "rpc error")
+                exc_cls = (
+                    PermanentChannelError
+                    if code in _PERMANENT_RPC_CODES
+                    else ChannelError
+                )
+                fut.set_exception(exc_cls(f"RPC error {code}: {msg}"))
             else:
                 fut.set_result(result)

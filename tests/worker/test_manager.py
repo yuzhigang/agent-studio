@@ -1,9 +1,25 @@
 import os
+import sys
 import tempfile
+import types
 
 import pytest
 
+from src.runtime.messaging import MessageEnvelope
 from src.runtime.world_registry import WorldRegistry
+
+if "websockets" not in sys.modules:
+    websockets_module = types.ModuleType("websockets")
+    protocol_module = types.ModuleType("websockets.protocol")
+
+    class _State:
+        OPEN = "OPEN"
+
+    protocol_module.State = _State
+    websockets_module.protocol = protocol_module
+    sys.modules["websockets"] = websockets_module
+    sys.modules["websockets.protocol"] = protocol_module
+
 from src.worker.manager import WorkerManager
 
 
@@ -43,7 +59,48 @@ async def test_worker_manager_handle_command_world_stop():
 
         result = await wm.handle_command("world.stop", {"world_id": "factory-01"})
         assert result["status"] == "stopped"
+        assert "factory-01" in wm.worlds
+        assert wm.worlds["factory-01"]["runtime_status"] == "stopped"
+
+        restart = await wm.handle_command(
+            "world.start",
+            {"world_id": "factory-01", "world_dir": f"{tmp}/factory-01"},
+        )
+        assert restart["status"] == "started"
+        assert wm.worlds["factory-01"]["runtime_status"] == "running"
+
+        removed = await wm.handle_command("world.remove", {"world_id": "factory-01"})
+        assert removed["status"] == "removed"
         assert "factory-01" not in wm.worlds
+
+
+@pytest.mark.anyio
+async def test_unload_world_marks_pending_deliveries_dead_when_world_is_removed():
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = WorldRegistry(base_dir=tmp)
+        reg.create_world("factory-01")
+
+        wm = WorkerManager(worker_id="wk-1")
+        wm.load_worlds(tmp)
+        hub = wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=None)
+        hub.on_inbound(
+            MessageEnvelope(
+                message_id="msg-1",
+                world_id="factory-01",
+                event_type="order.created",
+                payload={"order_id": "O1001"},
+            )
+        )
+        hub._store.inbox_create_deliveries("msg-1", ["factory-01"])
+        hub._store.inbox_mark_expanded("msg-1")
+
+        assert wm.unload_world("factory-01") is True
+
+        row = hub._store._conn.execute(
+            "SELECT status, last_error FROM inbox_deliveries WHERE message_id = ? AND target_world_id = ?",
+            ("msg-1", "factory-01"),
+        ).fetchone()
+        assert row == ("dead", "world permanently removed")
 
 
 @pytest.mark.anyio
@@ -60,6 +117,36 @@ async def test_worker_manager_handle_command_world_checkpoint():
 
         # cleanup
         wm.unload_world("world-a")
+
+
+@pytest.mark.anyio
+async def test_worker_manager_world_start_registers_receiver_and_sender():
+    with tempfile.TemporaryDirectory() as tmp:
+        wm = WorkerManager(worker_id="wk-1")
+        wm.load_worlds(tmp)
+        hub = wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=None)
+
+        reg = WorldRegistry(base_dir=tmp)
+        reg.create_world("factory-01")
+
+        result = await wm.handle_command(
+            "world.start",
+            {"world_id": "factory-01", "world_dir": f"{tmp}/factory-01"},
+        )
+
+        assert result["status"] == "started"
+        assert "factory-01" in hub.registered_worlds()
+        assert wm.worlds["factory-01"]["message_receiver"] is not None
+        assert wm.worlds["factory-01"]["message_sender"] is not None
+        assert wm.worlds["factory-01"]["state_manager"]._task is not None
+
+        stop_result = await wm.handle_command("world.stop", {"world_id": "factory-01"})
+        assert stop_result["status"] == "stopped"
+        assert "factory-01" in wm.worlds
+
+        remove_result = await wm.handle_command("world.remove", {"world_id": "factory-01"})
+        assert remove_result["status"] == "removed"
+        assert "factory-01" not in wm.worlds
 
 
 def test_worker_manager_handle_command_unknown_world():
@@ -99,8 +186,42 @@ async def test_worker_manager_handle_command_world_get_status():
         result = await wm.handle_command("world.getStatus", {"world_id": "world-a"})
         assert result["loaded"] is True
         assert result["world_id"] == "world-a"
+        assert result["status"] == "running"
 
-        wm.unload_world("world-a")
+        await wm.handle_command("world.stop", {"world_id": "world-a"})
+        stopped = await wm.handle_command("world.getStatus", {"world_id": "world-a"})
+        assert stopped["status"] == "stopped"
+
+        await wm.handle_command("world.remove", {"world_id": "world-a"})
+
+
+def test_build_message_hub_rejects_conflicting_channel_binding():
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = WorldRegistry(base_dir=tmp)
+        reg.create_world("factory-01")
+
+        wm = WorkerManager(worker_id="wk-1")
+        wm.load_worlds(tmp)
+
+        class _ChannelA:
+            async def start(self, callback):
+                return None
+
+            async def stop(self):
+                return None
+
+            async def send(self, envelope):
+                return None
+
+            def is_ready(self):
+                return True
+
+        class _ChannelB(_ChannelA):
+            pass
+
+        wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=_ChannelA())
+        with pytest.raises(RuntimeError, match="different channel binding"):
+            wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=_ChannelB())
 
 
 @pytest.mark.anyio
@@ -114,18 +235,27 @@ async def test_worker_manager_handle_command_message_hub_publish():
         wm.load_worlds(tmp)
 
         # Create a minimal message_hub mock
-        class _MockHub:
-            def on_channel_message(self, event_type, payload, source, scope, target):
-                pass
+        seen: list[MessageEnvelope] = []
 
-        wm.worlds["factory-01"]["message_hub"] = _MockHub()
+        class _MockHub:
+            def on_inbound(self, envelope: MessageEnvelope):
+                seen.append(envelope)
+
+            def unregister_world(self, world_id: str, *, permanent: bool = False):
+                return None
+
+        wm._message_hub = _MockHub()
 
         result = await wm.handle_command("messageHub.publish", {
+            "message_id": "msg-1",
             "world_id": "factory-01",
             "event_type": "test.event",
             "payload": {},
         })
         assert result["acked"] is True
+        assert seen[0].message_id == "msg-1"
+        assert seen[0].world_id == "factory-01"
+        assert seen[0].event_type == "test.event"
 
         wm.unload_world("factory-01")
 
@@ -143,19 +273,21 @@ async def test_worker_manager_handle_command_message_hub_publish_batch():
         seen_events = []
 
         class _MockHub:
-            def on_channel_message(self, event_type, payload, source, scope, target):
-                seen_events.append(event_type)
+            def on_inbound(self, envelope: MessageEnvelope):
+                seen_events.append((envelope.message_id, envelope.event_type, envelope.world_id))
 
-        wm.worlds["factory-01"]["message_hub"] = _MockHub()
+            def unregister_world(self, world_id: str, *, permanent: bool = False):
+                return None
+
+        wm._message_hub = _MockHub()
 
         result = await wm.handle_command("messageHub.publishBatch", {
-            "world_id": "factory-01",
             "records": [
-                {"id": "r1", "event_type": "e1", "payload": {}},
-                {"id": "r2", "event_type": "e2", "payload": {}},
+                {"message_id": "r1", "world_id": "factory-01", "event_type": "e1", "payload": {}},
+                {"message_id": "r2", "world_id": "*", "event_type": "e2", "payload": {}},
             ],
         })
         assert result["acked_ids"] == ["r1", "r2"]
-        assert seen_events == ["e1", "e2"]
+        assert seen_events == [("r1", "e1", "factory-01"), ("r2", "e2", "*")]
 
         wm.unload_world("factory-01")
