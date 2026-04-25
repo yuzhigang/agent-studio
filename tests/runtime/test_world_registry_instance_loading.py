@@ -107,6 +107,15 @@ def test_load_world_uses_global_model_when_not_in_world(registry_with_globals, t
             "counter": {"type": "number", "default": 0},
         },
     })
+    libs_dir = global_models_dir / "shared-agent" / "libs"
+    os.makedirs(libs_dir, exist_ok=True)
+    with open(libs_dir / "planner.py", "w", encoding="utf-8") as f:
+        f.write(
+            "from src.runtime.lib.decorator import lib_function\n"
+            "@lib_function()\n"
+            "def get_plan(args):\n"
+            "    return {'plan': 'ok'}\n"
+        )
 
     # Write an instance declaration in the world referencing the global model
     instances_dir = os.path.join(world_dir, "agents", "shared-agent", "instances")
@@ -124,6 +133,7 @@ def test_load_world_uses_global_model_when_not_in_world(registry_with_globals, t
     assert inst.model_name == "shared-agent"
     assert inst._agent_namespace == "shared-agent"
     assert inst.variables["counter"] == 42
+    assert bundle["lib_registry"].lookup("shared-agent", "planner", "get_plan")({}) == {"plan": "ok"}
 
 
 def test_load_world_uses_group_agent_path_as_default_lib_namespace(registry):

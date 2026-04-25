@@ -23,6 +23,24 @@ def test_registry_scan_uses_group_agent_namespace(registry: LibRegistry):
     assert func({"text": "hello"}) == {"text": "HELLO"}
 
 
+def test_registry_scan_uses_single_agent_namespace(tmp_path):
+    agents_dir = tmp_path / "agents"
+    libs_dir = agents_dir / "sensor" / "libs"
+    libs_dir.mkdir(parents=True)
+    (libs_dir / "tools.py").write_text(
+        "from src.runtime.lib.decorator import lib_function\n"
+        "@lib_function()\n"
+        "def calibrate(args):\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+
+    registry = LibRegistry()
+    registry.scan(str(agents_dir))
+
+    assert registry.lookup("sensor", "tools", "calibrate")({}) == {"ok": True}
+
+
 def test_registry_lookup_old_namespace_missing(registry: LibRegistry):
     agents_dir = os.path.join(FIXTURES, "agents")
     registry.scan(agents_dir)

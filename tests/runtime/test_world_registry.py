@@ -197,3 +197,28 @@ def test_load_world_scans_world_agents_for_libs(registry):
 
     func = bundle["lib_registry"].lookup("logistics.ladle", "dispatcher", "get_candidates")
     assert func({}) == {"candidates": []}
+
+
+def test_scene_local_instance_inherits_resolved_agent_namespace(registry):
+    registry.create_world("test-world")
+    world_dir = os.path.join(registry._base_dir, "test-world")
+
+    model_dir = os.path.join(world_dir, "agents", "logistics", "ladle", "model")
+    os.makedirs(model_dir, exist_ok=True)
+    with open(os.path.join(model_dir, "index.yaml"), "w", encoding="utf-8") as f:
+        f.write("metadata: {name: Ladle}\n")
+
+    bundle = registry.load_world("test-world")
+    scene = bundle["scene_manager"].start(
+        "test-world",
+        "scene-1",
+        mode="isolated",
+        local_instances={"ladle-local-01": {"modelName": "ladle"}},
+    )
+
+    inst = bundle["instance_manager"].get("test-world", "ladle-local-01", scope="scene:scene-1")
+    assert scene["local_instances"]["ladle-local-01"] == "ladle-local-01"
+    assert inst is not None
+    assert inst._agent_namespace == "logistics.ladle"
+
+    registry.unload_world("test-world")

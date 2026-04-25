@@ -1,8 +1,10 @@
 import logging
 import os
+from pathlib import Path
 
 import yaml
 
+from src.runtime.agent_namespace import agent_namespace_for_path
 from src.runtime.instance_loader import InstanceLoader
 from src.runtime.lib.registry import LibRegistry
 from src.runtime.lib.sandbox import SandboxExecutor
@@ -90,11 +92,23 @@ class WorldRegistry:
             world_state = WorldState(None, world_id)
 
             resolver = ModelResolver(world_dir, self._global_model_paths)
+            world_agents_dir = Path(world_dir) / "agents"
 
             def model_loader(model_id: str) -> dict | None:
                 model_dir = resolver.resolve(model_id)
                 if model_dir is not None:
                     return ModelLoader.load(model_dir.parent)
+                return None
+
+            def agent_namespace_resolver(model_id: str) -> str | None:
+                model_dir = resolver.resolve(model_id)
+                if model_dir is None:
+                    return None
+                scan_roots = [world_agents_dir, *[Path(p) for p in self._global_model_paths]]
+                for root in scan_roots:
+                    namespace = agent_namespace_for_path(model_dir, root, "model")
+                    if namespace is not None:
+                        return namespace
                 return None
 
             trigger_registry = TriggerRegistry()
@@ -103,13 +117,20 @@ class WorldRegistry:
 
             bus = bus_reg.get_or_create(world_id)
             lib_registry = LibRegistry()
-            lib_registry.scan(os.path.join(world_dir, "agents"))
+            global_roots = [Path(path) for path in self._global_model_paths]
+            first_scan = True
+            for root in [*global_roots, world_agents_dir]:
+                if not root.exists():
+                    continue
+                lib_registry.scan(str(root), clear=first_scan)
+                first_scan = False
             sandbox_executor = SandboxExecutor(registry=lib_registry)
 
             im = InstanceManager(
                 bus_reg,
                 instance_store=store,
                 model_loader=model_loader,
+                agent_namespace_resolver=agent_namespace_resolver,
                 sandbox_executor=sandbox_executor,
                 world_state=world_state,
                 world_event_emitter=None,

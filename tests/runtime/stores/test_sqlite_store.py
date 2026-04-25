@@ -64,6 +64,7 @@ def test_delete_scene(store):
 def test_save_and_load_instance(store):
     store.save_instance("world-01", "inst-1", "world", {
         "model_name": "ladle",
+        "agent_namespace": "logistics.ladle",
         "model_version": "1.0",
         "attributes": {"capacity": 200},
         "state": {"current": "idle"},
@@ -77,6 +78,7 @@ def test_save_and_load_instance(store):
     inst = store.load_instance("world-01", "inst-1", "world")
     assert inst is not None
     assert inst["model_name"] == "ladle"
+    assert inst["agent_namespace"] == "logistics.ladle"
     assert inst["model_version"] == "1.0"
     assert inst["attributes"]["capacity"] == 200
     assert inst["lifecycle_state"] == "active"

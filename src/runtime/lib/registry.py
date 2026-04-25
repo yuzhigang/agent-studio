@@ -6,6 +6,7 @@ import threading
 import types
 from pathlib import Path
 
+from src.runtime.agent_namespace import agent_namespace_for_path
 from src.runtime.lib.exceptions import LibNotFoundError, LibRegistrationError
 
 
@@ -30,7 +31,7 @@ class LibRegistry:
     def _init(self):
         self._registry = {}
         self._rlock = threading.RLock()
-        self._agents_root: Path | None = None
+        self._agents_roots: list[Path] = []
         self._loaded_modules: set[str] = set()
         self._module_keys: dict[str, set[str]] = {}
 
@@ -51,34 +52,27 @@ class LibRegistry:
                 sys.modules.pop(mod_name, None)
             self._loaded_modules.clear()
 
-    def scan(self, agents_root: str):
+    def scan(self, agents_root: str, *, clear: bool = True):
         agents_path = Path(agents_root)
         if not agents_path.exists():
             return
-        self._agents_root = agents_path
 
         with self._rlock:
-            self._registry.clear()
-            self._module_keys.clear()
-            # Handle shared libs directly
-            shared_libs = agents_path / "shared" / "libs"
-            if shared_libs.exists():
-                for py_file in shared_libs.glob("*.py"):
-                    self._load_module("shared", py_file)
+            if clear:
+                self._registry.clear()
+                self._module_keys.clear()
+                self._agents_roots = []
+            if agents_path not in self._agents_roots:
+                self._agents_roots.append(agents_path)
 
-            # Handle grouped agents: agents/<group>/<agent>/libs/
-            for group_dir in agents_path.iterdir():
-                if not group_dir.is_dir() or group_dir.name == "shared":
+            for libs_dir in agents_path.rglob("libs"):
+                if not libs_dir.is_dir():
                     continue
-                for agent_dir in group_dir.iterdir():
-                    if not agent_dir.is_dir():
-                        continue
-                    libs_dir = agent_dir / "libs"
-                    if not libs_dir.exists():
-                        continue
-                    namespace = f"{group_dir.name}.{agent_dir.name}"
-                    for py_file in libs_dir.glob("*.py"):
-                        self._load_module(namespace, py_file)
+                namespace = agent_namespace_for_path(libs_dir, agents_path, "libs")
+                if namespace is None:
+                    continue
+                for py_file in libs_dir.glob("*.py"):
+                    self._load_module(namespace, py_file)
 
     def _exec_module(self, namespace: str, py_file: Path):
         module_name = f"_lib_registry_{namespace}_{py_file.stem}"
@@ -145,20 +139,15 @@ class LibRegistry:
 
     def reload_module(self, py_file_path: str):
         py_file = Path(py_file_path)
-        if self._agents_root is None:
+        if not self._agents_roots:
             return
-        try:
-            rel = py_file.relative_to(self._agents_root)
-        except ValueError:
+        namespace = None
+        for agents_root in self._agents_roots:
+            namespace = agent_namespace_for_path(py_file, agents_root, "libs")
+            if namespace is not None:
+                break
+        if namespace is None:
             return
-        parts = rel.parts
-        # Expected: shared/libs/file.py OR <group>/<agent>/libs/file.py
-        if len(parts) < 3 or (parts[1] != "libs" and parts[2] != "libs"):
-            return
-        if parts[0] == "shared" and parts[1] == "libs":
-            namespace = "shared"
-        else:
-            namespace = f"{parts[0]}.{parts[1]}"  # group.agent
 
         with self._rlock:
             old_keys = self._module_keys.pop(self._module_key(py_file), set())

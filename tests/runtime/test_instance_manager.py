@@ -128,6 +128,7 @@ def test_lazy_load_from_store():
                 "instance_id": instance_id,
                 "scope": scope,
                 "model_name": "ladle",
+                "agent_namespace": None,
                 "model_version": "1.0",
                 "attributes": {"capacity": 200},
                 "state": {"current": "idle"},
@@ -140,10 +141,14 @@ def test_lazy_load_from_store():
             }
 
     store = FakeStore()
-    mgr = InstanceManager(instance_store=store)
+    mgr = InstanceManager(
+        instance_store=store,
+        agent_namespace_resolver=lambda model_name: "logistics.ladle" if model_name == "ladle" else None,
+    )
     inst = mgr.get("world-01", "ladle-001", scope="world")
     assert inst is not None
     assert inst.model_name == "ladle"
+    assert inst._agent_namespace == "logistics.ladle"
     assert inst.attributes["capacity"] == 200
 
 

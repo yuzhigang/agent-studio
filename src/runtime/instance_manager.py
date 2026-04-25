@@ -104,6 +104,7 @@ class InstanceManager:
         event_bus_registry=None,
         instance_store=None,
         model_loader: Callable[[str], dict | None] | None = None,
+        agent_namespace_resolver: Callable[[str], str | None] | None = None,
         sandbox_executor: SandboxExecutor | None = None,
         world_state=None,
         world_event_emitter=None,
@@ -115,6 +116,7 @@ class InstanceManager:
         self._bus_reg = event_bus_registry
         self._store = instance_store
         self._model_loader = model_loader
+        self._agent_namespace_resolver = agent_namespace_resolver
         self._sandbox = sandbox_executor or SandboxExecutor()
         self._world_state = world_state
         self._event_emitter = world_event_emitter
@@ -348,6 +350,7 @@ class InstanceManager:
     def build_persist_dict(self, inst: Instance) -> dict:
         return {
             "model_name": inst.model_name,
+            "agent_namespace": inst._agent_namespace,
             "model_version": inst.model_version,
             "attributes": inst.attributes or {},
             "state": inst.state or {"current": None, "enteredAt": None},
@@ -389,6 +392,8 @@ class InstanceManager:
         links = links or {}
         memory = memory or {}
         state = state or {"current": None, "enteredAt": None}
+        if agent_namespace is None and self._agent_namespace_resolver is not None:
+            agent_namespace = self._agent_namespace_resolver(model_name)
         inst = Instance(
             instance_id=instance_id,
             model_name=model_name,
@@ -444,6 +449,8 @@ class InstanceManager:
             model_name=snapshot["model_name"],
             world_id=snapshot["world_id"],
             scope=snapshot["scope"],
+            _agent_namespace=snapshot.get("agent_namespace")
+            or (self._agent_namespace_resolver(snapshot["model_name"]) if self._agent_namespace_resolver else None),
             model_version=snapshot.get("model_version"),
             attributes=copy.deepcopy(snapshot.get("attributes", {})),
             variables=copy.deepcopy(snapshot.get("variables", {})),

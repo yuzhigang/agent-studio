@@ -48,6 +48,16 @@ def test_scan_includes_source_file():
         assert os.path.exists(r["_source_file"])
 
 
+def test_scan_infers_agent_namespace_for_single_and_grouped_agents():
+    world_dir = os.path.join(WORLDS, "steel-plant-01")
+    results = InstanceLoader.scan(world_dir)
+    by_id = {r["id"]: r for r in results}
+
+    assert by_id["ladle-01"]["_agent_namespace"] == "logistics.ladle"
+    assert by_id["ladle-02"]["_agent_namespace"] == "logistics.ladle"
+    assert by_id["mp-01"]["_agent_namespace"] == "roles.master-planner"
+
+
 def test_scan_skips_non_instance_yaml():
     world_dir = os.path.join(os.path.dirname(__file__), "..", "fixtures", "agents_with_config")
     instances_dir = os.path.join(world_dir, "agents", "some_agent", "instances")

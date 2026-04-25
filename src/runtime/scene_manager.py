@@ -95,6 +95,7 @@ class SceneManager:
                 model_name=local_spec["modelName"],
                 instance_id=local_id,
                 scope=f"scene:{scene_id}",
+                agent_namespace=local_spec.get("agentNamespace"),
                 variables=copy.deepcopy(local_spec.get("variables", {})),
             )
             scene["local_instances"][local_id] = local_inst.id

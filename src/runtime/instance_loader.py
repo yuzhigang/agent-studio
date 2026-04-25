@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import yaml
+from src.runtime.agent_namespace import agent_namespace_for_path
 
 
 class InstanceLoader:
@@ -10,17 +11,7 @@ class InstanceLoader:
 
     @staticmethod
     def _agent_namespace_for(file_path: Path, agents_dir: Path) -> str | None:
-        try:
-            rel = file_path.relative_to(agents_dir)
-        except ValueError:
-            return None
-
-        # agents/<group>/<agent>/instances/*.instance.yaml -> group.agent
-        # agents/<agent>/instances/*.instance.yaml -> agent
-        agent_parts = rel.parts[:-2]
-        if not agent_parts:
-            return None
-        return ".".join(agent_parts)
+        return agent_namespace_for_path(file_path, agents_dir, "instances")
 
     @staticmethod
     def scan(world_dir: str) -> list[dict]:
