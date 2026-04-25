@@ -11,9 +11,10 @@ def test_decorator_attaches_metadata():
     assert get_candidates._lib_meta["entrypoint"] == "get_candidates"
 
 def test_decorator_defaults():
-    @lib_function(name="doWork", namespace="shared")
+    @lib_function()
     def do_work(args: dict) -> dict:
         return {}
 
-    assert do_work._lib_meta["name"] == "doWork"
-    assert do_work._lib_meta["namespace"] == "shared"
+    assert do_work._lib_meta["name"] is None
+    assert do_work._lib_meta["namespace"] is None
+    assert do_work._lib_meta["entrypoint"] == "do_work"

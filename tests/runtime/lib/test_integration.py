@@ -14,7 +14,7 @@ def test_full_dsl_run_script(registry: LibRegistry):
     proxy = LibProxy(default_namespace="logistics.ladle", registry=registry)
 
     script = """
-result = lib.dispatcher.getCandidates({'converterId': args['converterId']})
+result = lib.dispatcher.get_candidates({'converterId': args['converterId']})
 """
     executor = SandboxExecutor()
     result = executor.execute(script, {
@@ -47,7 +47,7 @@ def test_shared_modules_can_be_imported_in_sandbox(registry: LibRegistry):
 
     script = """
 import api
-result = api.httpGet({'url': 'https://example.com'})
+result = api.http_get({'url': 'https://example.com'})
 """
     executor = SandboxExecutor(registry=registry)
     result = executor.execute(script, {})
@@ -81,7 +81,7 @@ def test_ladle_dispatcher_get_candidates(registry: LibRegistry):
     proxy = LibProxy(default_namespace="roles.ladle_dispatcher", registry=registry)
 
     script = """
-result = lib.ladle.getCandidates({
+result = lib.ladle.get_candidates({
     'grade': 'Q235B',
     'heat_id': 'H2025041401',
     'order_id': 'ORD-001',

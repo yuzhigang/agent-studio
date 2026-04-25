@@ -10,7 +10,7 @@ class ApiClient:
         self.base_url = "https://api.example.com"
         self.timeout = 30
 
-    @lib_function(name="echo", namespace="shared")
+    @lib_function()
     def echo(self, args: dict) -> dict:
         return {"message": args.get("message", "")}
 
@@ -79,6 +79,6 @@ class ApiClient:
                 "error": str(e),
             }
 
-    @lib_function(name="httpGet", namespace="shared")
+    @lib_function()
     def http_get(self, args: dict) -> dict:
         return self._http_request("GET", args)

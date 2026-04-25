@@ -102,7 +102,8 @@ class LibRegistry:
                         f"{py_file}",
                         details=f"namespace mismatch: declared '{declared_ns}' but file is under '{namespace}'"
                     )
-                key = f"{namespace}.{py_file.stem}.{meta['name']}"
+                func_name = meta["name"] or meta["entrypoint"]
+                key = f"{namespace}.{py_file.stem}.{func_name}"
                 self._registry[key] = meta["func"]
                 continue
 
@@ -130,7 +131,8 @@ class LibRegistry:
                             )
                         class_instances[attr_name] = instance
                     bound = getattr(instance, method_name)
-                    key = f"{namespace}.{py_file.stem}.{meta['name']}"
+                    func_name = meta["name"] or meta["entrypoint"]
+                    key = f"{namespace}.{py_file.stem}.{func_name}"
                     self._registry[key] = bound
 
     def _load_module(self, namespace: str, py_file: Path):

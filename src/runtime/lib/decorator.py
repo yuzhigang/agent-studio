@@ -1,4 +1,4 @@
-def lib_function(*, name: str, namespace: str | None = None):
+def lib_function(*, name: str | None = None, namespace: str | None = None):
     def decorator(func):
         func._lib_meta = {
             "name": name,
