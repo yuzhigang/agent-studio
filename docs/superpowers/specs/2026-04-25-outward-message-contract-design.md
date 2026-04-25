@@ -353,7 +353,7 @@ class MessageEnvelope:
 ## 11. 兼容性策略
 
 - 旧字段 `world_id` 视为待迁移字段，不再作为新契约继续扩展。
-- 旧 action 字段 `targetWorldId` 进入弃用路径，迁移期内可以保留兼容读取，但新实现和新文档不再使用。
+- 旧 action 字段 `targetWorldId` 直接删除，不提供兼容读取层。
 - 所有新测试、新 fixture、新 spec 必须使用：
   - `source_world`
   - `target_world`
