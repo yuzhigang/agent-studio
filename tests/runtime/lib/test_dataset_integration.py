@@ -60,19 +60,19 @@ def mock_adapter_registry():
 
 
 class MockDao:
-    @lib_function(name="getItems", namespace="test")
+    @lib_function(name="getItems", module="dao")
     def get_items(self, args):
         cfg = self._context["this"].bindings.items
         ds = Dataset(cfg)
         return ds.query(args.get("filters", {}), args.get("limit", 50))
 
-    @lib_function(name="getItem", namespace="test")
+    @lib_function(name="getItem", module="dao")
     def get_item(self, args):
         cfg = self._context["this"].bindings.items
         ds = Dataset(cfg)
         return ds.get(args.get("id"))
 
-    @lib_function(name="createItem", namespace="test")
+    @lib_function(name="createItem", module="dao")
     def create_item(self, args):
         cfg = self._context["this"].bindings.items
         ds = Dataset(cfg)

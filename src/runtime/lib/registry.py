@@ -96,14 +96,9 @@ class LibRegistry:
             # 1) 模块级函数
             meta = getattr(obj, "_lib_meta", None)
             if meta is not None:
-                declared_ns = meta["namespace"] or namespace
-                if declared_ns != namespace:
-                    raise LibRegistrationError(
-                        f"{py_file}",
-                        details=f"namespace mismatch: declared '{declared_ns}' but file is under '{namespace}'"
-                    )
                 func_name = meta["name"] or meta["entrypoint"]
-                key = f"{namespace}.{py_file.stem}.{func_name}"
+                mod_name = meta["module"] or py_file.stem
+                key = f"{namespace}.{mod_name}.{func_name}"
                 self._registry[key] = meta["func"]
                 continue
 
@@ -114,12 +109,6 @@ class LibRegistry:
                     meta = getattr(method, "_lib_meta", None)
                     if meta is None:
                         continue
-                    declared_ns = meta["namespace"] or namespace
-                    if declared_ns != namespace:
-                        raise LibRegistrationError(
-                            f"{py_file}",
-                            details=f"namespace mismatch: declared '{declared_ns}' but file is under '{namespace}'"
-                        )
                     instance = class_instances.get(attr_name)
                     if instance is None:
                         try:
@@ -132,7 +121,8 @@ class LibRegistry:
                         class_instances[attr_name] = instance
                     bound = getattr(instance, method_name)
                     func_name = meta["name"] or meta["entrypoint"]
-                    key = f"{namespace}.{py_file.stem}.{func_name}"
+                    mod_name = meta["module"] or py_file.stem
+                    key = f"{namespace}.{mod_name}.{func_name}"
                     self._registry[key] = bound
 
     def _load_module(self, namespace: str, py_file: Path):

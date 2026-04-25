@@ -17,7 +17,7 @@ def test_watcher_detects_file_change():
         with open(py_path, "w", encoding="utf-8") as f:
             f.write('''
 from src.runtime.lib.decorator import lib_function
-@lib_function(name="demo", namespace="group.ladle")
+@lib_function(name="demo")
 def demo(args: dict) -> dict:
     return {"version": 1}
 ''')
@@ -35,7 +35,7 @@ def demo(args: dict) -> dict:
         with open(py_path, "w", encoding="utf-8") as f:
             f.write('''
 from src.runtime.lib.decorator import lib_function
-@lib_function(name="demo", namespace="group.ladle")
+@lib_function(name="demo")
 def demo(args: dict) -> dict:
     return {"version": 2}
 ''')

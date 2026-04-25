@@ -1,13 +1,13 @@
 from src.runtime.lib.decorator import lib_function
 
 def test_decorator_attaches_metadata():
-    @lib_function(name="getCandidates", namespace="ladle")
+    @lib_function(name="getCandidates", module="dispatcher")
     def get_candidates(args: dict) -> dict:
         return {"ok": True}
 
     assert hasattr(get_candidates, "_lib_meta")
     assert get_candidates._lib_meta["name"] == "getCandidates"
-    assert get_candidates._lib_meta["namespace"] == "ladle"
+    assert get_candidates._lib_meta["module"] == "dispatcher"
     assert get_candidates._lib_meta["entrypoint"] == "get_candidates"
 
 def test_decorator_defaults():
@@ -16,5 +16,5 @@ def test_decorator_defaults():
         return {}
 
     assert do_work._lib_meta["name"] is None
-    assert do_work._lib_meta["namespace"] is None
+    assert do_work._lib_meta["module"] is None
     assert do_work._lib_meta["entrypoint"] == "do_work"
