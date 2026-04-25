@@ -97,7 +97,7 @@ class MessageEnvelope:
   - 该消息要进入哪个 world。
   - 定向投递时为具体 world id。
   - 广播时为 `"*"`。
-  - 对于普通 outward publish，可为空。
+  - 为空时表示不触发任何 world 路由处理。
 
 - `event_type`
   - 事件类型。
@@ -148,13 +148,19 @@ class MessageEnvelope:
 - `target_world = null`
 - `source = 当前 instance.id` 或调用上下文来源
 
+其中 `target_world = null` 的含义是：
+
+- 该消息只是被发布到外部消息平面；
+- 默认不触发任何 worker 级 world 路由处理；
+- 只有后续某个接入方重新写入了明确的 `target_world`，它才会再次进入某个 world。
+
 ### 6.2 Inbound
 
 外部消息要进入某个 world 时，必须显式带 `target_world`：
 
 - `target_world = "factory-a"`：定向投递到 `factory-a`
 - `target_world = "*"`：广播给当前 worker 上所有已注册 world
-- `target_world = null`：不进入 world，worker 不做猜测式投递
+- `target_world = null`：默认不进行任何处理，不进入 world，worker 不做猜测式投递
 
 `InboxProcessor` 只基于 `target_world` 决定 worker 级路由。
 
