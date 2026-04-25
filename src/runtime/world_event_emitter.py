@@ -40,8 +40,16 @@ class WorldEventEmitter:
         source: str,
         scope: str,
         target: str | None = None,
+        raise_on_error: bool = False,
     ) -> None:
-        self._bus.publish(event_type, payload, source, scope, target)
+        self._bus.publish(
+            event_type,
+            payload,
+            source,
+            scope,
+            target,
+            raise_on_error=raise_on_error,
+        )
 
     def publish_external(
         self,

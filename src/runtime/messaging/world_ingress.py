@@ -13,4 +13,5 @@ class WorldMessageIngress(WorldMessageReceiver):
             source=envelope.source or "external",
             scope=envelope.scope,
             target=envelope.target,
+            raise_on_error=True,
         )

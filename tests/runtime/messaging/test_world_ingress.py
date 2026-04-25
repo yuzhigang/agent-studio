@@ -61,3 +61,39 @@ async def test_world_ingress_uses_same_task_context_as_caller():
     )
 
     assert emitter.task_ids == [caller_task_id]
+
+
+@pytest.mark.anyio
+async def test_world_ingress_uses_strict_internal_delivery():
+    class _Emitter:
+        def __init__(self):
+            self.calls = []
+
+        def publish_internal(self, **kwargs):
+            self.calls.append(kwargs)
+            raise RuntimeError("boom")
+
+    emitter = _Emitter()
+    adapter = WorldMessageIngress(emitter)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await adapter.receive(
+            MessageEnvelope(
+                message_id="msg-3",
+                world_id="factory-a",
+                event_type="order.created",
+                payload={"order_id": "O1003"},
+                source="erp",
+            )
+        )
+
+    assert emitter.calls == [
+        {
+            "event_type": "order.created",
+            "payload": {"order_id": "O1003"},
+            "source": "erp",
+            "scope": "world",
+            "target": None,
+            "raise_on_error": True,
+        }
+    ]

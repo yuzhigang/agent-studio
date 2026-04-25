@@ -35,6 +35,7 @@ class EventBus:
         source: str,
         scope: str,
         target: str | None = None,
+        raise_on_error: bool = False,
     ):
         with self._lock:
             handlers = list(self._subscribers.get(event_type, []))
@@ -46,6 +47,8 @@ class EventBus:
             try:
                 handler(event_type, payload, source)
             except Exception:
+                if raise_on_error:
+                    raise
                 logger.exception("Handler failed for instance %s on event %s", instance_id, event_type)
 
     def _scope_matches(self, msg_scope: str, inst_scope: str) -> bool:

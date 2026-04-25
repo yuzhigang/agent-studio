@@ -1,3 +1,5 @@
+import pytest
+
 from src.runtime.event_bus import EventBus, EventBusRegistry
 
 
@@ -68,3 +70,15 @@ def test_handler_failure_does_not_interrupt_other_subscribers():
     bus.publish("test.event", {}, "src-1", "world")
 
     assert hits == [("test.event", "src-1")]
+
+
+def test_publish_raise_on_error_propagates_handler_failure():
+    bus = EventBus()
+
+    def buggy_handler(event_type, payload, source):
+        raise RuntimeError("boom")
+
+    bus.register("inst-buggy", "world", "test.event", buggy_handler)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        bus.publish("test.event", {}, "src-1", "world", raise_on_error=True)
