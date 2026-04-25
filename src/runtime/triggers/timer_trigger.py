@@ -68,8 +68,9 @@ class TimerScheduler:
                         break
 
                     wait_seconds = (next_time - datetime.now()).total_seconds()
-                    if wait_seconds > 0:
-                        await asyncio.sleep(wait_seconds)
+                    if wait_seconds <= 0:
+                        wait_seconds = 0.001
+                    await asyncio.sleep(wait_seconds)
 
                     if timer_id not in self._tasks:
                         return
@@ -147,6 +148,10 @@ class TimerTrigger(Trigger):
             cron_expr = trigger.get("cron")
             if not cron_expr:
                 raise ValueError("cron trigger requires a 'cron' expression")
+            try:
+                croniter(cron_expr)
+            except (ValueError, KeyError) as exc:
+                raise ValueError(f"Invalid cron expression: {cron_expr}") from exc
             count = trigger.get("count", -1)
             timer_id = self._scheduler.schedule_cron(
                 cron_expr,
