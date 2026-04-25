@@ -7,7 +7,7 @@ Agent Studio 脚本库运行时。
 ```python
 from runtime.lib import lib_function, LibRegistry, LibProxy, SandboxExecutor
 
-@lib_function(name="hello", namespace="shared", readonly=True)
+@lib_function(name="hello", namespace="shared")
 def hello(args: dict) -> dict:
     return {"msg": f"Hello, {args.get('name', 'world')}!"}
 

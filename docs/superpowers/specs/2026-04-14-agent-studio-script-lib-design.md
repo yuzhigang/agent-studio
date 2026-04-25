@@ -30,35 +30,36 @@
 
 ```
 agents/
-├── ladle/
-│   ├── model.json
+├── shared/
 │   └── libs/
-│       ├── dispatcher.py
-│       └── validator.py
-├── converter/
-│   ├── model.json
-│   └── libs/
-│       └── planner.py
-└── shared/
-    └── libs/
-        ├── data_adapter.py
-        └── common_utils.py
+│       ├── data_adapter.py
+│       └── common_utils.py
+├── logistics/
+│   └── ladle/
+│       ├── model.json
+│       └── libs/
+│           ├── dispatcher.py
+│           └── validator.py
+└── machines/
+    └── converter/
+        ├── model.json
+│       └── libs/
+            └── planner.py
 ```
 
-- 每个 `agents/<model>/libs/` 目录注册为 `lib.<model>` 命名空间
+- 每个 `agents/<group>/<model>/libs/` 目录注册为 `lib.<group>.<model>` 命名空间
 - `agents/shared/libs/` 目录注册为 `lib.shared` 命名空间
 
 ### 3.2 装饰器与注册机制
 
-脚本函数统一使用 `@lib_function` 装饰器声明元数据，启动时自动扫描注册。`readonly` 参数用于标记该函数是否承诺为纯计算函数。`namespace` 为必填字段，用于校验脚本所在目录与声明的命名空间是否一致；若不一致，注册时抛出 `LibRegistrationError`。
+脚本函数统一使用 `@lib_function` 装饰器声明元数据，启动时自动扫描注册。`namespace` 为必填字段，用于校验脚本所在目录与声明的命名空间是否一致；若不一致，注册时抛出 `LibRegistrationError`。
 
 ```python
 from runtime.lib import lib_function
 
 @lib_function(
     name="getCandidates",
-    namespace="ladle",
-    readonly=True,
+    namespace="logistics.ladle",
 )
 def get_candidates(args: dict) -> dict:
     """
@@ -71,8 +72,7 @@ def get_candidates(args: dict) -> dict:
 
 @lib_function(
     name="loadSteel",
-    namespace="ladle",
-    readonly=False,
+    namespace="logistics.ladle",
 )
 def load_steel(args: dict) -> dict:
     """
@@ -91,7 +91,7 @@ def load_steel(args: dict) -> dict:
 LibRegistry.scan("agents/")
 ```
 
-扫描器递归遍历所有 `agents/<namespace>/libs/` 和 `agents/shared/libs/` 下的 `.py` 文件，import 模块，收集所有带 `@lib_function` 装饰器的函数，建立映射表：
+扫描器递归遍历所有 `agents/<group>/<agent>/libs/` 和 `agents/shared/libs/` 下的 `.py` 文件，import 模块，收集所有带 `@lib_function` 装饰器的函数，建立映射表：
 
 ```
 ladle.dispatcher.getCandidates -> <function>
@@ -134,7 +134,7 @@ lib.dispatcher.getCandidates(args)
 lib.ladle.dispatcher.getCandidates(args)
 ```
 
-**注意**：`agents/<model>/libs/` 下的 Python 脚本内部，函数之间直接通过普通 Python `import` 调用即可，不经过 `lib` 代理对象解析。
+**注意**：`agents/<group>/<model>/libs/` 下的 Python 脚本内部，函数之间直接通过普通 Python `import` 调用即可，不经过 `lib` 代理对象解析。
 
 公共库和跨 scope 调用必须显式写出完整路径：
 
@@ -263,10 +263,10 @@ avg_temp = statistics.mean([l['temperature'] for l in ladles])
 ### 4.6 纯脚本函数示例
 
 ```python
-# agents/ladle/libs/dispatcher.py
+# agents/logistics/ladle/libs/dispatcher.py
 from runtime.lib import lib_function
 
-@lib_function(name="getCandidates", namespace="ladle", readonly=True)
+@lib_function(name="getCandidates", namespace="logistics.ladle")
 def get_candidates(args: dict) -> dict:
     ladles = args.get("ladles", [])
     converter_id = args.get("converterId")
@@ -349,21 +349,20 @@ def get_candidates(args: dict) -> dict:
 ### P1 校验项
 
 1. `lib.<module>.<entrypoint>` 或 `lib.<namespace>.<module>.<entrypoint>` 引用的路径必须在 `LibRegistry` 中存在
-2. `lib` 调用出现在 `functions` 中时，目标脚本函数必须声明 `readonly=True`
-3. `functions` 中的 `runScript` 禁止调用 `this.services` 或 `emit`——主要依靠运行时沙箱代理抛出 `ImmutableContextError` 进行拦截；配置校验阶段可做简单的字符串扫描作为辅助提示，但不强求深度 AST 分析
+2. `functions` 中的 `runScript` 禁止调用 `this.services` 或 `emit`——主要依靠运行时沙箱代理抛出 `ImmutableContextError` 进行拦截；配置校验阶段可做简单的字符串扫描作为辅助提示，但不强求深度 AST 分析
 
 ## 8. 迁移路径
 
 现有 `model.json` 中的内嵌脚本**无需立即迁移**，新旧机制共存。
 
 建议迁移策略：
-1. 新建 `agents/<model>/libs/` 目录
+1. 新建 `agents/<group>/<model>/libs/` 目录
 2. 将复杂逻辑提取为 `@lib_function` 装饰的纯函数
 3. 在 `model.json` 中将原内嵌脚本替换为 `lib.xxx()` 调用 + 轻量 adapter
 4. 简单脚本（如单变量赋值、事件触发）可继续保留内嵌形式
 
 对于原有 `algo_packages/` 下的脚本，迁移步骤：
-1. 将 `algo_packages/<package>/` 移动或复制到对应 `agents/<model>/libs/` 目录
+1. 将 `algo_packages/<package>/` 移动或复制到对应 `agents/<group>/<model>/libs/` 目录
 2. 将 `@algo_function` 替换为 `@lib_function`
 3. 将装饰器中的 `namespace` 参数值设为对应 agent model 的 ID
 4. 将 `model.json` 中的 `algo.xxx` 调用替换为 `lib.xxx`
