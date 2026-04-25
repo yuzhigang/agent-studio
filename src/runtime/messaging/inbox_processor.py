@@ -93,17 +93,24 @@ class InboxProcessor:
     async def _deliver_for_world(self, world_id: str, deliveries: list) -> None:
         store = self._hub._store
         for delivery in deliveries:
-            envelope = store.inbox_load(delivery.message_id)
-            receiver = self._hub.get_receiver(delivery.target_world_id)
-            if receiver is None:
-                self._mark_receiver_unavailable(
-                    message_id=delivery.message_id,
-                    world_id=delivery.target_world_id,
-                    error_count=delivery.error_count,
-                )
-                continue
             try:
+                envelope = store.inbox_load(delivery.message_id)
+                receiver = self._hub.get_receiver(delivery.target_world_id)
+                if receiver is None:
+                    self._mark_receiver_unavailable(
+                        message_id=delivery.message_id,
+                        world_id=delivery.target_world_id,
+                        error_count=delivery.error_count,
+                    )
+                    continue
                 await receiver.receive(envelope)
+            except KeyError:
+                store.inbox_mark_delivery_dead(
+                    delivery.message_id,
+                    delivery.target_world_id,
+                    error_count=delivery.error_count,
+                    last_error="missing inbox message",
+                )
             except RetryableDeliveryError as exc:
                 self._mark_retry_or_dead(
                     message_id=delivery.message_id,

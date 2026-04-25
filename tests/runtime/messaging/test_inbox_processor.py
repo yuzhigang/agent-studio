@@ -208,3 +208,73 @@ async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds
     assert bad_row[1] == 1
     assert "unexpected error: boom" == bad_row[2]
     assert good_row == ("delivered",)
+
+
+@pytest.mark.anyio
+async def test_inbox_processor_missing_inbox_message_does_not_block_same_world_followups(tmp_path):
+    store = SQLiteMessageStore(str(tmp_path))
+    seen = []
+    delivered = asyncio.Event()
+
+    class _Receiver:
+        async def receive(self, envelope):
+            seen.append(envelope.message_id)
+            delivered.set()
+
+    hub = MessageHub(
+        message_store=store,
+        channel=None,
+        poll_interval=0.01,
+        max_retries=2,
+    )
+    hub.register_world("factory-a", _Receiver())
+
+    store.inbox_append(
+        MessageEnvelope(
+            message_id="msg-missing",
+            world_id="factory-a",
+            event_type="order.created",
+            payload={"order_id": "missing"},
+        )
+    )
+    store.inbox_append(
+        MessageEnvelope(
+            message_id="msg-good",
+            world_id="factory-a",
+            event_type="order.created",
+            payload={"order_id": "good"},
+        )
+    )
+    store.inbox_create_deliveries("msg-missing", ["factory-a"])
+    store.inbox_create_deliveries("msg-good", ["factory-a"])
+    store.inbox_mark_expanded("msg-missing")
+    store.inbox_mark_expanded("msg-good")
+
+    original_inbox_load = store.inbox_load
+
+    def _broken_inbox_load(message_id: str):
+        if message_id == "msg-missing":
+            raise KeyError("missing inbox message")
+        return original_inbox_load(message_id)
+
+    store.inbox_load = _broken_inbox_load
+
+    try:
+        await hub.start()
+        await asyncio.wait_for(delivered.wait(), timeout=1.0)
+    finally:
+        await hub.stop()
+
+    missing_row = store._conn.execute(
+        "SELECT status, last_error FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-missing",),
+    ).fetchone()
+    good_row = store._conn.execute(
+        "SELECT status FROM inbox_deliveries WHERE message_id = ?",
+        ("msg-good",),
+    ).fetchone()
+    store.close()
+
+    assert seen == ["msg-good"]
+    assert missing_row == ("dead", "missing inbox message")
+    assert good_row == ("delivered",)
