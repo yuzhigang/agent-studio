@@ -22,7 +22,7 @@
 - **DSL 显式命名**：所有上下文访问通过显式命名空间（`this.variables`、`this.attributes`、`lib.xxx` 等），语义清晰，便于后续做 IDE 自动补全
 - **适配器职责**：`runScript` 作为轻量适配层，负责组装参数、调用脚本函数、回写结果
 - **向后兼容**：保留现有的 `type: "runScript"` 结构和内嵌脚本能力，新能力作为增强选项存在
-- **作用域内省略 namespace**：在当前 agent 的 `model.json` 中通过 `runScript` 调用时，可省略本 agent 的 namespace，简写为 `lib.<module>.<function>`。`scripts/` 下的 Python 脚本内部作为普通 Python 函数互相调用，不通过 `lib` 代理解析。
+- **作用域内省略 namespace**：在当前 agent 的 `model.json` 中通过 `runScript` 调用时，可省略本 agent 的 namespace，简写为 `lib.<module>.<function>`。`libs/` 下的 Python 脚本内部作为普通 Python 函数互相调用，不通过 `lib` 代理解析。
 
 ## 3. 脚本库目录结构与自动注册
 
@@ -32,21 +32,21 @@
 agents/
 ├── ladle/
 │   ├── model.json
-│   └── scripts/
+│   └── libs/
 │       ├── dispatcher.py
 │       └── validator.py
 ├── converter/
 │   ├── model.json
-│   └── scripts/
+│   └── libs/
 │       └── planner.py
 └── shared/
-    └── scripts/
+    └── libs/
         ├── data_adapter.py
         └── common_utils.py
 ```
 
-- 每个 `agents/<model>/scripts/` 目录注册为 `lib.<model>` 命名空间
-- `agents/shared/scripts/` 目录注册为 `lib.shared` 命名空间
+- 每个 `agents/<model>/libs/` 目录注册为 `lib.<model>` 命名空间
+- `agents/shared/libs/` 目录注册为 `lib.shared` 命名空间
 
 ### 3.2 装饰器与注册机制
 
@@ -91,7 +91,7 @@ def load_steel(args: dict) -> dict:
 LibRegistry.scan("agents/")
 ```
 
-扫描器递归遍历所有 `agents/<namespace>/scripts/` 和 `agents/shared/scripts/` 下的 `.py` 文件，import 模块，收集所有带 `@lib_function` 装饰器的函数，建立映射表：
+扫描器递归遍历所有 `agents/<namespace>/libs/` 和 `agents/shared/libs/` 下的 `.py` 文件，import 模块，收集所有带 `@lib_function` 装饰器的函数，建立映射表：
 
 ```
 ladle.dispatcher.getCandidates -> <function>
@@ -134,7 +134,7 @@ lib.dispatcher.getCandidates(args)
 lib.ladle.dispatcher.getCandidates(args)
 ```
 
-**注意**：`agents/<model>/scripts/` 下的 Python 脚本内部，函数之间直接通过普通 Python `import` 调用即可，不经过 `lib` 代理对象解析。
+**注意**：`agents/<model>/libs/` 下的 Python 脚本内部，函数之间直接通过普通 Python `import` 调用即可，不经过 `lib` 代理对象解析。
 
 公共库和跨 scope 调用必须显式写出完整路径：
 
@@ -263,7 +263,7 @@ avg_temp = statistics.mean([l['temperature'] for l in ladles])
 ### 4.6 纯脚本函数示例
 
 ```python
-# agents/ladle/scripts/dispatcher.py
+# agents/ladle/libs/dispatcher.py
 from runtime.lib import lib_function
 
 @lib_function(name="getCandidates", namespace="ladle", readonly=True)
@@ -328,7 +328,7 @@ def get_candidates(args: dict) -> dict:
 
 ## 6. 热更新机制
 
-后端通过 `watchdog` 或轮询监控 `agents/**/scripts/` 目录下的 `.py` 文件变更。
+后端通过 `watchdog` 或轮询监控 `agents/**/libs/` 目录下的 `.py` 文件变更。
 
 ### 6.1 热更新流程
 
@@ -357,13 +357,13 @@ def get_candidates(args: dict) -> dict:
 现有 `model.json` 中的内嵌脚本**无需立即迁移**，新旧机制共存。
 
 建议迁移策略：
-1. 新建 `agents/<model>/scripts/` 目录
+1. 新建 `agents/<model>/libs/` 目录
 2. 将复杂逻辑提取为 `@lib_function` 装饰的纯函数
 3. 在 `model.json` 中将原内嵌脚本替换为 `lib.xxx()` 调用 + 轻量 adapter
 4. 简单脚本（如单变量赋值、事件触发）可继续保留内嵌形式
 
 对于原有 `algo_packages/` 下的脚本，迁移步骤：
-1. 将 `algo_packages/<package>/` 移动或复制到对应 `agents/<model>/scripts/` 目录
+1. 将 `algo_packages/<package>/` 移动或复制到对应 `agents/<model>/libs/` 目录
 2. 将 `@algo_function` 替换为 `@lib_function`
 3. 将装饰器中的 `namespace` 参数值设为对应 agent model 的 ID
 4. 将 `model.json` 中的 `algo.xxx` 调用替换为 `lib.xxx`
