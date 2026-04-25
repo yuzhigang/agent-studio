@@ -23,14 +23,14 @@ result = lib.dispatcher.getCandidates({'converterId': args['converterId']})
     })
     assert result == {"candidates": []}
 
-def test_cross_namespace_call(registry: LibRegistry):
+def test_cross_namespace_call_rejected(registry: LibRegistry):
     registry.scan(os.path.join(FIXTURES, "agents"))
     proxy = LibProxy(default_namespace="logistics.ladle", registry=registry)
 
     script = "result = lib.machines.converter.planner.plan({'target': 'A1'})"
     executor = SandboxExecutor()
-    result = executor.execute(script, {"lib": proxy})
-    assert result == {"plan": "A1"}
+    with pytest.raises(Exception, match="cross-agent"):
+        executor.execute(script, {"lib": proxy})
 
 
 def test_shared_modules_injected_into_sandbox(registry: LibRegistry):

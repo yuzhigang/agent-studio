@@ -16,13 +16,16 @@ class _LibProxyNode:
         if len(self._path) < 2:
             raise LibNotFoundError(".".join(self._path), details="incomplete path")
 
-        # Try default namespace omission
-        candidates = []
-        if self._default_namespace and len(self._path) == 2:
-            # lib.module.name => default_namespace.module.name
-            candidates.append(f"{self._default_namespace}.{self._path[0]}.{self._path[1]}")
-        if len(self._path) >= 3:
-            candidates.append(".".join(self._path))
+        if len(self._path) == 2:
+            # lib.module.name → default_namespace.module.name
+            if not self._default_namespace:
+                raise LibNotFoundError(".".join(self._path), details="no default namespace")
+            candidates = [f"{self._default_namespace}.{self._path[0]}.{self._path[1]}"]
+        elif len(self._path) == 3 and self._path[0] == "shared":
+            # lib.shared.module.name
+            candidates = [".".join(self._path)]
+        else:
+            raise LibNotFoundError(".".join(self._path), details="cross-agent lib calls are not allowed")
 
         func = None
         for key in candidates:
