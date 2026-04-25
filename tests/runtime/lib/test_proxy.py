@@ -18,6 +18,13 @@ def test_proxy_shared_namespace(registry: LibRegistry):
     assert result == {"x": 1}
 
 
+def test_proxy_shared_requires_module_and_name(registry: LibRegistry):
+    registry._data["shared.data_adapter.transform"] = lambda args: args
+    proxy = LibProxy(default_namespace="logistics.ladle", registry=registry)
+    with pytest.raises(LibNotFoundError, match="shared lib calls require module.function"):
+        proxy.shared.transform({})
+
+
 def test_proxy_cross_agent_rejected(registry: LibRegistry):
     registry._data["machines.converter.planner.plan"] = lambda args: args
     proxy = LibProxy(default_namespace="logistics.ladle", registry=registry)

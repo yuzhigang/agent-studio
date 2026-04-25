@@ -18,6 +18,8 @@ class _LibProxyNode:
 
         if len(self._path) == 2:
             # lib.module.name → default_namespace.module.name
+            if self._path[0] == "shared":
+                raise LibNotFoundError(".".join(self._path), details="shared lib calls require module.function")
             if not self._default_namespace:
                 raise LibNotFoundError(".".join(self._path), details="no default namespace")
             candidates = [f"{self._default_namespace}.{self._path[0]}.{self._path[1]}"]

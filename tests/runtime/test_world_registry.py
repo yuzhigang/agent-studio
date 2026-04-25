@@ -45,6 +45,15 @@ def test_load_world_creates_trigger_registry(registry):
     assert im._trigger_registry is not None
 
 
+def test_load_world_bundle_contains_lib_registry(registry):
+    registry.create_world("world-a")
+
+    bundle = registry.load_world("world-a")
+
+    assert bundle["lib_registry"] is not None
+    assert bundle["instance_manager"]._sandbox.registry is bundle["lib_registry"]
+
+
 def test_load_world_raises_when_missing(registry):
     with pytest.raises(ValueError, match="not found"):
         registry.load_world("missing-world")
@@ -169,3 +178,22 @@ def test_load_world_wires_world_state_and_event_emitter(registry):
     assert snapshot["ladle"][0]["snapshot"]["temperature"] == 1600
 
     registry.unload_world("ladle-proj")
+
+
+def test_load_world_scans_world_agents_for_libs(registry):
+    registry.create_world("test-world")
+    world_dir = os.path.join(registry._base_dir, "test-world")
+    libs_dir = os.path.join(world_dir, "agents", "logistics", "ladle", "libs")
+    os.makedirs(libs_dir, exist_ok=True)
+    with open(os.path.join(libs_dir, "dispatcher.py"), "w", encoding="utf-8") as f:
+        f.write(
+            "from src.runtime.lib.decorator import lib_function\n"
+            "@lib_function()\n"
+            "def get_candidates(args):\n"
+            "    return {'candidates': []}\n"
+        )
+
+    bundle = registry.load_world("test-world")
+
+    func = bundle["lib_registry"].lookup("logistics.ladle", "dispatcher", "get_candidates")
+    assert func({}) == {"candidates": []}

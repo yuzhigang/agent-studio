@@ -18,3 +18,12 @@ def test_decorator_defaults():
     assert do_work._lib_meta["name"] is None
     assert do_work._lib_meta["module"] is None
     assert do_work._lib_meta["entrypoint"] == "do_work"
+
+
+def test_decorator_normalizes_empty_name_and_module_to_none():
+    @lib_function(name="", module="")
+    def do_work(args: dict) -> dict:
+        return {}
+
+    assert do_work._lib_meta["name"] is None
+    assert do_work._lib_meta["module"] is None

@@ -32,6 +32,7 @@ class LibRegistry:
         self._rlock = threading.RLock()
         self._agents_root: Path | None = None
         self._loaded_modules: set[str] = set()
+        self._module_keys: dict[str, set[str]] = {}
 
     @classmethod
     def reset_instance(cls):
@@ -45,6 +46,7 @@ class LibRegistry:
     def clear(self):
         with self._rlock:
             self._registry.clear()
+            self._module_keys.clear()
             for mod_name in list(self._loaded_modules):
                 sys.modules.pop(mod_name, None)
             self._loaded_modules.clear()
@@ -57,6 +59,7 @@ class LibRegistry:
 
         with self._rlock:
             self._registry.clear()
+            self._module_keys.clear()
             # Handle shared libs directly
             shared_libs = agents_path / "shared" / "libs"
             if shared_libs.exists():
@@ -87,8 +90,17 @@ class LibRegistry:
         self._loaded_modules.add(module_name)
         return module
 
+    def _module_key(self, py_file: Path) -> str:
+        return str(py_file.resolve())
+
+    def _registration_parts(self, meta: dict, py_file: Path) -> tuple[str, str]:
+        func_name = meta["name"] or meta["entrypoint"]
+        mod_name = meta["module"] or py_file.stem
+        return mod_name, func_name
+
     def _register_functions(self, namespace: str, py_file: Path, module):
         class_instances = {}
+        registered_keys: set[str] = set()
 
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
@@ -96,10 +108,10 @@ class LibRegistry:
             # 1) 模块级函数
             meta = getattr(obj, "_lib_meta", None)
             if meta is not None:
-                func_name = meta["name"] or meta["entrypoint"]
-                mod_name = meta["module"] or py_file.stem
+                mod_name, func_name = self._registration_parts(meta, py_file)
                 key = f"{namespace}.{mod_name}.{func_name}"
                 self._registry[key] = meta["func"]
+                registered_keys.add(key)
                 continue
 
             # 2) 类方法
@@ -120,10 +132,12 @@ class LibRegistry:
                             )
                         class_instances[attr_name] = instance
                     bound = getattr(instance, method_name)
-                    func_name = meta["name"] or meta["entrypoint"]
-                    mod_name = meta["module"] or py_file.stem
+                    mod_name, func_name = self._registration_parts(meta, py_file)
                     key = f"{namespace}.{mod_name}.{func_name}"
                     self._registry[key] = bound
+                    registered_keys.add(key)
+
+        self._module_keys[self._module_key(py_file)] = registered_keys
 
     def _load_module(self, namespace: str, py_file: Path):
         module = self._exec_module(namespace, py_file)
@@ -146,11 +160,10 @@ class LibRegistry:
         else:
             namespace = f"{parts[0]}.{parts[1]}"  # group.agent
 
-        prefix = f"{namespace}.{py_file.stem}."
         with self._rlock:
-            for key in list(self._registry.keys()):
-                if key.startswith(prefix):
-                    del self._registry[key]
+            old_keys = self._module_keys.pop(self._module_key(py_file), set())
+            for key in old_keys:
+                self._registry.pop(key, None)
             module = self._exec_module(namespace, py_file)
             self._register_functions(namespace, py_file, module)
 

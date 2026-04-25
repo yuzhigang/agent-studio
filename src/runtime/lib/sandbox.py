@@ -57,6 +57,10 @@ class SandboxExecutor:
             if len(parts) != 3 or parts[0] != "shared":
                 continue
             _, mod_name, func_name = parts
+            if mod_name in PRELOADED_MODULES:
+                raise ScriptExecutionError(
+                    f"shared module name '{mod_name}' collides with preloaded module"
+                )
             if mod_name not in modules:
                 modules[mod_name] = types.ModuleType(mod_name)
             setattr(modules[mod_name], func_name, func)

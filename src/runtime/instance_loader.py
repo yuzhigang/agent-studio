@@ -9,6 +9,20 @@ class InstanceLoader:
     """Scan a world's agents/ directory for *.instance.yaml declarations."""
 
     @staticmethod
+    def _agent_namespace_for(file_path: Path, agents_dir: Path) -> str | None:
+        try:
+            rel = file_path.relative_to(agents_dir)
+        except ValueError:
+            return None
+
+        # agents/<group>/<agent>/instances/*.instance.yaml -> group.agent
+        # agents/<agent>/instances/*.instance.yaml -> agent
+        agent_parts = rel.parts[:-2]
+        if not agent_parts:
+            return None
+        return ".".join(agent_parts)
+
+    @staticmethod
     def scan(world_dir: str) -> list[dict]:
         """Recursively scan {world_dir}/agents/**/instances/*.instance.yaml.
 
@@ -29,5 +43,6 @@ class InstanceLoader:
                 with open(file_path, "r", encoding="utf-8") as f:
                     decl = yaml.safe_load(f) or {}
                 decl["_source_file"] = str(file_path)
+                decl["_agent_namespace"] = InstanceLoader._agent_namespace_for(file_path, agents_dir)
                 results.append(decl)
         return results

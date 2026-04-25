@@ -4,6 +4,8 @@ import os
 import yaml
 
 from src.runtime.instance_loader import InstanceLoader
+from src.runtime.lib.registry import LibRegistry
+from src.runtime.lib.sandbox import SandboxExecutor
 from src.runtime.locks.world_lock import WorldLock
 from src.runtime.messaging import WorldMessageIngress, WorldMessageSender
 from src.runtime.model_loader import ModelLoader
@@ -100,11 +102,15 @@ class WorldRegistry:
             trigger_registry.add_trigger(TimerTrigger())
 
             bus = bus_reg.get_or_create(world_id)
+            lib_registry = LibRegistry()
+            lib_registry.scan(os.path.join(world_dir, "agents"))
+            sandbox_executor = SandboxExecutor(registry=lib_registry)
 
             im = InstanceManager(
                 bus_reg,
                 instance_store=store,
                 model_loader=model_loader,
+                sandbox_executor=sandbox_executor,
                 world_state=world_state,
                 world_event_emitter=None,
                 trigger_registry=trigger_registry,
@@ -157,6 +163,7 @@ class WorldRegistry:
                 "state_manager": state_mgr,
                 "metric_store": metric_store,
                 "world_state": world_state,
+                "lib_registry": lib_registry,
                 "lock": world_lock,
                 "alarm_manager": alarm_manager,
                 "_registry": self,
@@ -274,6 +281,7 @@ class WorldRegistry:
                 model_name=model_id,
                 instance_id=instance_id,
                 scope="world",
+                agent_namespace=decl.get("_agent_namespace"),
                 model=model,
                 state=state,
                 attributes=attributes,

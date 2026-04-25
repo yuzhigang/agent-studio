@@ -58,10 +58,12 @@ def test_load_world_creates_instances_from_declarations(registry):
     inst = im.get("test-world", "sensor-01", scope="world")
     assert inst is not None
     assert inst.model_name == "sensor"
+    assert inst._agent_namespace == "sensor"
     assert inst.variables["threshold"] == 150
     assert inst.variables["label"] == "overridden-label"
     assert inst.attributes["location"] == "boiler-room"
     assert inst.state["current"] == "active"
+    assert bundle["instance_manager"]._sandbox.registry is bundle["lib_registry"]
 
 
 def test_load_world_skips_missing_model(registry):
@@ -120,4 +122,53 @@ def test_load_world_uses_global_model_when_not_in_world(registry_with_globals, t
     inst = im.get("test-world", "shared-01", scope="world")
     assert inst is not None
     assert inst.model_name == "shared-agent"
+    assert inst._agent_namespace == "shared-agent"
     assert inst.variables["counter"] == 42
+
+
+def test_load_world_uses_group_agent_path_as_default_lib_namespace(registry):
+    registry.create_world("test-world")
+    world_dir = os.path.join(registry._base_dir, "test-world")
+
+    model_dir = os.path.join(world_dir, "agents", "logistics", "ladle", "model")
+    _write_yaml(os.path.join(model_dir, "index.yaml"), {
+        "metadata": {"name": "Ladle"},
+        "behaviors": {
+            "dispatch": {
+                "trigger": {"type": "event", "name": "run"},
+                "actions": [
+                    {
+                        "type": "runScript",
+                        "script": "result = lib.dispatcher.get_candidates({'converterId': 'C01'})",
+                    }
+                ],
+            }
+        },
+    })
+    libs_dir = os.path.join(world_dir, "agents", "logistics", "ladle", "libs")
+    os.makedirs(libs_dir, exist_ok=True)
+    with open(os.path.join(libs_dir, "dispatcher.py"), "w", encoding="utf-8") as f:
+        f.write(
+            "from src.runtime.lib.decorator import lib_function\n"
+            "@lib_function()\n"
+            "def get_candidates(args):\n"
+            "    return {'candidates': []}\n"
+        )
+    instances_dir = os.path.join(world_dir, "agents", "logistics", "ladle", "instances")
+    _write_yaml(os.path.join(instances_dir, "ladle-01.instance.yaml"), {
+        "id": "ladle-01",
+        "modelId": "ladle",
+    })
+
+    bundle = registry.load_world("test-world")
+    inst = bundle["instance_manager"].get("test-world", "ladle-01", scope="world")
+
+    assert inst is not None
+    assert inst._agent_namespace == "logistics.ladle"
+
+    context = bundle["instance_manager"]._build_behavior_context(inst, payload={}, source="test")
+    result = bundle["instance_manager"]._sandbox.execute(
+        "result = lib.dispatcher.get_candidates({'converterId': 'C01'})",
+        context,
+    )
+    assert result == {"candidates": []}

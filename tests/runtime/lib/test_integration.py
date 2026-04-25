@@ -4,8 +4,10 @@ from src.runtime.lib import (
     LibRegistry,
     LibProxy,
     SandboxExecutor,
-    lib_function,
 )
+from src.runtime.lib.exceptions import ScriptExecutionError
+from src.runtime.instance import Instance
+from src.runtime.instance_manager import InstanceManager
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures")
 
@@ -42,8 +44,23 @@ def test_shared_modules_injected_into_sandbox(registry: LibRegistry):
     assert result == {"message": "hello from sandbox"}
 
 
-def test_shared_modules_can_be_imported_in_sandbox(registry: LibRegistry):
+def test_shared_modules_can_be_imported_in_sandbox(registry: LibRegistry, monkeypatch):
     registry.scan(os.path.join(FIXTURES, "agents"))
+
+    class _FakeResponse:
+        status = 200
+        headers = {"Content-Type": "text/plain"}
+
+        def read(self):
+            return b"ok"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=30: _FakeResponse())
 
     script = """
 import api
@@ -55,6 +72,15 @@ result = api.http_get({'url': 'https://example.com'})
     assert result["url"] == "https://example.com"
     assert result["status"] == 200
     assert "data" in result
+
+
+def test_sandbox_rejects_agent_specific_import_even_when_registry_loaded(registry: LibRegistry):
+    registry.scan(os.path.join(FIXTURES, "agents"))
+
+    executor = SandboxExecutor(registry=registry)
+
+    with pytest.raises(ScriptExecutionError, match="Import of 'dispatcher' is not allowed"):
+        executor.execute("import dispatcher", {})
 
 
 def test_all_shared_libs_are_preloaded(registry: LibRegistry):
@@ -74,6 +100,15 @@ result = {
         "api": {"message": "hi"},
         "utils": {"text": "HELLO"},
     }
+
+
+def test_sandbox_rejects_shared_module_name_collision(registry: LibRegistry):
+    registry._data["shared.json.echo"] = lambda args: args
+
+    executor = SandboxExecutor(registry=registry)
+
+    with pytest.raises(ScriptExecutionError, match="collides with preloaded module"):
+        executor.execute("result = 1", {})
 
 
 def test_ladle_dispatcher_get_candidates(registry: LibRegistry):
@@ -98,3 +133,23 @@ result = lib.ladle.get_candidates({
     for c in result["candidates"]:
         assert "ladle_id" in c
         assert "score" in c
+
+
+def test_behavior_context_lib_proxy_uses_agent_namespace_over_model_name(registry: LibRegistry):
+    registry.scan(os.path.join(FIXTURES, "agents"))
+    manager = InstanceManager(sandbox_executor=SandboxExecutor(registry=registry))
+    instance = Instance(
+        instance_id="ladle-01",
+        model_name="ladle",
+        world_id="world-01",
+        scope="world",
+        _agent_namespace="logistics.ladle",
+    )
+
+    context = manager._build_behavior_context(instance, payload={}, source="test")
+
+    script = """
+result = lib.dispatcher.get_candidates({'converterId': 'C01'})
+"""
+    result = manager._sandbox.execute(script, context)
+    assert result == {"candidates": []}

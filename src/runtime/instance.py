@@ -8,6 +8,7 @@ class Instance:
     model_name: str
     world_id: str
     scope: str
+    _agent_namespace: str | None = field(default=None, repr=False)
     model_version: str | None = field(default=None)
     attributes: dict = field(default_factory=dict)
     variables: dict = field(default_factory=dict)

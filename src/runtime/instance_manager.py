@@ -201,7 +201,13 @@ class InstanceManager:
             "dispatch": dispatch,
             "world_state": _DictProxy(world_state),
         }
-        lib_proxy = LibProxy(default_namespace=instance.model_name, lib_context=lib_context)
+        lib_registry = getattr(self._sandbox, "registry", None)
+        default_namespace = getattr(instance, "_agent_namespace", None) or instance.model_name
+        lib_proxy = LibProxy(
+            default_namespace=default_namespace,
+            registry=lib_registry,
+            lib_context=lib_context,
+        )
 
         return {
             "this": wrapped,
@@ -367,6 +373,7 @@ class InstanceManager:
         model_name: str,
         instance_id: str,
         scope: str = "world",
+        agent_namespace: str | None = None,
         model_version: str | None = None,
         attributes: dict | None = None,
         variables: dict | None = None,
@@ -387,6 +394,7 @@ class InstanceManager:
             model_name=model_name,
             world_id=world_id,
             scope=scope,
+            _agent_namespace=agent_namespace,
             model_version=model_version,
             attributes=copy.deepcopy(attributes),
             variables=copy.deepcopy(variables),
