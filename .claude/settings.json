@@ -10,11 +10,16 @@
         ],
         "allow": [
             "Bash(curl *)",
+            "Bash(uv *)",
             "Bash(python3 -c ':*)",
-            "Bash(xargs wc:*)",
+            "Bash(xargs *)",
             "Bash(python -m *)",
             "Bash(pytest *)",
+            "Bash(grep *)",
+            "Bash(awk *)",
+            "Bash(wc *)",
             "WebSearch",
+            "Bash(find *)",
             "Read(//c/Users/Zigzag/.claude/plugins/**)",
             "Bash(git *)"
         ]
