@@ -35,11 +35,15 @@ namespace.modelName
 def split_model_id(model_id: str) -> tuple[str, str]:
     """Split model_id into (namespace, model_name).
 
-    Raises ValueError if model_id contains no dot.
+    Raises ValueError if model_id contains no dot or empty parts.
     """
     if "." not in model_id:
         raise ValueError(f"modelId must contain namespace: {model_id}")
     namespace, model_name = model_id.split(".", 1)
+    if not namespace:
+        raise ValueError(f"namespace must not be empty: {model_id}")
+    if not model_name:
+        raise ValueError(f"model_name must not be empty: {model_id}")
     if "." in namespace:
         raise ValueError(f"namespace must not contain dot: {namespace}")
     return namespace, model_name
@@ -126,6 +130,8 @@ def discover_models(root: Path) -> dict[str, Path]:
         for model_dir in ns_dir.iterdir():
             if not model_dir.is_dir():
                 continue
+            if not (model_dir / "model").is_dir():
+                continue
             model_name = model_dir.name
             model_id = f"{namespace}.{model_name}"
             models[model_id] = model_dir / "model"
@@ -171,7 +177,9 @@ def discover_models(root: Path) -> dict[str, Path]:
 | 场景 | 行为 |
 |------|------|
 | modelId 无点号 | `ValueError: modelId must contain namespace` |
+| modelId 以点号开头或结尾（如 `.ladle`、`logistics.`） | `ValueError: namespace/model_name must not be empty` |
 | namespace 含点号 | `ValueError: namespace must not contain dot` |
+| `resolve()` 或 `ensure()` 收到无效 modelId | 直接抛出 `ValueError`，不会返回 `None` |
 | 精确路径不存在 | `_find_model_dir` 返回 `None` → `ensure()` 继续查找全局模板 |
 | 全局模板也不存在 | `ModelNotFoundError` |
 | 旧的无 namespace 模型目录 | 不被识别，需要手动迁移 |
@@ -247,9 +255,11 @@ def migrate_models(agents_dir: Path, default_ns: str = "core"):
 |------|--------|
 | `src/runtime/model_resolver.py` | 新增 `split_model_id()`，重写 `_find_model_dir()` 为精确路径 |
 | `src/runtime/world_registry.py` | `model_loader` 和 `agent_namespace_resolver` 适配带 namespace 的 modelId |
-| `src/cli/main.py` | `sync_models` 模型发现改为按 namespace 遍历 |
+| `src/runtime/instance_loader.py` | `scan()` 可能需要调整 `_agent_namespace_for` 的语义 |
+| `src/cli/main.py` | `sync_models` 模型发现改为按 namespace 遍历，modelId 提取逻辑更新 |
 | `tests/runtime/test_model_resolver.py` | 更新测试用例，新增 namespace 相关测试 |
 | `tests/runtime/test_instance_loader.py` | 更新 fixture 中的 modelId 为带 namespace 格式 |
+| `tests/cli/test_main.py` | sync-models 测试用例更新（带 namespace 的 modelId） |
 
 ## Non-Goals
 
