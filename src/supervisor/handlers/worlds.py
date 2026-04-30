@@ -6,14 +6,13 @@ from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_
 
 async def handle_world_start(request: web.Request):
     gateway: WorkerController = request.app["gateway"]
-    ws_port = request.app["ws_port"]
+    supervisor_ws = request.app["supervisor_ws_url"]
     world_id = request.match_info["world_id"]
     worker = gateway.get_worker_by_world(world_id)
     if worker is not None:
         return web.json_response({"status": "already_running"})
 
     world_dir = f"{gateway._base_dir}/{world_id}"
-    supervisor_ws = f"ws://localhost:{ws_port}/workers"
 
     # Import here to avoid circular dependency
     from src.supervisor.server import _build_runtime_cmd
