@@ -1,5 +1,7 @@
 import argparse
+import shutil
 import sys
+from pathlib import Path
 
 
 def main(argv=None):
@@ -56,6 +58,17 @@ def main(argv=None):
     )
     sup_parser.set_defaults(func=_supervisor_command)
 
+    sync_parser = subparsers.add_parser(
+        "sync-models", help="Synchronize global templates into world-private agents/"
+    )
+    sync_parser.add_argument(
+        "--world-dir", required=True, help="Path to world directory"
+    )
+    sync_parser.add_argument(
+        "--force", action="store_true", help="Force overwrite existing files"
+    )
+    sync_parser.set_defaults(func=_sync_models_command)
+
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -81,6 +94,112 @@ def _run_inline_command(args):
 def _supervisor_command(args):
     from src.supervisor.cli import supervisor_main
     return supervisor_main(args)
+
+
+def _sync_models_command(args):
+    return sync_models(args.world_dir, force=args.force)
+
+
+def sync_models(world_dir: str, force: bool = False) -> int:
+    """Synchronize global templates into world-private agents/."""
+    from src.runtime.model_resolver import ModelResolver
+
+    world_path = Path(world_dir)
+    world_agents = world_path / "agents"
+
+    # Discover global models
+    global_paths = ["agents"]  # Default global path
+    # TODO: read from config if available
+
+    global_models: dict[str, Path] = {}
+    for gp_str in global_paths:
+        gp = Path(gp_str)
+        if not gp.exists():
+            continue
+        for model_dir in gp.rglob("*/model"):
+            if not model_dir.is_dir():
+                continue
+            model_id = model_dir.parent.name
+            if model_id not in global_models:
+                global_models[model_id] = model_dir
+
+    # Discover world models
+    world_models: dict[str, Path] = {}
+    if world_agents.exists():
+        for model_dir in world_agents.rglob("*/model"):
+            if not model_dir.is_dir():
+                continue
+            model_id = model_dir.parent.name
+            world_models[model_id] = model_dir
+
+    resolver = ModelResolver(str(world_dir), global_paths)
+    any_changes = False
+
+    for model_id, template_dir in sorted(global_models.items()):
+        if model_id in world_models:
+            print(f"[SYNC] {model_id}")
+            changed = _sync_single_model(template_dir, world_models[model_id], force)
+            any_changes = any_changes or changed
+        else:
+            print(f"[ADD] {model_id}")
+            resolver._copy_from_template(template_dir, _find_global_root(template_dir, global_paths))
+            any_changes = True
+
+    private_models = set(world_models) - set(global_models)
+    for model_id in sorted(private_models):
+        print(f"[SKIP] {model_id} (world-private, no global template)")
+
+    if not any_changes and not private_models:
+        print("No changes needed.")
+    return 0
+
+
+def _find_global_root(template_dir: Path, global_paths: list[str]) -> Path:
+    """Find which global root a template directory belongs to."""
+    for gp_str in global_paths:
+        gp = Path(gp_str)
+        try:
+            template_dir.relative_to(gp)
+            return gp
+        except ValueError:
+            continue
+    return Path(global_paths[0])
+
+
+def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> bool:
+    """Sync a single model, returning True if any changes were made."""
+    changed = False
+    for src_file in template_dir.rglob("*"):
+        if not src_file.is_file():
+            continue
+        rel = src_file.relative_to(template_dir)
+        dst_file = world_dir / rel
+
+        if not dst_file.exists():
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst_file)
+            print(f"  [ADD] {rel}")
+            changed = True
+            continue
+
+        if force:
+            shutil.copy2(src_file, dst_file)
+            print(f"  [OVERWRITE] {rel}")
+            changed = True
+        else:
+            answer = input(f"  Conflict: {rel}. Overwrite? [Y/n/a(ll)/s(kip)] ")
+            ans = answer.strip().lower()
+            if ans in ("y", ""):
+                shutil.copy2(src_file, dst_file)
+                print(f"  [OVERWRITE] {rel}")
+                changed = True
+            elif ans == "a":
+                force = True
+                shutil.copy2(src_file, dst_file)
+                print(f"  [OVERWRITE] {rel}")
+                changed = True
+            # n or s -> skip
+    return changed
 
 
 if __name__ == "__main__":
