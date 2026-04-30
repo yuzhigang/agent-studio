@@ -1,4 +1,5 @@
 import argparse
+import filecmp
 import shutil
 import sys
 from pathlib import Path
@@ -153,8 +154,11 @@ def sync_models(world_dir: str, force: bool = False) -> int:
                 any_changes = any_changes or changed_libs
         else:
             print(f"[ADD] {model_id}")
-            resolver._copy_from_template(template_dir, _find_global_root(template_dir, global_paths))
-            any_changes = True
+            try:
+                resolver._copy_from_template(template_dir, _find_global_root(template_dir, global_paths))
+                any_changes = True
+            except Exception as e:
+                print(f"  [ERROR] Failed to copy {model_id}: {e}")
 
     private_models = set(world_models) - set(global_models)
     for model_id in sorted(private_models):
@@ -185,6 +189,8 @@ def _find_global_root(template_dir: Path, global_paths: list[str]) -> Path:
             return gp
         except ValueError:
             continue
+    if not global_paths:
+        raise ValueError("global_paths is empty")
     return Path(global_paths[0])
 
 
@@ -204,6 +210,9 @@ def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> tupl
             changed = True
             continue
 
+        if filecmp.cmp(src_file, dst_file, shallow=False):
+            continue  # Identical content, skip
+
         if force:
             shutil.copy2(src_file, dst_file)
             print(f"  [OVERWRITE] {rel}")
@@ -217,6 +226,7 @@ def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> tupl
                 changed = True
             elif ans == "a":
                 force = True
+                print("Force mode enabled for all remaining files.")
                 shutil.copy2(src_file, dst_file)
                 print(f"  [OVERWRITE] {rel}")
                 changed = True
