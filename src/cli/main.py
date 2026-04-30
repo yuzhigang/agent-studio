@@ -140,37 +140,38 @@ def _list_instances_command(args):
     return 0
 
 
-def sync_models(world_dir: str, force: bool = False) -> int:
+def _discover_models(root: Path) -> dict[str, Path]:
+    """Discover models under root with two-level namespace structure."""
+    models: dict[str, Path] = {}
+    if not root.exists():
+        return models
+    for ns_dir in root.iterdir():
+        if not ns_dir.is_dir() or ns_dir.name == "shared":
+            continue
+        for model_dir in ns_dir.iterdir():
+            if not model_dir.is_dir():
+                continue
+            if not (model_dir / "model").is_dir():
+                continue
+            model_id = f"{ns_dir.name}.{model_dir.name}"
+            models[model_id] = model_dir / "model"
+    return models
+
+
+def sync_models(world_dir: str, force: bool = False, global_paths: list[str] | None = None) -> int:
     """Synchronize global templates into world-private agents/."""
     from src.runtime.model_resolver import ModelResolver
 
     world_path = Path(world_dir)
     world_agents = world_path / "agents"
 
-    # Discover global models
-    global_paths = ["agents"]  # Default global path
-    # TODO: read from config if available
+    global_paths = global_paths or ["agents"]
 
     global_models: dict[str, Path] = {}
     for gp_str in global_paths:
-        gp = Path(gp_str)
-        if not gp.exists():
-            continue
-        for model_dir in gp.rglob("*/model"):
-            if not model_dir.is_dir():
-                continue
-            model_id = model_dir.parent.name
-            if model_id not in global_models:
-                global_models[model_id] = model_dir
+        global_models.update(_discover_models(Path(gp_str)))
 
-    # Discover world models
-    world_models: dict[str, Path] = {}
-    if world_agents.exists():
-        for model_dir in world_agents.rglob("*/model"):
-            if not model_dir.is_dir():
-                continue
-            model_id = model_dir.parent.name
-            world_models[model_id] = model_dir
+    world_models: dict[str, Path] = _discover_models(world_agents)
 
     resolver = ModelResolver(str(world_dir), global_paths)
     any_changes = False
