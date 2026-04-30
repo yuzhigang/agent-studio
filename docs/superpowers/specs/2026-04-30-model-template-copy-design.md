@@ -55,6 +55,7 @@ class ModelResolver:
     def __init__(self, world_dir: str, global_paths: list[str]):
         ...
         self._copied: set[str] = set()  # track already-copied modelIds
+        self._shared_libs_copied: bool = False  # shared/libs/ copied once
 
     def resolve(self, model_id: str) -> Path | None:
         """Search world-private agents/ only. No global fallback."""
@@ -76,11 +77,17 @@ class ModelResolver:
 
 **Copy logic** (`_copy_from_template`):
 
+The function receives `template_path` (the `model/` subdirectory in global
+agents/). It uses `template_path.parent` to get the agent-level directory for
+copying `model/` and `libs/`:
+
 ```
-Input: template_path (path to model/ dir in global agents/)
+Input: template_path (Path to agents/{ns...}/{mid}/model/)
 1. Compute relative path from global root to agent dir
-2. Copy agent_dir/model/ → world_agents/{rel}/model/   (skip existing)
-3. Copy agent_dir/libs/ → world_agents/{rel}/libs/      (skip existing, if exists)
+   (template_path.parent relative to global root)
+2. Copy template_path/* → world_agents/{rel}/model/*   (skip existing)
+3. Copy template_path.parent/libs/* → world_agents/{rel}/libs/*
+   (skip existing, if agent_dir/libs/ exists)
 4. Copy shared/libs/ → world_agents/shared/libs/        (skip existing)
 ```
 
@@ -93,6 +100,9 @@ Simplifies several closures since models are guaranteed local.
 def model_loader(model_id: str) -> dict | None:
     try:
         model_dir = resolver.ensure(model_id)  # auto-copy if needed
+        # ensure() returns Path to model/ subdirectory.
+        # ModelLoader.load() expects the agent (parent) directory path,
+        # so we pass model_dir.parent.
         return ModelLoader.load(model_dir.parent)
     except ModelNotFoundError:
         logger.warning(...)
@@ -122,8 +132,8 @@ may reference at runtime. On first `ensure()` call in a world:
 2. If not, copy from `agents/shared/libs/`.
 3. If partially present, merge (skip existing files).
 
-This is done only once per world (tracked by `_copied` set reaching
-`shared/libs/`).
+This is done only once per world (tracked by `_shared_libs_copied` boolean
+flag on ModelResolver).
 
 ## Error Handling
 
