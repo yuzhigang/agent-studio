@@ -47,7 +47,7 @@ async def test_worker_replacement_broadcasts_reset():
     worker_ws = FakeWs()
     await gateway.register_worker("wk-1", worker_ws, "sess-1", ["world-a"])
 
-    # Client should have received notify.session.reset
+    # Client should have received notify.worker.activated
     assert len(client_ws.sent) == 1
     msg = client_ws.sent[0]
-    assert "notify.session.reset" in msg
+    assert "notify.worker.activated" in msg

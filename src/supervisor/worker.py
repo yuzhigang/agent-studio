@@ -142,7 +142,7 @@ class WorkerController:
         """
         worker = self.get_worker_by_world(world_id)
         if worker is None:
-            raise RuntimeError(f"No worker running world {world_id}")
+            raise WorkerRpcError(-32004, f"No worker running world {world_id}")
 
         # Generate a unique request ID if not present
         req_id = message.get("id")
@@ -196,7 +196,12 @@ class WorkerController:
         if worker is not None:
             worker.last_heartbeat = datetime.now(timezone.utc)
         if worlds_status:
-            for world_id, status in worlds_status.items():
+            # Handle both dict {world_id: status} and list [{world_id, status, ...}] formats
+            if isinstance(worlds_status, list):
+                worlds_iter = ((s.get("world_id"), s) for s in worlds_status)
+            else:
+                worlds_iter = worlds_status.items()
+            for world_id, status in worlds_iter:
                 old = self._world_status_cache.get(world_id, {})
                 new_status = status.get("status")
                 old_status = old.get("status")

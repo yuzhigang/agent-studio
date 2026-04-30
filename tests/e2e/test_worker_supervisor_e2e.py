@@ -109,7 +109,7 @@ async def test_full_supervisor_worker_flow(tmp_base_dir):
                 async with session.get(f"http://127.0.0.1:{http_port}/api/workers") as resp:
                     assert resp.status == 200
                     data = await resp.json()
-                    workers = data.get("workers", [])
+                    workers = data.get("items", [])
                     matching = [w for w in workers if w["worker_id"] == "e2e-worker-01"]
                     assert len(matching) == 1, f"Worker not found in {workers}"
                     assert matching[0]["world_ids"] == ["test-world-01"]
@@ -122,7 +122,7 @@ async def test_full_supervisor_worker_flow(tmp_base_dir):
                 "params": {
                     "worker_id": "e2e-worker-01",
                     "session_id": "e2e-sess-01",
-                    "worlds": [{"world_id": "test-world-01", "status": "running", "instance_count": 0}],
+                    "worlds": {"test-world-01": {"status": "running", "scene_count": 0, "instance_count": 0, "isolated_scenes": []}},
                 },
             }))
 
@@ -133,8 +133,8 @@ async def test_full_supervisor_worker_flow(tmp_base_dir):
             async with aiohttp.ClientSession() as session:
                 async with session.post(f"http://127.0.0.1:{http_port}/api/worlds/test-world-01/stop") as resp:
                     data = await resp.json()
-                    # Should either succeed with stop_requested or have no worker handling it
-                    assert resp.status in (200, 404, 502)
+                    # Mock worker doesn't respond to JSON-RPC, so expect timeout or other error
+                    assert resp.status in (200, 404, 502, 504)
 
             # Phase 5: Deactivate worker
             await ws.send(json.dumps({
@@ -153,7 +153,7 @@ async def test_full_supervisor_worker_flow(tmp_base_dir):
                 async with session.get(f"http://127.0.0.1:{http_port}/api/workers") as resp:
                     assert resp.status == 200
                     data = await resp.json()
-                    workers = data.get("workers", [])
+                    workers = data.get("items", [])
                     matching = [w for w in workers if w["worker_id"] == "e2e-worker-01"]
                     assert len(matching) == 0, f"Worker should be deregistered: {matching}"
 
@@ -216,7 +216,7 @@ async def test_run_inline_loopback_registration(tmp_base_dir):
                 async with session.get(f"http://127.0.0.1:{http_port}/api/workers") as resp:
                     assert resp.status == 200
                     data = await resp.json()
-                    workers = data.get("workers", [])
+                    workers = data.get("items", [])
                     assert len(workers) >= 1, f"Expected at least 1 registered worker, got {workers}"
                     # run-inline creates a worker with auto-generated worker_id
                     w = workers[0]
@@ -231,7 +231,7 @@ async def test_run_inline_loopback_registration(tmp_base_dir):
                 async with session.get(f"http://127.0.0.1:{http_port}/api/workers") as resp:
                     assert resp.status == 200
                     data = await resp.json()
-                    workers = data.get("workers", [])
+                    workers = data.get("items", [])
                     assert len(workers) >= 1, f"Worker should still be registered after heartbeats"
 
         finally:
@@ -251,7 +251,7 @@ async def test_run_inline_loopback_registration(tmp_base_dir):
                 async with session.get(f"http://127.0.0.1:{http_port}/api/workers") as resp:
                     assert resp.status == 200
                     data = await resp.json()
-                    workers = data.get("workers", [])
+                    workers = data.get("items", [])
                     matching = [w for w in workers if "test-world-01" in w.get("world_ids", [])]
                     assert len(matching) == 0, f"Worker should be deregistered after shutdown: {matching}"
 

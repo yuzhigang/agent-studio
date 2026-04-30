@@ -3,7 +3,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from src.supervisor.server import _handle_list_instances
+from src.supervisor.handlers.instances import handle_world_instances
 from src.supervisor.worker import WorkerController
 
 
@@ -14,7 +14,7 @@ async def app():
     app["gateway"] = gateway
     app["ws_port"] = 8001
     app["http_port"] = 8080
-    app.router.add_get("/api/worlds/{world_id}/instances", _handle_list_instances)
+    app.router.add_get("/api/worlds/{world_id}/instances", handle_world_instances)
     return app
 
 
@@ -32,17 +32,16 @@ async def test_list_instances_no_worker(client):
     resp = await client.get("/api/worlds/test-world/instances")
     assert resp.status == 404
     data = await resp.json()
-    assert data["error"] == "not_running"
+    assert data["error"] == "world_not_found"
 
 
 @pytest.mark.anyio
 async def test_list_instances_success(client, app):
     gateway = app["gateway"]
-    # Mock send_request to return success without actual worker
-    original_send_request = gateway.send_request
-    async def mock_send_request(world_id, message, timeout=5.0):
-        return {"instances": [{"id": "inst-1", "model": "model-a", "state": "idle"}]}
-    gateway.send_request = mock_send_request
+    # Mock proxy_to_worker to return success without actual worker
+    async def mock_proxy(world_id, method, params=None):
+        return {"instances": [{"id": "inst-1", "model": "model-a", "scope": "world", "state": {"current": "idle"}, "lifecycle_state": "active"}]}
+    gateway.proxy_to_worker = mock_proxy
 
     # Register a fake worker so get_worker_by_world returns something
     from unittest.mock import AsyncMock
@@ -52,7 +51,4 @@ async def test_list_instances_success(client, app):
     resp = await client.get("/api/worlds/test-world/instances")
     assert resp.status == 200
     data = await resp.json()
-    assert data["instances"][0]["id"] == "inst-1"
-
-    # Restore
-    gateway.send_request = original_send_request
+    assert data["items"][0]["instance_id"] == "inst-1"
