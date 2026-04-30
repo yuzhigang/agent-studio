@@ -160,6 +160,17 @@ def sync_models(world_dir: str, force: bool = False) -> int:
     for model_id in sorted(private_models):
         print(f"[SKIP] {model_id}")
 
+    # Synchronize shared/libs/ directory
+    global_shared_libs = Path("agents/shared/libs")
+    if global_shared_libs.exists():
+        world_shared_libs = world_agents / "shared/libs"
+        changed_libs, force = _sync_single_model(
+            global_shared_libs, world_shared_libs, force
+        )
+        if changed_libs:
+            print("[ADD] shared/libs")
+        any_changes = any_changes or changed_libs
+
     if not any_changes and not private_models:
         print("No changes needed.")
     return 0
