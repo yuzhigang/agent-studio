@@ -172,154 +172,16 @@ class WorkerManager:
                 )
 
     async def handle_command(self, method: str, params: dict) -> dict:
-        """Handle a command from Supervisor asynchronously.
+        """Dispatch a command to the appropriate handler."""
+        from src.worker.commands import get_handler
 
-        I/O-intensive operations (checkpoint, world loading, scene start/stop)
-        are offloaded to a thread pool via asyncio.to_thread to avoid blocking
-        the event loop. Lightweight in-memory operations run directly.
-        """
+        handler = get_handler(method)
+        if handler is None:
+            raise JsonRpcError(-32601, f"Unknown method: {method}")
+
         world_id = params.get("world_id")
         bundle = self.worlds.get(world_id) if world_id else None
-
-        if method == "world.stop":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            force = params.get("force_stop_on_shutdown")
-            await self._graceful_shutdown(
-                bundle,
-                force_stop_on_shutdown=force,
-                permanent=False,
-            )
-            return {"status": "stopped"}
-
-        if method == "world.remove":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            force = params.get("force_stop_on_shutdown")
-            await self._graceful_shutdown(
-                bundle,
-                force_stop_on_shutdown=force,
-                permanent=True,
-            )
-            self.worlds.pop(world_id, None)
-            return {"status": "removed"}
-
-        if method == "world.checkpoint":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            await asyncio.to_thread(bundle["state_manager"].checkpoint_world, world_id)
-            return {"status": "checkpointed"}
-
-        if method == "world.getStatus":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            return {
-                "world_id": world_id,
-                "loaded": True,
-                "status": bundle.get("runtime_status", "running"),
-                "scenes": [s["scene_id"] for s in bundle["scene_manager"].list_by_world(world_id)],
-            }
-
-        if method == "world.instances.list":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            instances = bundle["instance_manager"].list_by_world(world_id)
-            return {
-                "instances": [
-                    {
-                        "id": inst.instance_id,
-                        "model": inst.model_name,
-                        "scope": inst.scope,
-                        "state": inst.state.get("current"),
-                        "lifecycle_state": inst.lifecycle_state,
-                        "variables": inst.variables,
-                        "attributes": inst.attributes,
-                    }
-                    for inst in instances
-                ]
-            }
-
-        if method == "world.start":
-            if bundle is not None:
-                if bundle.get("runtime_status", "running") == "running":
-                    return {"status": "already_running"}
-                self._bind_world_bundle(world_id, bundle)
-                self._start_shared_scenes_for_bundle(bundle)
-                state_mgr = bundle.get("state_manager")
-                if state_mgr is not None and state_mgr._task is None:
-                    await state_mgr.start_async()
-                bundle["runtime_status"] = "running"
-                return {"status": "started"}
-            world_dir = params.get("world_dir")
-            if world_dir is None:
-                raise JsonRpcError(-32602, "world_dir required for world.start")
-            base_dir = os.path.dirname(os.path.abspath(world_dir))
-            registry = WorldRegistry(base_dir=base_dir)
-            new_bundle = await asyncio.to_thread(registry.load_world, world_id)
-            self.worlds[world_id] = new_bundle
-            self._bind_world_bundle(world_id, new_bundle)
-            self._start_shared_scenes_for_bundle(new_bundle)
-            state_mgr = new_bundle.get("state_manager")
-            if state_mgr is not None and state_mgr._task is None:
-                await state_mgr.start_async()
-            new_bundle["runtime_status"] = "running"
-            return {"status": "started"}
-
-        if method == "world.reload":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            raise JsonRpcError(-32601, "world.reload not yet implemented")
-
-        if method == "scene.start":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            scene_id = params.get("scene_id")
-            if scene_id is None:
-                raise JsonRpcError(-32602, "scene_id required")
-            existing = bundle["scene_manager"].get(world_id, scene_id)
-            if existing is not None:
-                return {"status": "already_running"}
-            await asyncio.to_thread(bundle["scene_manager"].start, world_id, scene_id, mode="isolated")
-            return {"status": "started"}
-
-        if method == "scene.stop":
-            if bundle is None:
-                raise JsonRpcError(-32004, f"World {world_id} not loaded")
-            scene_id = params.get("scene_id")
-            if scene_id is None:
-                raise JsonRpcError(-32602, "scene_id required")
-            ok = await asyncio.to_thread(bundle["scene_manager"].stop, world_id, scene_id)
-            if not ok:
-                raise JsonRpcError(-32002, "scene not found")
-            return {"status": "stopped"}
-
-        if method == "messageHub.publish":
-            hub = self._message_hub
-            if hub is None:
-                raise JsonRpcError(-32102, "message hub not initialized")
-            hub.on_inbound(self._message_envelope_from_params(params))
-            return {"acked": True}
-
-        if method == "messageHub.publishBatch":
-            hub = self._message_hub
-            if hub is None:
-                raise JsonRpcError(-32102, "message hub not initialized")
-            records = params.get("records", [])
-            for record in records:
-                hub.on_inbound(
-                    self._message_envelope_from_params(
-                        record,
-                        default_target_world=params.get("target_world"),
-                    )
-                )
-            return {
-                "acked_ids": [
-                    record.get("message_id") or record.get("id")
-                    for record in records
-                ]
-            }
-
-        raise JsonRpcError(-32601, f"Unknown method: {method}")
+        return await handler(self, bundle, params)
 
     async def _graceful_shutdown(
         self,
