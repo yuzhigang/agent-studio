@@ -3,9 +3,9 @@ import json
 import shutil
 import subprocess
 import sys
-import uuid
 
 from aiohttp import web
+from src.supervisor import handlers
 from src.supervisor.worker import WorkerController
 
 
@@ -42,47 +42,28 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080):
     app["ws_port"] = ws_port
     app["http_port"] = http_port
 
-    app.router.add_post("/api/worlds/{world_id}/start", _handle_start)
-    app.router.add_post("/api/worlds/{world_id}/stop", _handle_stop)
-    app.router.add_get("/api/worlds/{world_id}/instances", _handle_list_instances)
-    app.router.add_get("/api/workers", _handle_workers)
+    # REST API routes
+    app.router.add_get("/api/workers", handlers.handle_workers)
+    app.router.add_get("/api/workers/{worker_id}/worlds", handlers.handle_worker_worlds)
+    app.router.add_get("/api/worlds/{world_id}", handlers.handle_world_detail)
+    app.router.add_post("/api/worlds/{world_id}/start", handlers.handle_world_start)
+    app.router.add_post("/api/worlds/{world_id}/stop", handlers.handle_world_stop)
+    app.router.add_post("/api/worlds/{world_id}/checkpoint", handlers.handle_world_checkpoint)
+    app.router.add_get("/api/worlds/{world_id}/instances", handlers.handle_world_instances)
+    app.router.add_get("/api/worlds/{world_id}/instances/{instance_id}", handlers.handle_instance_detail)
+    app.router.add_get("/api/worlds/{world_id}/models", handlers.handle_world_models)
+    app.router.add_get("/api/worlds/{world_id}/models/{model_id}", handlers.handle_model_detail)
+    app.router.add_get("/api/worlds/{world_id}/scenes", handlers.handle_world_scenes)
+    app.router.add_get("/api/worlds/{world_id}/scenes/{scene_id}/instances", handlers.handle_scene_instances)
+    app.router.add_post("/api/worlds/{world_id}/scenes/{scene_id}/start", handlers.handle_scene_start)
+    app.router.add_post("/api/worlds/{world_id}/scenes/{scene_id}/stop", handlers.handle_scene_stop)
+
+    # WebSocket routes
     app.router.add_get("/workers", _handle_worker_ws)
     app.router.add_get("/ws", _handle_client_ws)
 
     web.run_app(app, host="0.0.0.0", port=http_port)
     return 0
-
-
-async def _handle_start(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
-    ws_port = request.app["ws_port"]
-    world_id = request.match_info["world_id"]
-    worker = gateway.get_worker_by_world(world_id)
-    if worker is not None:
-        return web.json_response({"status": "already_running"})
-
-    # Spawn local subprocess
-    world_dir = f"{gateway._base_dir}/{world_id}"
-    supervisor_ws = f"ws://localhost:{ws_port}/workers"
-    cmd = _build_runtime_cmd(world_dir, supervisor_ws)
-    subprocess.Popen(cmd)
-    return web.json_response({"status": "starting"})
-
-
-async def _handle_stop(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
-    world_id = request.match_info["world_id"]
-    worker = gateway.get_worker_by_world(world_id)
-    if worker is None:
-        return web.json_response({"error": "not_running"}, status=404)
-
-    ok = await gateway.send_to_worker_by_world(
-        world_id,
-        {"jsonrpc": "2.0", "id": 1, "method": "world.stop", "params": {"world_id": world_id}},
-    )
-    if not ok:
-        return web.json_response({"error": "send_failed"}, status=502)
-    return web.json_response({"status": "stop_requested"})
 
 
 async def _handle_worker_ws(request: web.Request):
@@ -130,45 +111,6 @@ async def _handle_worker_ws(request: web.Request):
     if worker_id:
         await gateway.unregister_worker(worker_id)
     return ws
-
-
-async def _handle_workers(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
-    workers = []
-    for worker in gateway._workers.values():
-        workers.append({
-            "worker_id": worker.worker_id,
-            "session_id": worker.session_id,
-            "world_ids": worker.world_ids,
-            "metadata": worker.metadata,
-            "status": worker.status,
-        })
-    return web.json_response({"workers": workers})
-
-
-async def _handle_list_instances(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
-    world_id = request.match_info["world_id"]
-
-    worker = gateway.get_worker_by_world(world_id)
-    if worker is None:
-        return web.json_response({"error": "not_running"}, status=404)
-
-    try:
-        result = await gateway.send_request(
-            world_id,
-            {
-                "jsonrpc": "2.0",
-                "id": str(uuid.uuid4()),
-                "method": "world.instances.list",
-                "params": {"world_id": world_id},
-            },
-        )
-        return web.json_response(result)
-    except TimeoutError:
-        return web.json_response({"error": "timeout"}, status=504)
-    except RuntimeError as e:
-        return web.json_response({"error": str(e)}, status=502)
 
 
 async def _handle_client_ws(request: web.Request):
