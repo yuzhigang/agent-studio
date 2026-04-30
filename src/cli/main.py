@@ -182,6 +182,8 @@ def sync_models(world_dir: str, force: bool = False) -> int:
 
 def _find_global_root(template_dir: Path, global_paths: list[str]) -> Path:
     """Find which global root a template directory belongs to."""
+    if not global_paths:
+        raise ValueError("global_paths is empty")
     for gp_str in global_paths:
         gp = Path(gp_str)
         try:
@@ -189,9 +191,7 @@ def _find_global_root(template_dir: Path, global_paths: list[str]) -> Path:
             return gp
         except ValueError:
             continue
-    if not global_paths:
-        raise ValueError("global_paths is empty")
-    return Path(global_paths[0])
+    raise ValueError(f"template_dir {template_dir} is not under any global path: {global_paths}")
 
 
 def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> tuple[bool, bool]:
