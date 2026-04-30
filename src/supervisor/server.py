@@ -93,6 +93,12 @@ async def _handle_worker_ws(request: web.Request):
     async for msg in ws:
         if msg.type == web.WSMsgType.TEXT:
             data = json.loads(msg.data)
+
+            # Handle JSON-RPC responses from worker
+            if "id" in data and ("result" in data or "error" in data):
+                gateway._handle_response(data)
+                continue
+
             method = data.get("method")
             params = data.get("params", {})
 
