@@ -220,6 +220,25 @@ class WorkerManager:
                 "scenes": [s["scene_id"] for s in bundle["scene_manager"].list_by_world(world_id)],
             }
 
+        if method == "world.instances.list":
+            if bundle is None:
+                raise JsonRpcError(-32004, f"World {world_id} not loaded")
+            instances = bundle["instance_manager"].list_by_world(world_id)
+            return {
+                "instances": [
+                    {
+                        "id": inst.instance_id,
+                        "model": inst.model_name,
+                        "scope": inst.scope,
+                        "state": inst.state.get("current"),
+                        "lifecycle_state": inst.lifecycle_state,
+                        "variables": inst.variables,
+                        "attributes": inst.attributes,
+                    }
+                    for inst in instances
+                ]
+            }
+
         if method == "world.start":
             if bundle is not None:
                 if bundle.get("runtime_status", "running") == "running":

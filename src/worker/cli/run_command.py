@@ -282,6 +282,9 @@ def _register_worker_handlers(conn: JsonRpcConnection, worker_manager):
     async def world_get_status(params, req_id):
         return await worker_manager.handle_command("world.getStatus", params)
 
+    async def world_instances_list(params, req_id):
+        return await worker_manager.handle_command("world.instances.list", params)
+
     async def scene_start(params, req_id):
         return await worker_manager.handle_command("scene.start", params)
 
@@ -298,6 +301,7 @@ def _register_worker_handlers(conn: JsonRpcConnection, worker_manager):
     conn.register("world.remove", world_remove)
     conn.register("world.checkpoint", world_checkpoint)
     conn.register("world.getStatus", world_get_status)
+    conn.register("world.instances.list", world_instances_list)
     conn.register("scene.start", scene_start)
     conn.register("scene.stop", scene_stop)
     conn.register("messageHub.publish", message_hub_publish)
