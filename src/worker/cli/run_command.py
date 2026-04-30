@@ -270,42 +270,14 @@ async def _send_heartbeats(ws, conn, worker_manager):
 
 
 def _register_worker_handlers(conn: JsonRpcConnection, worker_manager):
-    async def world_stop(params, req_id):
-        return await worker_manager.handle_command("world.stop", params)
+    """Auto-register all commands from the commands registry."""
+    from src.worker.commands import _REGISTRY
 
-    async def world_remove(params, req_id):
-        return await worker_manager.handle_command("world.remove", params)
+    for method in _REGISTRY:
+        async def handler(params, req_id, method=method):
+            return await worker_manager.handle_command(method, params)
 
-    async def world_checkpoint(params, req_id):
-        return await worker_manager.handle_command("world.checkpoint", params)
-
-    async def world_get_status(params, req_id):
-        return await worker_manager.handle_command("world.getStatus", params)
-
-    async def world_instances_list(params, req_id):
-        return await worker_manager.handle_command("world.instances.list", params)
-
-    async def scene_start(params, req_id):
-        return await worker_manager.handle_command("scene.start", params)
-
-    async def scene_stop(params, req_id):
-        return await worker_manager.handle_command("scene.stop", params)
-
-    async def message_hub_publish(params, req_id):
-        return await worker_manager.handle_command("messageHub.publish", params)
-
-    async def message_hub_publish_batch(params, req_id):
-        return await worker_manager.handle_command("messageHub.publishBatch", params)
-
-    conn.register("world.stop", world_stop)
-    conn.register("world.remove", world_remove)
-    conn.register("world.checkpoint", world_checkpoint)
-    conn.register("world.getStatus", world_get_status)
-    conn.register("world.instances.list", world_instances_list)
-    conn.register("scene.start", scene_start)
-    conn.register("scene.stop", scene_stop)
-    conn.register("messageHub.publish", message_hub_publish)
-    conn.register("messageHub.publishBatch", message_hub_publish_batch)
+        conn.register(method, handler)
 
 
 # Legacy: per-bundle handlers for direct WebSocket server
