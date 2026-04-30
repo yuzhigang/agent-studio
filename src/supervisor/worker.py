@@ -12,6 +12,20 @@ class WorkerRpcError(RuntimeError):
         super().__init__(message)
 
 
+_RPC_ERROR_MAP = {
+    -32004: 404,  # World/Scene/Instance not found
+    -32003: 409,  # Illegal lifecycle
+    -32002: 404,  # Scene not found
+    -32001: 409,  # World locked
+    -32602: 400,  # Invalid params
+    -32601: 501,  # Method not found
+}
+
+
+def rpc_code_to_http(code: int) -> int:
+    return _RPC_ERROR_MAP.get(code, 502)
+
+
 @dataclass
 class WorkerState:
     worker_id: str
