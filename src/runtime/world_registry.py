@@ -6,6 +6,7 @@ import yaml
 
 from src.runtime.agent_namespace import agent_namespace_for_path
 from src.runtime.instance_loader import InstanceLoader
+from src.runtime.lib.exceptions import ModelNotFoundError
 from src.runtime.lib.registry import LibRegistry
 from src.runtime.lib.sandbox import SandboxExecutor
 from src.runtime.locks.world_lock import WorldLock
@@ -97,10 +98,10 @@ class WorldRegistry:
             def model_loader(model_id: str) -> dict | None:
                 try:
                     model_dir = resolver.ensure(model_id)
-                    return ModelLoader.load(model_dir.parent)
-                except Exception as e:
-                    logger.warning("Model '%s' not found: %s", model_id, e)
+                except ModelNotFoundError:
+                    logger.warning("Model '%s' not found in world or global templates", model_id)
                     return None
+                return ModelLoader.load(model_dir.parent)
 
             def agent_namespace_resolver(model_id: str) -> str | None:
                 model_dir = resolver.resolve(model_id)
@@ -159,10 +160,12 @@ class WorldRegistry:
             )
             scene_mgr.set_state_manager(state_mgr)
 
+            # Load instances first: model_loader -> resolver.ensure() copies missing models/libs
+            # from global templates into world-private agents/. Then scan picks them up.
             self._load_instance_declarations(world_id, world_dir, im, model_loader)
 
             if world_agents_dir.exists():
-                lib_registry.scan(str(world_agents_dir), clear=True)
+                lib_registry.scan(str(world_agents_dir), clear=False)
 
             state_mgr.restore_world(world_id)
             state_mgr.track_world(world_id)
