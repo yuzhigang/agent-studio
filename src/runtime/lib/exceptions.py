@@ -45,3 +45,9 @@ class ModelConfigError(RuntimeError):
         self.path = path
         self.details = details
         super().__init__(f"Model config error at {path}: {details}")
+
+
+class ModelNotFoundError(RuntimeError):
+    def __init__(self, model_id: str):
+        self.model_id = model_id
+        super().__init__(f"Model not found: {model_id}")
