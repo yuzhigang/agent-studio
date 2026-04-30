@@ -95,21 +95,18 @@ class WorldRegistry:
             world_agents_dir = Path(world_dir) / "agents"
 
             def model_loader(model_id: str) -> dict | None:
-                model_dir = resolver.resolve(model_id)
-                if model_dir is not None:
+                try:
+                    model_dir = resolver.ensure(model_id)
                     return ModelLoader.load(model_dir.parent)
-                return None
+                except Exception as e:
+                    logger.warning("Model '%s' not found: %s", model_id, e)
+                    return None
 
             def agent_namespace_resolver(model_id: str) -> str | None:
                 model_dir = resolver.resolve(model_id)
                 if model_dir is None:
                     return None
-                scan_roots = [world_agents_dir, *[Path(p) for p in self._global_model_paths]]
-                for root in scan_roots:
-                    namespace = agent_namespace_for_path(model_dir, root, "model")
-                    if namespace is not None:
-                        return namespace
-                return None
+                return agent_namespace_for_path(model_dir, world_agents_dir, "model")
 
             trigger_registry = TriggerRegistry()
             trigger_registry.add_trigger(EventTrigger(bus_reg))
@@ -117,13 +114,6 @@ class WorldRegistry:
 
             bus = bus_reg.get_or_create(world_id)
             lib_registry = LibRegistry()
-            global_roots = [Path(path) for path in self._global_model_paths]
-            first_scan = True
-            for root in [*global_roots, world_agents_dir]:
-                if not root.exists():
-                    continue
-                lib_registry.scan(str(root), clear=first_scan)
-                first_scan = False
             sandbox_executor = SandboxExecutor(registry=lib_registry)
 
             im = InstanceManager(
@@ -170,6 +160,9 @@ class WorldRegistry:
             scene_mgr.set_state_manager(state_mgr)
 
             self._load_instance_declarations(world_id, world_dir, im, model_loader)
+
+            if world_agents_dir.exists():
+                lib_registry.scan(str(world_agents_dir), clear=True)
 
             state_mgr.restore_world(world_id)
             state_mgr.track_world(world_id)
