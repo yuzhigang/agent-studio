@@ -3,11 +3,11 @@ from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_
 
 
 async def handle_world_instances(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
 
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
         instances = result.get("instances", [])
 
         model_id = request.query.get("model_id")
@@ -46,12 +46,12 @@ async def handle_world_instances(request: web.Request):
 
 
 async def handle_instance_detail(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     instance_id = request.match_info["instance_id"]
 
     try:
-        result = await gateway.proxy_to_worker(
+        result = await controller.proxy_to_worker(
             world_id, "world.instances.get", {"world_id": world_id, "instance_id": instance_id}
         )
         return web.json_response(result)

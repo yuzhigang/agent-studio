@@ -34,11 +34,11 @@ def _build_runtime_cmd(world_dir: str, supervisor_ws: str) -> list[str]:
 
 
 def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080, supervisor_ws_url=None):
-    gateway = WorkerController(base_dir=base_dir)
+    controller = WorkerController(base_dir=base_dir)
     # Start heartbeat monitor as background task
-    asyncio.get_event_loop().create_task(gateway.start_heartbeat_monitor())
+    asyncio.get_event_loop().create_task(controller.start_heartbeat_monitor())
     app = web.Application()
-    app["gateway"] = gateway
+    app["controller"] = controller
     app["ws_port"] = ws_port
     app["http_port"] = http_port
     app["supervisor_ws_url"] = supervisor_ws_url or f"ws://localhost:{ws_port}/workers"
@@ -68,7 +68,7 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080, supervisor_w
 
 
 async def _handle_worker_ws(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
@@ -80,7 +80,7 @@ async def _handle_worker_ws(request: web.Request):
 
             # Handle JSON-RPC responses from worker
             if "id" in data and ("result" in data or "error" in data):
-                gateway._handle_response(data)
+                controller._handle_response(data)
                 continue
 
             method = data.get("method")
@@ -92,33 +92,33 @@ async def _handle_worker_ws(request: web.Request):
                 world_ids = params.get("world_ids", [])
                 metadata = params.get("metadata", {})
                 if worker_id and session_id:
-                    await gateway.register_worker(worker_id, ws, session_id, world_ids, metadata)
+                    await controller.register_worker(worker_id, ws, session_id, world_ids, metadata)
 
             elif method == "notify.worker.heartbeat":
                 wid = params.get("worker_id")
                 worlds = params.get("worlds", {})
                 if wid:
-                    await gateway.update_heartbeat(wid, worlds)
+                    await controller.update_heartbeat(wid, worlds)
 
             elif method == "notify.worker.deactivated":
                 wid = params.get("worker_id")
                 if wid:
-                    await gateway.unregister_worker(wid)
+                    await controller.unregister_worker(wid)
                     worker_id = None
 
         elif msg.type == web.WSMsgType.ERROR:
             break
 
     if worker_id:
-        await gateway.unregister_worker(worker_id)
+        await controller.unregister_worker(worker_id)
     return ws
 
 
 async def _handle_client_ws(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-    await gateway.add_client(ws)
+    await controller.add_client(ws)
     try:
         async for msg in ws:
             if msg.type == web.WSMsgType.TEXT:
@@ -126,9 +126,9 @@ async def _handle_client_ws(request: web.Request):
                 data = json.loads(msg.data)
                 world_id = data.get("params", {}).get("world_id")
                 if world_id:
-                    await gateway.send_to_worker_by_world(world_id, data)
+                    await controller.send_to_worker_by_world(world_id, data)
             elif msg.type == web.WSMsgType.ERROR:
                 break
     finally:
-        await gateway.remove_client(ws)
+        await controller.remove_client(ws)
     return ws

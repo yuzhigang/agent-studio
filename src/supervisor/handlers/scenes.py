@@ -3,11 +3,11 @@ from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_
 
 
 async def handle_world_scenes(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
 
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.scenes.list", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.scenes.list", {"world_id": world_id})
         scenes = result.get("scenes", [])
         return web.json_response({"items": scenes, "total": len(scenes)})
     except WorkerRpcError as e:
@@ -18,12 +18,12 @@ async def handle_world_scenes(request: web.Request):
 
 
 async def handle_scene_instances(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     scene_id = request.match_info["scene_id"]
 
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
         instances = result.get("instances", [])
 
         model_id = request.query.get("model_id")
@@ -62,16 +62,16 @@ async def handle_scene_instances(request: web.Request):
 
 
 async def handle_scene_start(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     scene_id = request.match_info["scene_id"]
     try:
-        result = await gateway.proxy_to_worker(
+        result = await controller.proxy_to_worker(
             world_id, "scene.start", {"world_id": world_id, "scene_id": scene_id}
         )
         if result.get("status") == "started":
-            previous = gateway._world_status_cache.get(world_id, {}).get("status")
-            await gateway._broadcast({
+            previous = controller._world_status_cache.get(world_id, {}).get("status")
+            await controller._broadcast({
                 "jsonrpc": "2.0",
                 "method": "notify.world.status_changed",
                 "params": {
@@ -88,16 +88,16 @@ async def handle_scene_start(request: web.Request):
 
 
 async def handle_scene_stop(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     scene_id = request.match_info["scene_id"]
     try:
-        result = await gateway.proxy_to_worker(
+        result = await controller.proxy_to_worker(
             world_id, "scene.stop", {"world_id": world_id, "scene_id": scene_id}
         )
         if result.get("status") == "stopped":
-            previous = gateway._world_status_cache.get(world_id, {}).get("status")
-            await gateway._broadcast({
+            previous = controller._world_status_cache.get(world_id, {}).get("status")
+            await controller._broadcast({
                 "jsonrpc": "2.0",
                 "method": "notify.world.status_changed",
                 "params": {

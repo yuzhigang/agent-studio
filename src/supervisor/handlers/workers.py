@@ -3,9 +3,9 @@ from src.supervisor.worker import WorkerController
 
 
 async def handle_workers(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     workers = []
-    for worker in gateway._workers.values():
+    for worker in controller._workers.values():
         workers.append({
             "worker_id": worker.worker_id,
             "session_id": worker.session_id,
@@ -17,15 +17,15 @@ async def handle_workers(request: web.Request):
 
 
 async def handle_worker_worlds(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     worker_id = request.match_info["worker_id"]
-    worker = gateway.get_worker(worker_id)
+    worker = controller.get_worker(worker_id)
     if worker is None:
         return web.json_response({"error": "worker_not_found"}, status=404)
 
     worlds = []
     for world_id in worker.world_ids:
-        world_data = gateway._world_status_cache.get(world_id, {})
+        world_data = controller._world_status_cache.get(world_id, {})
         worlds.append({
             "world_id": world_id,
             "status": world_data.get("status", "unknown"),

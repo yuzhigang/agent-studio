@@ -7,9 +7,9 @@ from src.supervisor.handlers.workers import handle_workers
 
 @pytest.mark.anyio
 async def test_full_api_flow():
-    gateway = WorkerController(base_dir="test_worlds")
+    controller = WorkerController(base_dir="test_worlds")
     app = web.Application()
-    app["gateway"] = gateway
+    app["controller"] = controller
     app["ws_port"] = 8001
     app["http_port"] = 8080
 

@@ -3,11 +3,11 @@ from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_
 
 
 async def handle_world_models(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
 
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.models.list", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.models.list", {"world_id": world_id})
         models = result.get("models", [])
         return web.json_response({"items": models, "total": len(models)})
     except WorkerRpcError as e:
@@ -18,12 +18,12 @@ async def handle_world_models(request: web.Request):
 
 
 async def handle_model_detail(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     model_id = request.match_info["model_id"]
 
     try:
-        result = await gateway.proxy_to_worker(
+        result = await controller.proxy_to_worker(
             world_id, "world.models.get", {"world_id": world_id, "model_id": model_id}
         )
         return web.json_response(result)

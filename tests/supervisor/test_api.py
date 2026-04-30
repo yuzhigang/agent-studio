@@ -5,14 +5,14 @@ from src.supervisor.worker import WorkerController
 
 
 @pytest.fixture
-def gateway():
+def controller():
     return WorkerController(base_dir="test_worlds")
 
 
 @pytest.fixture
-def app(gateway):
+def app(controller):
     app = web.Application()
-    app["gateway"] = gateway
+    app["controller"] = controller
     app["ws_port"] = 8001
     app["http_port"] = 8080
     return app
@@ -41,7 +41,7 @@ async def test_get_worker_worlds_not_found(app):
 async def test_get_world_instances_with_filter(app):
     from src.supervisor.handlers.instances import handle_world_instances
 
-    gateway = app["gateway"]
+    controller = app["controller"]
     async def mock_proxy(world_id, method, params=None):
         return {
             "instances": [
@@ -49,9 +49,9 @@ async def test_get_world_instances_with_filter(app):
                 {"id": "i2", "model": "car", "scope": "world", "state": {"current": "busy"}, "lifecycle_state": "active"},
             ]
         }
-    gateway.proxy_to_worker = mock_proxy
-    gateway._workers["worker1"] = type("W", (), {"worker_id": "worker1", "world_ids": ["w1"]})()
-    gateway._world_to_worker["w1"] = "worker1"
+    controller.proxy_to_worker = mock_proxy
+    controller._workers["worker1"] = type("W", (), {"worker_id": "worker1", "world_ids": ["w1"]})()
+    controller._world_to_worker["w1"] = "worker1"
 
     request = type("Req", (), {
         "app": app,
@@ -70,18 +70,18 @@ async def test_get_world_instances_with_filter(app):
 async def test_post_world_stop_triggers_broadcast(app):
     from src.supervisor.handlers.worlds import handle_world_stop
 
-    gateway = app["gateway"]
+    controller = app["controller"]
     broadcasts = []
     async def mock_broadcast(msg):
         broadcasts.append(msg)
-    gateway._broadcast = mock_broadcast
-    gateway._world_status_cache["w1"] = {"status": "running"}
+    controller._broadcast = mock_broadcast
+    controller._world_status_cache["w1"] = {"status": "running"}
 
     async def mock_proxy(world_id, method, params=None):
         return {"status": "stopped"}
-    gateway.proxy_to_worker = mock_proxy
-    gateway._workers["worker1"] = type("W", (), {"worker_id": "worker1"})()
-    gateway._world_to_worker["w1"] = "worker1"
+    controller.proxy_to_worker = mock_proxy
+    controller._workers["worker1"] = type("W", (), {"worker_id": "worker1"})()
+    controller._world_to_worker["w1"] = "worker1"
 
     request = type("Req", (), {"app": app, "match_info": {"world_id": "w1"}})()
     response = await handle_world_stop(request)

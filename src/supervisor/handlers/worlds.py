@@ -5,14 +5,14 @@ from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_
 
 
 async def handle_world_start(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     supervisor_ws = request.app["supervisor_ws_url"]
     world_id = request.match_info["world_id"]
-    worker = gateway.get_worker_by_world(world_id)
+    worker = controller.get_worker_by_world(world_id)
     if worker is not None:
         return web.json_response({"status": "already_running"})
 
-    world_dir = f"{gateway._base_dir}/{world_id}"
+    world_dir = f"{controller._base_dir}/{world_id}"
 
     # Import here to avoid circular dependency
     from src.supervisor.server import _build_runtime_cmd
@@ -22,13 +22,13 @@ async def handle_world_start(request: web.Request):
 
 
 async def handle_world_stop(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.stop", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.stop", {"world_id": world_id})
         if result.get("status") == "stopped":
-            previous = gateway._world_status_cache.get(world_id, {}).get("status")
-            await gateway._broadcast({
+            previous = controller._world_status_cache.get(world_id, {}).get("status")
+            await controller._broadcast({
                 "jsonrpc": "2.0",
                 "method": "notify.world.status_changed",
                 "params": {
@@ -38,7 +38,7 @@ async def handle_world_stop(request: web.Request):
                     "reason": "user_request",
                 },
             })
-            gateway._world_status_cache[world_id] = {"status": "stopped"}
+            controller._world_status_cache[world_id] = {"status": "stopped"}
         return web.json_response(result)
     except WorkerRpcError as e:
         status = rpc_code_to_http(e.code)
@@ -48,10 +48,10 @@ async def handle_world_stop(request: web.Request):
 
 
 async def handle_world_checkpoint(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.checkpoint", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.checkpoint", {"world_id": world_id})
         return web.json_response(result)
     except WorkerRpcError as e:
         status = rpc_code_to_http(e.code)
@@ -61,18 +61,18 @@ async def handle_world_checkpoint(request: web.Request):
 
 
 async def handle_world_detail(request: web.Request):
-    gateway: WorkerController = request.app["gateway"]
+    controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
-    worker = gateway.get_worker_by_world(world_id)
+    worker = controller.get_worker_by_world(world_id)
     if worker is None:
         return web.json_response({"error": "world_not_found"}, status=404)
 
     try:
-        result = await gateway.proxy_to_worker(world_id, "world.getStatus", {"world_id": world_id})
+        result = await controller.proxy_to_worker(world_id, "world.getStatus", {"world_id": world_id})
         status = result.get("status", "unknown")
         scenes = result.get("scenes", [])
 
-        instances_result = await gateway.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
+        instances_result = await controller.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
         instance_count = len(instances_result.get("instances", []))
 
         return web.json_response({
