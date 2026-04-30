@@ -138,8 +138,19 @@ def sync_models(world_dir: str, force: bool = False) -> int:
     for model_id, template_dir in sorted(global_models.items()):
         if model_id in world_models:
             print(f"[SYNC] {model_id}")
-            changed = _sync_single_model(template_dir, world_models[model_id], force)
+            changed, force = _sync_single_model(template_dir, world_models[model_id], force)
             any_changes = any_changes or changed
+
+            # Sync libs/ directory if present in template
+            template_agent_dir = template_dir.parent
+            template_libs_dir = template_agent_dir / "libs"
+            if template_libs_dir.exists():
+                world_agent_dir = world_models[model_id].parent
+                world_libs_dir = world_agent_dir / "libs"
+                changed_libs, force = _sync_single_model(
+                    template_libs_dir, world_libs_dir, force
+                )
+                any_changes = any_changes or changed_libs
         else:
             print(f"[ADD] {model_id}")
             resolver._copy_from_template(template_dir, _find_global_root(template_dir, global_paths))
@@ -147,7 +158,7 @@ def sync_models(world_dir: str, force: bool = False) -> int:
 
     private_models = set(world_models) - set(global_models)
     for model_id in sorted(private_models):
-        print(f"[SKIP] {model_id} (world-private, no global template)")
+        print(f"[SKIP] {model_id}")
 
     if not any_changes and not private_models:
         print("No changes needed.")
@@ -166,8 +177,8 @@ def _find_global_root(template_dir: Path, global_paths: list[str]) -> Path:
     return Path(global_paths[0])
 
 
-def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> bool:
-    """Sync a single model, returning True if any changes were made."""
+def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> tuple[bool, bool]:
+    """Sync a single model directory, returning (changed, force)."""
     changed = False
     for src_file in template_dir.rglob("*"):
         if not src_file.is_file():
@@ -199,7 +210,7 @@ def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> bool
                 print(f"  [OVERWRITE] {rel}")
                 changed = True
             # n or s -> skip
-    return changed
+    return changed, force
 
 
 if __name__ == "__main__":
