@@ -1,7 +1,9 @@
 import argparse
 import filecmp
+import json
 import shutil
 import sys
+import urllib.request
 from pathlib import Path
 
 
@@ -70,6 +72,15 @@ def main(argv=None):
     )
     sync_parser.set_defaults(func=_sync_models_command)
 
+    list_parser = subparsers.add_parser(
+        "list-instances", help="List all instances in a running world"
+    )
+    list_parser.add_argument("--world-id", required=True, help="World ID")
+    list_parser.add_argument(
+        "--supervisor-url", default="http://localhost:8080", help="Supervisor HTTP URL"
+    )
+    list_parser.set_defaults(func=_list_instances_command)
+
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -99,6 +110,34 @@ def _supervisor_command(args):
 
 def _sync_models_command(args):
     return sync_models(args.world_dir, force=args.force)
+
+
+def _list_instances_command(args):
+    url = f"{args.supervisor_url}/api/worlds/{args.world_id}/instances"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        print(f"Error: HTTP {e.code} - {e.reason}")
+        return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+    instances = data.get("instances", [])
+    if not instances:
+        print(f"No instances found in world '{args.world_id}'")
+        return 0
+
+    print(f"Instances in world '{args.world_id}':")
+    print(f"{'ID':<20} {'Model':<20} {'Scope':<10} {'State':<15} {'Lifecycle':<10}")
+    print("-" * 80)
+    for inst in instances:
+        print(
+            f"{inst['id']:<20} {inst['model']:<20} {inst['scope']:<10} "
+            f"{inst.get('state', 'N/A'):<15} {inst.get('lifecycle_state', 'N/A'):<10}"
+        )
+    return 0
 
 
 def sync_models(world_dir: str, force: bool = False) -> int:
