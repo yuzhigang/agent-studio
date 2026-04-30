@@ -59,11 +59,6 @@ def main(argv=None):
     sup_parser.add_argument(
         "--http-port", type=int, default=8080, help="HTTP port for management API"
     )
-    sup_parser.add_argument(
-        "--supervisor-ws-url",
-        default=None,
-        help="Externally accessible Supervisor WebSocket URL (e.g. ws://host:port/workers). Defaults to ws://localhost:<ws-port>/workers",
-    )
     sup_parser.set_defaults(func=_supervisor_command)
 
     sync_parser = subparsers.add_parser(

@@ -1,39 +1,12 @@
 import asyncio
 import json
-import shutil
-import subprocess
-import sys
 
 from aiohttp import web
 from src.supervisor import handlers
 from src.supervisor.worker import WorkerController
 
 
-def _build_runtime_cmd(world_dir: str, supervisor_ws: str) -> list[str]:
-    """Build the command to spawn a runtime process.
-
-    Prefer the installed 'agent-studio' CLI entrypoint to keep supervisor
-    decoupled from runtime internals. Fallback to invoking the module
-    directly when running from source without the script on PATH.
-    """
-    if shutil.which("agent-studio"):
-        return [
-            "agent-studio",
-            "run",
-            f"--world-dir={world_dir}",
-            f"--supervisor-ws={supervisor_ws}",
-        ]
-    return [
-        sys.executable,
-        "-m",
-        "src.cli.main",
-        "run",
-        f"--world-dir={world_dir}",
-        f"--supervisor-ws={supervisor_ws}",
-    ]
-
-
-def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080, supervisor_ws_url=None):
+def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080):
     controller = WorkerController(base_dir=base_dir)
     # Start heartbeat monitor as background task
     asyncio.get_event_loop().create_task(controller.start_heartbeat_monitor())
@@ -41,7 +14,6 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080, supervisor_w
     app["controller"] = controller
     app["ws_port"] = ws_port
     app["http_port"] = http_port
-    app["supervisor_ws_url"] = supervisor_ws_url or f"ws://localhost:{ws_port}/workers"
 
     # REST API routes
     app.router.add_get("/api/workers", handlers.handle_workers)

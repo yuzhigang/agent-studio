@@ -4,5 +4,4 @@ def supervisor_main(args):
         base_dir=args.base_dir,
         ws_port=args.ws_port,
         http_port=args.http_port,
-        supervisor_ws_url=args.supervisor_ws_url,
     )

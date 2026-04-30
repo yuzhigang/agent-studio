@@ -1,24 +1,18 @@
-import subprocess
-
 from aiohttp import web
 from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_http
 
 
 async def handle_world_start(request: web.Request):
     controller: WorkerController = request.app["controller"]
-    supervisor_ws = request.app["supervisor_ws_url"]
     world_id = request.match_info["world_id"]
     worker = controller.get_worker_by_world(world_id)
     if worker is not None:
         return web.json_response({"status": "already_running"})
 
-    world_dir = f"{controller._base_dir}/{world_id}"
-
-    # Import here to avoid circular dependency
-    from src.supervisor.server import _build_runtime_cmd
-    cmd = _build_runtime_cmd(world_dir, supervisor_ws)
-    subprocess.Popen(cmd)
-    return web.json_response({"status": "starting"})
+    return web.json_response(
+        {"error": "no_worker_available", "message": f"No worker is running world '{world_id}'. Start a worker and connect it to the supervisor."},
+        status=503,
+    )
 
 
 async def handle_world_stop(request: web.Request):
