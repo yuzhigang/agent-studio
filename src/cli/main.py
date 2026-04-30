@@ -42,7 +42,7 @@ def main(argv=None):
     )
     inline_parser.add_argument(
         "--supervisor-ws",
-        default=None,
+        default="ws://localhost:8001/workers",
         help="Supervisor WebSocket URL for loopback registration",
     )
     inline_parser.set_defaults(func=_run_inline_command)

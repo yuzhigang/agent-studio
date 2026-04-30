@@ -78,7 +78,7 @@ def test_load_world_restores_instances(registry):
     registry.create_world("world-a")
     bundle = registry.load_world("world-a")
     im = bundle["instance_manager"]
-    im.create(world_id="world-a", model_name="ladle", instance_id="ladle-001", scope="world")
+    im.create(world_id="world-a", model_name="core.ladle", instance_id="ladle-001", scope="world")
     # checkpoint to persist
     bundle["state_manager"].checkpoint_world("world-a")
     # unload and reload
@@ -87,7 +87,7 @@ def test_load_world_restores_instances(registry):
     im2 = bundle2["instance_manager"]
     inst = im2.get("world-a", "ladle-001", scope="world")
     assert inst is not None
-    assert inst.model_name == "ladle"
+    assert inst.model_name == "core.ladle"
 
 
 def test_load_world_acquires_lock(registry):
@@ -146,7 +146,7 @@ def test_load_world_wires_world_state_and_event_emitter(registry):
 
     inst = im.create(
         world_id="ladle-proj",
-        model_name="ladle",
+        model_name="core.ladle",
         instance_id="ladle-001",
         scope="world",
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
@@ -172,10 +172,10 @@ def test_load_world_wires_world_state_and_event_emitter(registry):
 
     # Verify WorldState snapshot structure
     snapshot = ws.snapshot()
-    assert "ladle" in snapshot
-    assert len(snapshot["ladle"]) == 1
-    assert snapshot["ladle"][0]["id"] == "ladle-001"
-    assert snapshot["ladle"][0]["snapshot"]["temperature"] == 1600
+    assert "core.ladle" in snapshot
+    assert len(snapshot["core.ladle"]) == 1
+    assert snapshot["core.ladle"][0]["id"] == "ladle-001"
+    assert snapshot["core.ladle"][0]["snapshot"]["temperature"] == 1600
 
     registry.unload_world("ladle-proj")
 
@@ -213,7 +213,7 @@ def test_scene_local_instance_inherits_resolved_agent_namespace(registry):
         "test-world",
         "scene-1",
         mode="isolated",
-        local_instances={"ladle-local-01": {"modelName": "ladle"}},
+        local_instances={"ladle-local-01": {"modelName": "logistics.ladle"}},
     )
 
     inst = bundle["instance_manager"].get("test-world", "ladle-local-01", scope="scene:scene-1")

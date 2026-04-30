@@ -46,16 +46,16 @@ def tmp_base_dir():
         # Create agents dir
         agents_dir = world_dir / "agents"
         agents_dir.mkdir()
-        # Create a minimal agent instance so world loading doesn't fail
-        agent_dir = agents_dir / "dummy" / "instances"
-        agent_dir.mkdir(parents=True)
-        instance_yaml = agent_dir / "dummy-01.instance.yaml"
+        # Create a minimal namespaced agent so world loading doesn't fail
+        model_dir = agents_dir / "core" / "basic_agent" / "model"
+        model_dir.mkdir(parents=True)
+        (model_dir / "index.yaml").write_text("metadata: {name: Basic Agent}")
+        instance_dir = agents_dir / "core" / "basic_agent" / "instances"
+        instance_dir.mkdir(parents=True)
+        instance_yaml = instance_dir / "dummy-01.instance.yaml"
         instance_yaml.write_text(yaml.dump({
-            "model": "basic_agent",
-            "name": "dummy-01",
-            "description": "Minimal test instance",
-            "state": {},
-            "behaviors": [],
+            "modelId": "core.basic_agent",
+            "id": "dummy-01",
         }))
         yield str(base)
 

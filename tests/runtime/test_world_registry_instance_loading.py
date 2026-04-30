@@ -30,7 +30,7 @@ def test_load_world_creates_instances_from_declarations(registry):
     world_dir = os.path.join(registry._base_dir, "test-world")
 
     # Write a model
-    model_dir = os.path.join(world_dir, "agents", "sensor", "model")
+    model_dir = os.path.join(world_dir, "agents", "core", "sensor", "model")
     _write_yaml(os.path.join(model_dir, "index.yaml"), {
         "metadata": {"name": "Temperature Sensor"},
         "variables": {
@@ -43,10 +43,10 @@ def test_load_world_creates_instances_from_declarations(registry):
     })
 
     # Write an instance declaration with overrides
-    instances_dir = os.path.join(world_dir, "agents", "sensor", "instances")
+    instances_dir = os.path.join(world_dir, "agents", "core", "sensor", "instances")
     _write_yaml(os.path.join(instances_dir, "sensor-01.instance.yaml"), {
         "id": "sensor-01",
-        "modelId": "sensor",
+        "modelId": "core.sensor",
         "variables": {"threshold": 150, "label": "overridden-label"},
         "attributes": {"location": "boiler-room"},
         "state": "active",
@@ -57,8 +57,8 @@ def test_load_world_creates_instances_from_declarations(registry):
 
     inst = im.get("test-world", "sensor-01", scope="world")
     assert inst is not None
-    assert inst.model_name == "sensor"
-    assert inst._agent_namespace == "sensor"
+    assert inst.model_name == "core.sensor"
+    assert inst._agent_namespace == "core.sensor"
     assert inst.variables["threshold"] == 150
     assert inst.variables["label"] == "overridden-label"
     assert inst.attributes["location"] == "boiler-room"
@@ -71,10 +71,10 @@ def test_load_world_skips_missing_model(registry):
     registry.create_world("test-world")
     world_dir = os.path.join(registry._base_dir, "test-world")
 
-    instances_dir = os.path.join(world_dir, "agents", "ghost", "instances")
+    instances_dir = os.path.join(world_dir, "agents", "core", "ghost", "instances")
     _write_yaml(os.path.join(instances_dir, "ghost-01.instance.yaml"), {
         "id": "ghost-01",
-        "modelId": "nonexistent-model",
+        "modelId": "core.nonexistent-model",
     })
 
     bundle = registry.load_world("test-world")
@@ -100,14 +100,14 @@ def test_load_world_uses_global_model_when_not_in_world(registry_with_globals, t
 
     # Write a global model (not inside the world)
     global_models_dir = tmp_path / "global_models"
-    model_dir = global_models_dir / "shared-agent" / "model"
+    model_dir = global_models_dir / "core" / "shared-agent" / "model"
     _write_yaml(str(model_dir / "index.yaml"), {
         "metadata": {"name": "Shared Agent"},
         "variables": {
             "counter": {"type": "number", "default": 0},
         },
     })
-    libs_dir = global_models_dir / "shared-agent" / "libs"
+    libs_dir = global_models_dir / "core" / "shared-agent" / "libs"
     os.makedirs(libs_dir, exist_ok=True)
     with open(libs_dir / "planner.py", "w", encoding="utf-8") as f:
         f.write(
@@ -118,10 +118,10 @@ def test_load_world_uses_global_model_when_not_in_world(registry_with_globals, t
         )
 
     # Write an instance declaration in the world referencing the global model
-    instances_dir = os.path.join(world_dir, "agents", "shared-agent", "instances")
+    instances_dir = os.path.join(world_dir, "agents", "core", "shared-agent", "instances")
     _write_yaml(os.path.join(instances_dir, "shared-01.instance.yaml"), {
         "id": "shared-01",
-        "modelId": "shared-agent",
+        "modelId": "core.shared-agent",
         "variables": {"counter": 42},
     })
 
@@ -130,10 +130,10 @@ def test_load_world_uses_global_model_when_not_in_world(registry_with_globals, t
 
     inst = im.get("test-world", "shared-01", scope="world")
     assert inst is not None
-    assert inst.model_name == "shared-agent"
-    assert inst._agent_namespace == "shared-agent"
+    assert inst.model_name == "core.shared-agent"
+    assert inst._agent_namespace == "core.shared-agent"
     assert inst.variables["counter"] == 42
-    assert bundle["lib_registry"].lookup("shared-agent", "planner", "get_plan")({}) == {"plan": "ok"}
+    assert bundle["lib_registry"].lookup("core.shared-agent", "planner", "get_plan")({}) == {"plan": "ok"}
 
 
 def test_load_world_uses_group_agent_path_as_default_lib_namespace(registry):
@@ -167,7 +167,7 @@ def test_load_world_uses_group_agent_path_as_default_lib_namespace(registry):
     instances_dir = os.path.join(world_dir, "agents", "logistics", "ladle", "instances")
     _write_yaml(os.path.join(instances_dir, "ladle-01.instance.yaml"), {
         "id": "ladle-01",
-        "modelId": "ladle",
+        "modelId": "logistics.ladle",
     })
 
     bundle = registry.load_world("test-world")

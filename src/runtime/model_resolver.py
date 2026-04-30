@@ -6,12 +6,29 @@ from pathlib import Path
 from src.runtime.lib.exceptions import ModelNotFoundError
 
 
+def split_model_id(model_id: str) -> tuple[str, str]:
+    """Split model_id into (namespace, model_name).
+
+    Raises ValueError if model_id contains no dot or empty parts.
+    """
+    if "." not in model_id:
+        raise ValueError(f"modelId must contain namespace: {model_id}")
+    namespace, model_name = model_id.split(".", 1)
+    if not namespace:
+        raise ValueError(f"namespace must not be empty: {model_id}")
+    if not model_name:
+        raise ValueError(f"model_name must not be empty: {model_id}")
+    return namespace, model_name
+
+
 class ModelResolver:
     """Resolves a modelId to a model/ directory path.
 
     Searches only in the world's private agents/ directory.
     Global paths are used only as templates for lazy copy via ensure().
     """
+
+    split_model_id = staticmethod(split_model_id)
 
     def __init__(self, world_dir: str, global_paths: list[str]):
         """Initialize the resolver.
@@ -29,6 +46,8 @@ class ModelResolver:
 
         Searches world private agents only. No global fallback.
         """
+        # Always validate modelId format first
+        split_model_id(model_id)
         world_agents_dir = self.world_dir / "agents"
         if world_agents_dir.exists():
             return self._find_model_dir(world_agents_dir, model_id)
@@ -58,12 +77,10 @@ class ModelResolver:
 
     @staticmethod
     def _find_model_dir(root: Path, model_id: str) -> Path | None:
-        """Recursively search root for */{model_id}/model directory."""
-        pattern = f"{model_id}/model"
-        for match in root.rglob(pattern):
-            if match.is_dir():
-                return match
-        return None
+        """Exact-path lookup: root/{namespace}/{model_name}/model"""
+        namespace, model_name = split_model_id(model_id)
+        exact = root / namespace / model_name / "model"
+        return exact if exact.is_dir() else None
 
     def _copy_from_template(self, template_model_dir: Path, global_root: Path) -> None:
         """Copy model/ and libs/ from template agent dir to world agents/."""

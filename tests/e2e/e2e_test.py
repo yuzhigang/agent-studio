@@ -40,7 +40,7 @@ def main():
     print(f"      attributes: {inst.attributes}")
     print(f"      variables: {inst.variables}")
 
-    assert inst.model_name == "heartbeat"
+    assert inst.model_name == "logistics.heartbeat"
     assert inst.state.get("current") == "idle"
     assert inst.attributes.get("interval") == 500
     assert inst.attributes.get("threshold") == 80.0

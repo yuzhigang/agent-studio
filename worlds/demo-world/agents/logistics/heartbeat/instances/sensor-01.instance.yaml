@@ -1,6 +1,6 @@
 $schema: https://agent-studio.io/schema/v2/instance
 id: sensor-01
-modelId: heartbeat
+modelId: logistics.heartbeat
 state: idle
 metadata:
   name: sensor-01
