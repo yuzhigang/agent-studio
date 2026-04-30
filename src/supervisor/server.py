@@ -114,8 +114,9 @@ async def _handle_worker_ws(request: web.Request):
 
             elif method == "notify.worker.heartbeat":
                 wid = params.get("worker_id")
+                worlds = params.get("worlds", {})
                 if wid:
-                    await gateway.update_heartbeat(wid)
+                    await gateway.update_heartbeat(wid, worlds)
 
             elif method == "notify.worker.deactivated":
                 wid = params.get("worker_id")

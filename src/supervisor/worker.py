@@ -5,6 +5,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 
+class WorkerRpcError(RuntimeError):
+    def __init__(self, code: int, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
 @dataclass
 class WorkerState:
     worker_id: str
@@ -24,6 +31,8 @@ class WorkerController:
         self._clients: list = []  # browser/management client websockets
         self._lock = asyncio.Lock()
         self._pending_requests: dict[str, asyncio.Future] = {}
+        self._world_status_cache: dict[str, dict] = {}  # world_id -> latest status from heartbeat
+        self._request_counter = 0
 
     # --- Worker registration ---
 
@@ -58,8 +67,13 @@ class WorkerController:
 
             await self._broadcast({
                 "jsonrpc": "2.0",
-                "method": "notify.session.reset",
-                "params": {"worker_id": worker_id, "world_ids": world_ids},
+                "method": "notify.worker.activated",
+                "params": {
+                    "worker_id": worker_id,
+                    "session_id": session_id,
+                    "world_ids": world_ids,
+                    "metadata": metadata or {},
+                },
             })
 
     async def unregister_worker(self, worker_id: str):
@@ -68,6 +82,15 @@ class WorkerController:
             if worker is not None:
                 for wid in worker.world_ids:
                     self._world_to_worker.pop(wid, None)
+                await self._broadcast({
+                    "jsonrpc": "2.0",
+                    "method": "notify.worker.disconnected",
+                    "params": {
+                        "worker_id": worker_id,
+                        "world_ids": worker.world_ids,
+                        "reason": "explicit_deactivation",
+                    },
+                })
 
     def get_worker(self, worker_id: str) -> WorkerState | None:
         return self._workers.get(worker_id)
@@ -126,6 +149,17 @@ class WorkerController:
         finally:
             self._pending_requests.pop(req_id, None)
 
+    async def proxy_to_worker(self, world_id: str, method: str, params: dict | None = None) -> dict:
+        """Send a JSON-RPC request to the worker managing world_id and return the result."""
+        self._request_counter += 1
+        message = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params or {},
+            "id": f"supervisor-{self._request_counter}",
+        }
+        return await self.send_request(world_id, message)
+
     def _handle_response(self, response: dict) -> None:
         """Handle an incoming JSON-RPC response from a worker."""
         req_id = response.get("id")
@@ -135,14 +169,35 @@ class WorkerController:
         if future is None:
             return
         if "error" in response:
-            future.set_exception(RuntimeError(response["error"].get("message", "Unknown error")))
+            error = response["error"]
+            future.set_exception(WorkerRpcError(
+                error.get("code", 0),
+                error.get("message", "Unknown error")
+            ))
         else:
             future.set_result(response.get("result"))
 
-    async def update_heartbeat(self, worker_id: str):
+    async def update_heartbeat(self, worker_id: str, worlds_status: dict | None = None):
         worker = self._workers.get(worker_id)
         if worker is not None:
             worker.last_heartbeat = datetime.now(timezone.utc)
+        if worlds_status:
+            for world_id, status in worlds_status.items():
+                old = self._world_status_cache.get(world_id, {})
+                new_status = status.get("status")
+                old_status = old.get("status")
+                if new_status != old_status:
+                    await self._broadcast({
+                        "jsonrpc": "2.0",
+                        "method": "notify.world.status_changed",
+                        "params": {
+                            "world_id": world_id,
+                            "status": new_status,
+                            "previous_status": old_status,
+                            "reason": "heartbeat",
+                        },
+                    })
+                self._world_status_cache[world_id] = status
 
     # --- Heartbeat monitor ---
 
