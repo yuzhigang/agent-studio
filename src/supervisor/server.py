@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import sys
+import uuid
 
 from aiohttp import web
 from src.supervisor.worker import WorkerController
@@ -43,6 +44,7 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080):
 
     app.router.add_post("/api/worlds/{world_id}/start", _handle_start)
     app.router.add_post("/api/worlds/{world_id}/stop", _handle_stop)
+    app.router.add_get("/api/worlds/{world_id}/instances", _handle_list_instances)
     app.router.add_get("/api/workers", _handle_workers)
     app.router.add_get("/workers", _handle_worker_ws)
     app.router.add_get("/ws", _handle_client_ws)
@@ -141,6 +143,31 @@ async def _handle_workers(request: web.Request):
             "status": worker.status,
         })
     return web.json_response({"workers": workers})
+
+
+async def _handle_list_instances(request: web.Request):
+    gateway: WorkerController = request.app["gateway"]
+    world_id = request.match_info["world_id"]
+
+    worker = gateway.get_worker_by_world(world_id)
+    if worker is None:
+        return web.json_response({"error": "not_running"}, status=404)
+
+    try:
+        result = await gateway.send_request(
+            world_id,
+            {
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "world.instances.list",
+                "params": {"world_id": world_id},
+            },
+        )
+        return web.json_response(result)
+    except TimeoutError:
+        return web.json_response({"error": "timeout"}, status=504)
+    except RuntimeError as e:
+        return web.json_response({"error": str(e)}, status=502)
 
 
 async def _handle_client_ws(request: web.Request):
