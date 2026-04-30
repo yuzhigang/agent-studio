@@ -1,14 +1,16 @@
 """ModelResolver: resolves a modelId to a model/ directory path."""
 
+import shutil
 from pathlib import Path
+
+from src.runtime.lib.exceptions import ModelNotFoundError
 
 
 class ModelResolver:
     """Resolves a modelId to a model/ directory path.
 
-    Searches in priority order:
-    1. World's private agents/ directory: {world_dir}/agents/**/{model_id}/model/
-    2. Global model paths: each global path, looking for **/{model_id}/model/
+    Searches only in the world's private agents/ directory.
+    Global paths are used only as templates for lazy copy via ensure().
     """
 
     def __init__(self, world_dir: str, global_paths: list[str]):
@@ -20,41 +22,90 @@ class ModelResolver:
         """
         self.world_dir = Path(world_dir)
         self.global_paths = [Path(p) for p in global_paths]
+        self._shared_libs_copied: bool = False
 
     def resolve(self, model_id: str) -> Path | None:
         """Return the Path to the model/ directory, or None if not found.
 
-        Searches world private agents first, then falls back to global paths.
+        Searches world private agents only. No global fallback.
         """
-        # Search world private agents first
         world_agents_dir = self.world_dir / "agents"
         if world_agents_dir.exists():
-            result = self._find_model_dir(world_agents_dir, model_id)
-            if result is not None:
-                return result
+            return self._find_model_dir(world_agents_dir, model_id)
+        return None
 
-        # Fall back to global paths in order
+    def ensure(self, model_id: str) -> Path:
+        """Guarantee model_id exists in world-private dir, copying from global templates if needed.
+
+        1. resolve() locally -> found -> return.
+        2. Find in global templates -> copy to world -> return.
+        3. Not found anywhere -> ModelNotFoundError.
+        """
+        local = self.resolve(model_id)
+        if local is not None:
+            return local
+
         for global_path in self.global_paths:
-            if global_path.exists():
-                result = self._find_model_dir(global_path, model_id)
+            template = self._find_model_dir(global_path, model_id)
+            if template is not None:
+                self._copy_from_template(template, global_path)
+                self._ensure_shared_libs()
+                result = self.resolve(model_id)
                 if result is not None:
                     return result
 
-        return None
+        raise ModelNotFoundError(model_id)
 
     @staticmethod
     def _find_model_dir(root: Path, model_id: str) -> Path | None:
-        """Recursively search root for */{model_id}/model directory.
-
-        Args:
-            root: Directory to search under
-            model_id: The model identifier to find
-
-        Returns:
-            Path to the model/ directory if found, None otherwise.
-        """
+        """Recursively search root for */{model_id}/model directory."""
         pattern = f"{model_id}/model"
         for match in root.rglob(pattern):
             if match.is_dir():
                 return match
         return None
+
+    def _copy_from_template(self, template_model_dir: Path, global_root: Path) -> None:
+        """Copy model/ and libs/ from template agent dir to world agents/."""
+        # template_model_dir is agents/{ns...}/{mid}/model/
+        # template_agent_dir is agents/{ns...}/{mid}/
+        template_agent_dir = template_model_dir.parent
+        rel_path = template_agent_dir.relative_to(global_root)
+        world_target = self.world_dir / "agents" / rel_path
+
+        # Copy model/ directory
+        world_model_dir = world_target / "model"
+        self._copytree_skip_existing(template_model_dir, world_model_dir)
+
+        # Copy libs/ directory if it exists in template
+        template_libs_dir = template_agent_dir / "libs"
+        if template_libs_dir.exists():
+            world_libs_dir = world_target / "libs"
+            self._copytree_skip_existing(template_libs_dir, world_libs_dir)
+
+    def _ensure_shared_libs(self) -> None:
+        """Copy agents/shared/libs/ to world on first ensure() call."""
+        if self._shared_libs_copied:
+            return
+        self._shared_libs_copied = True
+
+        for global_path in self.global_paths:
+            shared_libs = global_path / "shared" / "libs"
+            if shared_libs.exists():
+                world_shared_libs = self.world_dir / "agents" / "shared" / "libs"
+                self._copytree_skip_existing(shared_libs, world_shared_libs)
+                break
+
+    @staticmethod
+    def _copytree_skip_existing(src: Path, dst: Path) -> None:
+        """Recursively copy src to dst, skipping files that already exist."""
+        if not src.exists():
+            return
+        dst.mkdir(parents=True, exist_ok=True)
+        for item in src.iterdir():
+            dst_item = dst / item.name
+            if item.is_dir():
+                ModelResolver._copytree_skip_existing(item, dst_item)
+            else:
+                if not dst_item.exists():
+                    shutil.copy2(item, dst_item)
