@@ -71,14 +71,13 @@ async def test_inbox_processor_marks_retry_for_unavailable_world(tmp_path):
     try:
         await hub.start()
         await asyncio.sleep(0.05)
+        row = store._conn.execute(
+            "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-2",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    row = store._conn.execute(
-        "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-2",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert row == ("retry", 0, "world receiver unavailable")
 
@@ -105,18 +104,17 @@ async def test_inbox_processor_leaves_targetless_messages_pending(tmp_path):
     try:
         await hub.start()
         await asyncio.sleep(0.05)
+        inbox_row = store._conn.execute(
+            "SELECT status, source_world, target_world FROM inbox WHERE message_id = ?",
+            ("msg-no-target",),
+        ).fetchone()
+        delivery_count = store._conn.execute(
+            "SELECT COUNT(*) FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-no-target",),
+        ).fetchone()[0]
     finally:
         await hub.stop()
-
-    inbox_row = store._conn.execute(
-        "SELECT status, source_world, target_world FROM inbox WHERE message_id = ?",
-        ("msg-no-target",),
-    ).fetchone()
-    delivery_count = store._conn.execute(
-        "SELECT COUNT(*) FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-no-target",),
-    ).fetchone()[0]
-    store.close()
+        store.close()
 
     assert inbox_row == ("pending", "erp", None)
     assert delivery_count == 0
@@ -172,18 +170,17 @@ async def test_inbox_processor_handles_retryable_and_permanent_errors(tmp_path):
         await hub.start()
         await asyncio.wait_for(retry_event.wait(), timeout=1.0)
         await asyncio.wait_for(dead_event.wait(), timeout=1.0)
+        retry_row = store._conn.execute(
+            "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-3",),
+        ).fetchone()
+        dead_row = store._conn.execute(
+            "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-4",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    retry_row = store._conn.execute(
-        "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-3",),
-    ).fetchone()
-    dead_row = store._conn.execute(
-        "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-4",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert attempts == {"retry": 1, "dead": 1}
     assert retry_row == ("retry", 1, "temporary")
@@ -235,18 +232,17 @@ async def test_inbox_processor_unexpected_exception_does_not_cancel_other_worlds
     try:
         await hub.start()
         await asyncio.wait_for(delivered.wait(), timeout=1.0)
+        bad_row = store._conn.execute(
+            "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-5",),
+        ).fetchone()
+        good_row = store._conn.execute(
+            "SELECT status FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-6",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    bad_row = store._conn.execute(
-        "SELECT status, error_count, last_error FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-5",),
-    ).fetchone()
-    good_row = store._conn.execute(
-        "SELECT status FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-6",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert seen == [("erp-b", "factory-b", "msg-6")]
     assert bad_row[0] == "retry"
@@ -309,18 +305,17 @@ async def test_inbox_processor_missing_inbox_message_does_not_block_same_world_f
     try:
         await hub.start()
         await asyncio.wait_for(delivered.wait(), timeout=1.0)
+        missing_row = store._conn.execute(
+            "SELECT status, last_error FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-missing",),
+        ).fetchone()
+        good_row = store._conn.execute(
+            "SELECT status FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-good",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    missing_row = store._conn.execute(
-        "SELECT status, last_error FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-missing",),
-    ).fetchone()
-    good_row = store._conn.execute(
-        "SELECT status FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-good",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert seen == ["msg-good"]
     assert missing_row == ("dead", "missing inbox message")
@@ -373,14 +368,13 @@ async def test_inbox_handler_failure_is_not_visible_to_processor(tmp_path):
         await hub.start()
         await asyncio.wait_for(received.wait(), timeout=1.0)
         await asyncio.sleep(0.05)
+        row = store._conn.execute(
+            "SELECT status, error_count FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-handler-boom",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    row = store._conn.execute(
-        "SELECT status, error_count FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-handler-boom",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     # Because WorldMessageIngress passes raise_on_error=True, the handler
     # exception propagates to InboxProcessor and is treated as retryable.
@@ -437,18 +431,17 @@ async def test_inbox_delivery_resumes_after_world_re_registration(tmp_path):
         await asyncio.wait_for(delivered.wait(), timeout=1.0)
         # Give reconcile a chance to run before checking status
         await asyncio.sleep(0.05)
+        row = store._conn.execute(
+            "SELECT status FROM inbox_deliveries WHERE message_id = ?",
+            ("msg-backlog",),
+        ).fetchone()
+        inbox_row = store._conn.execute(
+            "SELECT status FROM inbox WHERE message_id = ?",
+            ("msg-backlog",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    row = store._conn.execute(
-        "SELECT status FROM inbox_deliveries WHERE message_id = ?",
-        ("msg-backlog",),
-    ).fetchone()
-    inbox_row = store._conn.execute(
-        "SELECT status FROM inbox WHERE message_id = ?",
-        ("msg-backlog",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert row == ("delivered",)
     assert inbox_row == ("completed",)

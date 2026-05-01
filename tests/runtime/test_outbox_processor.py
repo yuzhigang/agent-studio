@@ -60,6 +60,11 @@ async def test_outbox_processor_sends_and_marks_sent(msg_store):
     try:
         assert channel.started is True
         await asyncio.wait_for(channel.sent_event.wait(), timeout=2.0)
+        pending = msg_store.outbox_read_pending(limit=10)
+        row = msg_store._conn.execute(
+            "SELECT status, sent_at FROM outbox WHERE message_id = ?",
+            ("msg-success",),
+        ).fetchone()
     finally:
         await hub.stop()
 
@@ -67,14 +72,7 @@ async def test_outbox_processor_sends_and_marks_sent(msg_store):
     assert channel.messages[0].event_type == "order.created"
     assert channel.messages[0].source_world == "world-2"
     assert channel.messages[0].target_world is None
-
-    pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 0
-
-    row = msg_store._conn.execute(
-        "SELECT status, sent_at FROM outbox WHERE message_id = ?",
-        ("msg-success",),
-    ).fetchone()
     assert row == ("sent", row[1])
     assert row[1] is not None
 
@@ -97,20 +95,18 @@ async def test_outbox_processor_retries_on_retryable(msg_store):
     await hub.start()
     try:
         await asyncio.wait_for(channel.sent_event.wait(), timeout=2.0)
+        pending = msg_store.outbox_read_pending(limit=10)
+        row = msg_store._conn.execute(
+            "SELECT status, error_count, retry_after, last_error FROM outbox WHERE message_id = ?",
+            ("msg-retry",),
+        ).fetchone()
     finally:
         await hub.stop()
 
     assert len(channel.messages) == 1
     assert channel.messages[0].source_world == "world-2"
     assert channel.messages[0].target_world is None
-
-    pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 0
-
-    row = msg_store._conn.execute(
-        "SELECT status, error_count, retry_after, last_error FROM outbox WHERE message_id = ?",
-        ("msg-retry",),
-    ).fetchone()
     assert row is not None
     status, error_count, retry_after, last_error = row
     assert status == "retry"
@@ -137,20 +133,18 @@ async def test_outbox_processor_permanent_failure(msg_store):
     await hub.start()
     try:
         await asyncio.wait_for(channel.sent_event.wait(), timeout=2.0)
+        pending = msg_store.outbox_read_pending(limit=10)
+        row = msg_store._conn.execute(
+            "SELECT status, error_count, retry_after, last_error FROM outbox WHERE message_id = ?",
+            ("msg-dead",),
+        ).fetchone()
     finally:
         await hub.stop()
 
     assert len(channel.messages) == 1
     assert channel.messages[0].source_world == "world-2"
     assert channel.messages[0].target_world is None
-
-    pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 0
-
-    row = msg_store._conn.execute(
-        "SELECT status, error_count, retry_after, last_error FROM outbox WHERE message_id = ?",
-        ("msg-dead",),
-    ).fetchone()
     assert row is not None
     status, error_count, retry_after, last_error = row
     assert status == "dead"
@@ -176,10 +170,10 @@ async def test_outbox_processor_no_channel_does_not_crash(msg_store):
     await hub.start()
     try:
         await asyncio.sleep(0.2)
+        pending = msg_store.outbox_read_pending(limit=10)
     finally:
         await hub.stop()
 
-    pending = msg_store.outbox_read_pending(limit=10)
     assert len(pending) == 1
     assert pending[0].payload == {"id": "000"}
     assert pending[0].source_world == "world-2"

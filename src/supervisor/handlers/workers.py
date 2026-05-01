@@ -21,7 +21,7 @@ async def handle_worker_worlds(request: web.Request):
     worker_id = request.match_info["worker_id"]
     worker = controller.get_worker(worker_id)
     if worker is None:
-        return web.json_response({"error": "worker_not_found"}, status=404)
+        return web.json_response({"error": "worker_not_found", "message": f"Worker '{worker_id}' not found"}, status=404)
 
     worlds = []
     for world_id in worker.world_ids:

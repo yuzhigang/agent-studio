@@ -100,6 +100,8 @@ class MessageHub:
             await self._outbox_processor.stop()
         if self._channel is not None:
             await self._channel.stop()
+        if self._store is not None:
+            self._store.close()
 
     def is_ready(self) -> bool:
         if self._channel is None:

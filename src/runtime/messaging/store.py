@@ -118,3 +118,7 @@ class MessageStore(ABC):
         last_error: str | None,
     ) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    def close(self) -> None:
+        raise NotImplementedError

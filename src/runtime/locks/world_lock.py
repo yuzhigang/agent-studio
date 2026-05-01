@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import threading
 import fasteners
 
@@ -51,9 +52,7 @@ class WorldLock:
             raise LockAlreadyHeldError(f"World {world_id} is already locked")
         self._acquired = True
         with open(self._meta_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {"pid": os.getpid(), "started_at": _now_iso()}, f
-            )
+            json.dump({"pid": os.getpid(), "started_at": _now_iso()}, f)
 
     def release(self) -> None:
         if self._acquired and self._lock is not None:
@@ -63,10 +62,26 @@ class WorldLock:
             except OSError:
                 pass
             self._lock.release()
+            # Force-close the underlying file handle on Windows; fasteners
+            # may leave it open after release() if _do_close() fails silently.
+            if hasattr(self._lock, "lockfile") and self._lock.lockfile is not None:
+                try:
+                    self._lock.lockfile.close()
+                except OSError:
+                    pass
             self._acquired = False
             self._lock = None
         with self._in_process_locks_lock:
             self._in_process_locks.pop(self._world_dir, None)
+        # Best-effort cleanup: on Windows the lockfile handle may linger,
+        # preventing temp directory deletion in tests. Retry a few times.
+        for _ in range(5):
+            try:
+                if os.path.exists(self._lockfile_path):
+                    os.remove(self._lockfile_path)
+                break
+            except OSError:
+                time.sleep(0.05)
 
     def __enter__(self):
         self.acquire()
@@ -78,4 +93,5 @@ class WorldLock:
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()

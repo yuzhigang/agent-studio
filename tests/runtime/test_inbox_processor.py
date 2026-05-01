@@ -45,13 +45,12 @@ async def test_inbox_processor_injects_events_into_event_bus(msg_store):
     await hub.start()
     try:
         await asyncio.wait_for(event.wait(), timeout=2.0)
+        pending = msg_store.inbox_read_pending(limit=10)
     finally:
         await hub.stop()
 
     assert len(received) == 1
     assert received[0] == ("order.created", {"id": "123"}, "ext-1")
-
-    pending = msg_store.inbox_read_pending(limit=10)
     assert len(pending) == 0
 
 
@@ -84,12 +83,11 @@ async def test_inbox_processor_no_outbox_loop(msg_store):
     await hub.start()
     try:
         await asyncio.wait_for(event.wait(), timeout=2.0)
+        outbox = msg_store.outbox_read_pending(limit=10)
     finally:
         await hub.stop()
 
     assert len(received) == 1
-
-    outbox = msg_store.outbox_read_pending(limit=10)
     assert len(outbox) == 0
 
 

@@ -14,7 +14,7 @@ async def handle_world_models(request: web.Request):
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)
 
 
 async def handle_model_detail(request: web.Request):
@@ -31,4 +31,4 @@ async def handle_model_detail(request: web.Request):
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "model_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)

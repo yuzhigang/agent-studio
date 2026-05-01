@@ -1,3 +1,5 @@
+"""Tests for run_command helpers and SupervisorConnection heartbeat."""
+
 import os
 import sys
 import tempfile
@@ -19,7 +21,8 @@ if "websockets" not in sys.modules:
     sys.modules["websockets"] = websockets_module
     sys.modules["websockets.protocol"] = protocol_module
 
-from src.worker.cli.run_command import _start_shared_scenes, _graceful_shutdown, _send_heartbeats
+from src.worker.channels.supervisor_connection import SupervisorConnection
+from src.worker.cli.run_command import _start_shared_scenes, _graceful_shutdown
 
 
 def test_start_shared_scenes_restores_shared():
@@ -55,7 +58,9 @@ def test_graceful_shutdown_unloads_and_releases_lock():
 
 
 @pytest.mark.anyio
-async def test_send_heartbeats_reports_runtime_status(monkeypatch):
+async def test_supervisor_connection_heartbeat(monkeypatch):
+    """SupervisorConnection sends heartbeat with correct world status."""
+
     class FakeWS:
         def __init__(self):
             self.closed = False
@@ -70,7 +75,7 @@ async def test_send_heartbeats_reports_runtime_status(monkeypatch):
 
         async def send(self, payload):
             self.sent.append(payload)
-            self._ws.closed = True
+            self._ws.closed = True  # Simulate disconnect after first send
 
     class FakeSceneManager:
         def list_by_world(self, world_id):
@@ -91,17 +96,18 @@ async def test_send_heartbeats_reports_runtime_status(monkeypatch):
             }
         }
 
-    async def _fast_sleep(_seconds):
+    async def _fast_sleep(_s):
         return None
 
-    monkeypatch.setattr("src.worker.cli.run_command.asyncio.sleep", _fast_sleep)
+    monkeypatch.setattr("asyncio.sleep", _fast_sleep)
 
-    ws = FakeWS()
-    conn = FakeConn(ws)
-    await _send_heartbeats(ws, conn, FakeWorkerManager())
+    sc = SupervisorConnection("ws://test", FakeWorkerManager())
+    sc._ws = FakeWS()
+    sc._conn = FakeConn(sc._ws)
+    await sc._heartbeat_loop()
 
-    assert len(conn.sent) == 1
-    payload = conn.sent[0]
+    assert len(sc._conn.sent) == 1
+    payload = sc._conn.sent[0]
     assert payload["method"] == "notify.worker.heartbeat"
     assert payload["params"]["worlds"]["world-a"]["status"] == "stopped"
     assert payload["params"]["worlds"]["world-a"]["scene_count"] == 1

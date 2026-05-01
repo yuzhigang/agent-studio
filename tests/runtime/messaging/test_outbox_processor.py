@@ -69,14 +69,13 @@ async def test_outbox_processor_sends_enqueued_envelope(tmp_path):
     try:
         await hub.start()
         await asyncio.wait_for(channel.sent_event.wait(), timeout=1.0)
+        row = store._conn.execute(
+            "SELECT status, source_world, target_world FROM outbox WHERE message_id = ?",
+            ("msg-9",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    row = store._conn.execute(
-        "SELECT status, source_world, target_world FROM outbox WHERE message_id = ?",
-        ("msg-9",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert channel.sent == ["msg-9"]
     assert row == ("sent", "factory-b", None)
@@ -104,14 +103,13 @@ async def test_outbox_processor_marks_retryable_send_for_retry(tmp_path):
     try:
         await hub.start()
         await asyncio.wait_for(channel.sent_event.wait(), timeout=1.0)
+        row = store._conn.execute(
+            "SELECT status, error_count, last_error, source_world, target_world FROM outbox WHERE message_id = ?",
+            ("msg-10",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    row = store._conn.execute(
-        "SELECT status, error_count, last_error, source_world, target_world FROM outbox WHERE message_id = ?",
-        ("msg-10",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert channel.sent == ["msg-10"]
     assert row == ("retry", 1, "retryable failure", "factory-b", None)
@@ -139,14 +137,13 @@ async def test_outbox_processor_marks_permanent_send_dead(tmp_path):
     try:
         await hub.start()
         await asyncio.wait_for(channel.sent_event.wait(), timeout=1.0)
+        row = store._conn.execute(
+            "SELECT status, error_count, last_error, source_world, target_world FROM outbox WHERE message_id = ?",
+            ("msg-11",),
+        ).fetchone()
     finally:
         await hub.stop()
-
-    row = store._conn.execute(
-        "SELECT status, error_count, last_error, source_world, target_world FROM outbox WHERE message_id = ?",
-        ("msg-11",),
-    ).fetchone()
-    store.close()
+        store.close()
 
     assert channel.sent == ["msg-11"]
     assert row == ("dead", 3, "permanent failure", "factory-b", None)
@@ -183,13 +180,12 @@ async def test_outbox_processor_slow_send_does_not_block_following_message(tmp_p
         await asyncio.wait_for(channel.fast_sent.wait(), timeout=1.0)
         channel._slow_gate.set()
         await asyncio.sleep(0.05)
+        rows = store._conn.execute(
+            "SELECT message_id, status FROM outbox ORDER BY message_id"
+        ).fetchall()
     finally:
         await hub.stop()
-
-    rows = store._conn.execute(
-        "SELECT message_id, status FROM outbox ORDER BY message_id"
-    ).fetchall()
-    store.close()
+        store.close()
 
     assert ("msg-fast", "sent") in rows
     assert ("msg-slow", "sent") in rows

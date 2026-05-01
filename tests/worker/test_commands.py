@@ -119,12 +119,12 @@ async def test_world_scenes_list(manager):
 
 @pytest.mark.anyio
 async def test_world_models_list(manager, tmp_path):
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
-    (agents_dir / "robot" / "model").mkdir(parents=True)
-    (agents_dir / "robot" / "model" / "index.yaml").write_text("metadata:\n  name: Robot\n")
+    agents_dir = tmp_path / "agents" / "core" / "robot"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "model").mkdir()
+    (agents_dir / "model" / "index.yaml").write_text("metadata:\n  name: Robot\n")
 
     mock_bundle = {"world_id": "w1", "world_dir": str(tmp_path)}
     result = await world_models_list(manager, mock_bundle, {"world_id": "w1"})
     assert len(result["models"]) == 1
-    assert result["models"][0]["model_id"] == "robot"
+    assert result["models"][0]["model_id"] == "core.robot"

@@ -45,3 +45,5 @@ def test_run_inline_registers_message_receivers_for_all_worlds():
         # cleanup
         for wid in list(wm.worlds.keys()):
             wm.unload_world(wid)
+        import asyncio
+        asyncio.run(message_hub.stop())

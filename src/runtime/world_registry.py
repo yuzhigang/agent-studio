@@ -201,18 +201,19 @@ class WorldRegistry:
         if bundle is None:
             return False
 
-        state_mgr = bundle["state_manager"]
-        state_mgr.untrack_world(world_id)
-        state_mgr.shutdown()
+        try:
+            state_mgr = bundle["state_manager"]
+            state_mgr.untrack_world(world_id)
+            state_mgr.shutdown()
 
-        store = bundle["store"]
-        store.close()
+            store = bundle["store"]
+            store.close()
 
-        bus_reg = bundle["event_bus_registry"]
-        bus_reg.destroy(world_id)
-
-        world_lock = bundle["lock"]
-        world_lock.release()
+            bus_reg = bundle["event_bus_registry"]
+            bus_reg.destroy(world_id)
+        finally:
+            world_lock = bundle["lock"]
+            world_lock.release()
 
         return True
 

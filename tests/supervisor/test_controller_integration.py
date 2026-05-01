@@ -5,7 +5,7 @@ from src.supervisor.worker import WorkerController
 
 @pytest.mark.anyio
 async def test_worker_registration_roundtrip():
-    gateway = WorkerController()
+    controller = WorkerController()
 
     class FakeWs:
         def __init__(self):
@@ -17,20 +17,20 @@ async def test_worker_registration_roundtrip():
             self.closed = True
 
     ws = FakeWs()
-    await gateway.register_worker("wk-1", ws, "sess-1", ["world-a"])
+    await controller.register_worker("wk-1", ws, "sess-1", ["world-a"])
 
-    worker = gateway.get_worker("wk-1")
+    worker = controller.get_worker("wk-1")
     assert worker.worker_id == "wk-1"
-    assert gateway.get_worker_by_world("world-a").worker_id == "wk-1"
+    assert controller.get_worker_by_world("world-a").worker_id == "wk-1"
 
-    await gateway.unregister_worker("wk-1")
-    assert gateway.get_worker("wk-1") is None
-    assert gateway.get_worker_by_world("world-a") is None
+    await controller.unregister_worker("wk-1")
+    assert controller.get_worker("wk-1") is None
+    assert controller.get_worker_by_world("world-a") is None
 
 
 @pytest.mark.anyio
 async def test_worker_replacement_broadcasts_reset():
-    gateway = WorkerController()
+    controller = WorkerController()
 
     class FakeWs:
         def __init__(self):
@@ -42,10 +42,10 @@ async def test_worker_replacement_broadcasts_reset():
             self.closed = True
 
     client_ws = FakeWs()
-    await gateway.add_client(client_ws)
+    await controller.add_client(client_ws)
 
     worker_ws = FakeWs()
-    await gateway.register_worker("wk-1", worker_ws, "sess-1", ["world-a"])
+    await controller.register_worker("wk-1", worker_ws, "sess-1", ["world-a"])
 
     # Client should have received notify.worker.activated
     assert len(client_ws.sent) == 1

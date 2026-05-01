@@ -1,4 +1,5 @@
 from aiohttp import web
+from src.supervisor.handlers.filters import filter_instances
 from src.supervisor.worker import WorkerController, WorkerRpcError, rpc_code_to_http
 
 
@@ -14,7 +15,7 @@ async def handle_world_scenes(request: web.Request):
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)
 
 
 async def handle_scene_instances(request: web.Request):
@@ -26,39 +27,20 @@ async def handle_scene_instances(request: web.Request):
         result = await controller.proxy_to_worker(world_id, "world.instances.list", {"world_id": world_id})
         instances = result.get("instances", [])
 
-        model_id = request.query.get("model_id")
-        lifecycle_state = request.query.get("lifecycle_state")
-        state = request.query.get("state")
-
-        target_scope = f"scene:{scene_id}"
-        filtered = []
-        for inst in instances:
-            if inst.get("scope") != target_scope:
-                continue
-            if model_id and inst.get("model") != model_id:
-                continue
-            if lifecycle_state and inst.get("lifecycle_state") != lifecycle_state:
-                continue
-            raw_state = inst.get("state", {})
-            inst_state = raw_state.get("current") if isinstance(raw_state, dict) else raw_state
-            if state and inst_state != state:
-                continue
-            filtered.append({
-                "instance_id": inst["id"],
-                "model_name": inst["model"],
-                "scope": inst["scope"],
-                "state": inst_state,
-                "lifecycle_state": inst["lifecycle_state"],
-                "variables": inst.get("variables", {}),
-                "attributes": inst.get("attributes", {}),
-            })
+        filtered = filter_instances(
+            instances,
+            model_id=request.query.get("model_id"),
+            lifecycle_state=request.query.get("lifecycle_state"),
+            state=request.query.get("state"),
+            target_scope=f"scene:{scene_id}",
+        )
 
         return web.json_response({"items": filtered, "total": len(filtered)})
     except WorkerRpcError as e:
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)
 
 
 async def handle_scene_start(request: web.Request):

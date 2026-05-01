@@ -83,7 +83,9 @@ async def test_unload_world_marks_pending_deliveries_dead_when_world_is_removed(
 
         wm = WorkerManager(worker_id="wk-1")
         wm.load_worlds(tmp)
-        hub = wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=None)
+        hub = wm.build_message_hub(
+            worker_dir=os.path.join(tmp, "messagebox"), channel=None
+        )
         hub.on_inbound(
             MessageEnvelope(
                 message_id="msg-1",
@@ -103,6 +105,9 @@ async def test_unload_world_marks_pending_deliveries_dead_when_world_is_removed(
             ("msg-1", "factory-01"),
         ).fetchone()
         assert row == ("dead", "world permanently removed")
+
+        # cleanup: close message hub store so Windows can delete temp dir
+        await hub.stop()
 
 
 @pytest.mark.anyio
@@ -126,7 +131,9 @@ async def test_worker_manager_world_start_registers_receiver_and_sender():
     with tempfile.TemporaryDirectory() as tmp:
         wm = WorkerManager(worker_id="wk-1")
         wm.load_worlds(tmp)
-        hub = wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=None)
+        hub = wm.build_message_hub(
+            worker_dir=os.path.join(tmp, "messagebox"), channel=None
+        )
 
         reg = WorldRegistry(base_dir=tmp)
         reg.create_world("factory-01")
@@ -146,9 +153,14 @@ async def test_worker_manager_world_start_registers_receiver_and_sender():
         assert stop_result["status"] == "stopped"
         assert "factory-01" in wm.worlds
 
-        remove_result = await wm.handle_command("world.remove", {"world_id": "factory-01"})
+        remove_result = await wm.handle_command(
+            "world.remove", {"world_id": "factory-01"}
+        )
         assert remove_result["status"] == "removed"
         assert "factory-01" not in wm.worlds
+
+        # cleanup: close message hub store so Windows can delete temp dir
+        await hub.stop()
 
 
 def test_worker_manager_handle_command_unknown_world():
@@ -156,6 +168,7 @@ def test_worker_manager_handle_command_unknown_world():
     with pytest.raises(Exception) as exc_info:
         # Use asyncio.run since there's no running loop in a sync test
         import asyncio
+
         asyncio.run(wm.handle_command("world.stop", {"world_id": "nonexistent"}))
     assert "-32004" in str(exc_info.value)
 
@@ -221,9 +234,24 @@ def test_build_message_hub_rejects_conflicting_channel_binding():
         class _ChannelB(_ChannelA):
             pass
 
-        wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=_ChannelA())
+        hub = wm.build_message_hub(
+            worker_dir=os.path.join(tmp, "messagebox"), channel=_ChannelA()
+        )
         with pytest.raises(RuntimeError, match="different channel binding"):
-            wm.build_message_hub(worker_dir=os.path.join(tmp, "messagebox"), channel=_ChannelB())
+            wm.build_message_hub(
+                worker_dir=os.path.join(tmp, "messagebox"), channel=_ChannelB()
+            )
+
+        # cleanup: unload world first (marks pending deliveries dead via hub.store),
+        # then stop the hub (closes hub store and releases resources).
+        wm.unload_world("factory-01")
+        import asyncio
+
+        asyncio.run(hub.stop())
+        import gc, time
+
+        gc.collect()
+        time.sleep(0.1)
 
 
 @pytest.mark.anyio
@@ -248,13 +276,16 @@ async def test_worker_manager_handle_command_message_hub_publish():
 
         wm._message_hub = _MockHub()
 
-        result = await wm.handle_command("messageHub.publish", {
-            "message_id": "msg-1",
-            "source_world": "external-erp",
-            "target_world": "factory-01",
-            "event_type": "test.event",
-            "payload": {},
-        })
+        result = await wm.handle_command(
+            "messageHub.publish",
+            {
+                "message_id": "msg-1",
+                "source_world": "external-erp",
+                "target_world": "factory-01",
+                "event_type": "test.event",
+                "payload": {},
+            },
+        )
         assert result["acked"] is True
         assert seen[0].message_id == "msg-1"
         assert seen[0].source_world == "external-erp"
@@ -276,7 +307,9 @@ async def test_worker_manager_handle_command_message_hub_publish_requires_target
 
         class _MockHub:
             def on_inbound(self, envelope: MessageEnvelope):
-                raise AssertionError("on_inbound should not be called when target_world is missing")
+                raise AssertionError(
+                    "on_inbound should not be called when target_world is missing"
+                )
 
             def unregister_world(self, world_id: str, *, permanent: bool = False):
                 return None
@@ -284,12 +317,15 @@ async def test_worker_manager_handle_command_message_hub_publish_requires_target
         wm._message_hub = _MockHub()
 
         with pytest.raises(JsonRpcError, match="target_world required"):
-            await wm.handle_command("messageHub.publish", {
-                "message_id": "msg-1",
-                "source_world": "external-erp",
-                "event_type": "test.event",
-                "payload": {},
-            })
+            await wm.handle_command(
+                "messageHub.publish",
+                {
+                    "message_id": "msg-1",
+                    "source_world": "external-erp",
+                    "event_type": "test.event",
+                    "payload": {},
+                },
+            )
 
         wm.unload_world("factory-01")
 
@@ -308,36 +344,41 @@ async def test_worker_manager_handle_command_message_hub_publish_batch():
 
         class _MockHub:
             def on_inbound(self, envelope: MessageEnvelope):
-                seen_events.append((
-                    envelope.message_id,
-                    envelope.event_type,
-                    envelope.source_world,
-                    envelope.target_world,
-                ))
+                seen_events.append(
+                    (
+                        envelope.message_id,
+                        envelope.event_type,
+                        envelope.source_world,
+                        envelope.target_world,
+                    )
+                )
 
             def unregister_world(self, world_id: str, *, permanent: bool = False):
                 return None
 
         wm._message_hub = _MockHub()
 
-        result = await wm.handle_command("messageHub.publishBatch", {
-            "records": [
-                {
-                    "message_id": "r1",
-                    "source_world": "external-erp",
-                    "target_world": "factory-01",
-                    "event_type": "e1",
-                    "payload": {},
-                },
-                {
-                    "message_id": "r2",
-                    "source_world": "external-erp",
-                    "target_world": "*",
-                    "event_type": "e2",
-                    "payload": {},
-                },
-            ],
-        })
+        result = await wm.handle_command(
+            "messageHub.publishBatch",
+            {
+                "records": [
+                    {
+                        "message_id": "r1",
+                        "source_world": "external-erp",
+                        "target_world": "factory-01",
+                        "event_type": "e1",
+                        "payload": {},
+                    },
+                    {
+                        "message_id": "r2",
+                        "source_world": "external-erp",
+                        "target_world": "*",
+                        "event_type": "e2",
+                        "payload": {},
+                    },
+                ],
+            },
+        )
         assert result["acked_ids"] == ["r1", "r2"]
         assert seen_events == [
             ("r1", "e1", "external-erp", "factory-01"),
@@ -359,7 +400,9 @@ async def test_worker_manager_handle_command_message_hub_publish_batch_requires_
 
         class _MockHub:
             def on_inbound(self, envelope: MessageEnvelope):
-                raise AssertionError("on_inbound should not be called when target_world is missing")
+                raise AssertionError(
+                    "on_inbound should not be called when target_world is missing"
+                )
 
             def unregister_world(self, world_id: str, *, permanent: bool = False):
                 return None
@@ -367,15 +410,18 @@ async def test_worker_manager_handle_command_message_hub_publish_batch_requires_
         wm._message_hub = _MockHub()
 
         with pytest.raises(JsonRpcError, match="target_world required"):
-            await wm.handle_command("messageHub.publishBatch", {
-                "records": [
-                    {
-                        "message_id": "r1",
-                        "source_world": "external-erp",
-                        "event_type": "e1",
-                        "payload": {},
-                    }
-                ],
-            })
+            await wm.handle_command(
+                "messageHub.publishBatch",
+                {
+                    "records": [
+                        {
+                            "message_id": "r1",
+                            "source_world": "external-erp",
+                            "event_type": "e1",
+                            "payload": {},
+                        }
+                    ],
+                },
+            )
 
         wm.unload_world("factory-01")

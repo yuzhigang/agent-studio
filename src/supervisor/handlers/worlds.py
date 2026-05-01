@@ -6,13 +6,19 @@ async def handle_world_start(request: web.Request):
     controller: WorkerController = request.app["controller"]
     world_id = request.match_info["world_id"]
     worker = controller.get_worker_by_world(world_id)
-    if worker is not None:
-        return web.json_response({"status": "already_running"})
-
-    return web.json_response(
-        {"error": "no_worker_available", "message": f"No worker is running world '{world_id}'. Start a worker and connect it to the supervisor."},
-        status=503,
-    )
+    if worker is None:
+        return web.json_response(
+            {"error": "no_worker_available", "message": f"No worker is running world '{world_id}'. Start a worker and connect it to the supervisor."},
+            status=503,
+        )
+    try:
+        result = await controller.proxy_to_worker(world_id, "world.start", {"world_id": world_id})
+        return web.json_response(result)
+    except WorkerRpcError as e:
+        status = rpc_code_to_http(e.code)
+        return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
+    except TimeoutError:
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)
 
 
 async def handle_world_stop(request: web.Request):
@@ -38,7 +44,7 @@ async def handle_world_stop(request: web.Request):
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)
 
 
 async def handle_world_checkpoint(request: web.Request):
@@ -51,7 +57,7 @@ async def handle_world_checkpoint(request: web.Request):
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)
 
 
 async def handle_world_detail(request: web.Request):
@@ -59,7 +65,7 @@ async def handle_world_detail(request: web.Request):
     world_id = request.match_info["world_id"]
     worker = controller.get_worker_by_world(world_id)
     if worker is None:
-        return web.json_response({"error": "world_not_found"}, status=404)
+        return web.json_response({"error": "world_not_found", "message": f"World '{world_id}' not found"}, status=404)
 
     try:
         result = await controller.proxy_to_worker(world_id, "world.getStatus", {"world_id": world_id})
@@ -80,4 +86,4 @@ async def handle_world_detail(request: web.Request):
         status = rpc_code_to_http(e.code)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
     except TimeoutError:
-        return web.json_response({"error": "gateway_timeout"}, status=504)
+        return web.json_response({"error": "worker_timeout", "message": "Request to worker timed out"}, status=504)

@@ -23,7 +23,22 @@
       "Bash(rtk pytest *)",
       "Bash(python tests/e2e/e2e_test.py)",
       "Bash(PYTHONPATH=. python tests/e2e/e2e_test.py)",
-      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/e2e/e2e_test.py)"
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=. python tests/e2e/e2e_test.py)",
+      "Bash(pip install *)",
+      "Bash(python -c \"from src.runtime.lib.exceptions import ModelNotFoundError; print\\('OK'\\)\")",
+      "Bash(mkdir -p /tmp/test-sync/agents/logistics/ladle/model)",
+      "Bash(mkdir -p /tmp/test-sync/worlds/demo)",
+      "Bash(echo \"name: ladle\")",
+      "Bash(echo \"world_id: demo\")",
+      "Read(//tmp/test-sync/worlds/demo/agents/logistics/ladle/**)",
+      "Read(//d//**)",
+      "Bash(pip show *)",
+      "Bash(python -c \"from src.cli.main import main; main\\(['list-instances']\\)\")",
+      "Bash(python -c \"from src.cli.main import main; import sys; sys.exit\\(main\\(['list-instances']\\)\\)\")",
+      "Bash(python -c ' *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }
