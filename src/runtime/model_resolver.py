@@ -46,39 +46,41 @@ class ModelResolver:
 
         Searches world private agents only. No global fallback.
         """
-        # Always validate modelId format first
-        split_model_id(model_id)
+        namespace, model_name = split_model_id(model_id)
         world_agents_dir = self.world_dir / "agents"
         if world_agents_dir.exists():
-            return self._find_model_dir(world_agents_dir, model_id)
+            return self._find_model_dir(world_agents_dir, namespace, model_name)
         return None
 
     def ensure(self, model_id: str) -> Path:
         """Guarantee model_id exists in world-private dir, copying from global templates if needed.
 
-        1. resolve() locally -> found -> return.
+        1. Search world-local -> found -> return.
         2. Find in global templates -> copy to world -> return.
         3. Not found anywhere -> ModelNotFoundError.
         """
-        local = self.resolve(model_id)
-        if local is not None:
-            return local
+        namespace, model_name = split_model_id(model_id)
+        world_agents_dir = self.world_dir / "agents"
+
+        if world_agents_dir.exists():
+            local = self._find_model_dir(world_agents_dir, namespace, model_name)
+            if local is not None:
+                return local
 
         for global_path in self.global_paths:
-            template = self._find_model_dir(global_path, model_id)
+            template = self._find_model_dir(global_path, namespace, model_name)
             if template is not None:
                 self._copy_from_template(template, global_path)
                 self._ensure_shared_libs()
-                result = self.resolve(model_id)
+                result = self._find_model_dir(world_agents_dir, namespace, model_name)
                 if result is not None:
                     return result
 
         raise ModelNotFoundError(model_id)
 
     @staticmethod
-    def _find_model_dir(root: Path, model_id: str) -> Path | None:
+    def _find_model_dir(root: Path, namespace: str, model_name: str) -> Path | None:
         """Exact-path lookup: root/{namespace}/{model_name}/model"""
-        namespace, model_name = split_model_id(model_id)
         exact = root / namespace / model_name / "model"
         return exact if exact.is_dir() else None
 

@@ -15,10 +15,14 @@ def main(argv=None):
         "run", help="Run worker process loading all worlds from base directory"
     )
     run_parser.add_argument(
-        "--base-dir", required=True, help="Base directory containing world subdirectories"
+        "--base-dir",
+        required=True,
+        help="Base directory containing world subdirectories",
     )
     run_parser.add_argument(
-        "--supervisor-ws", default=None, help="Supervisor WebSocket URL to register with"
+        "--supervisor-ws",
+        default=None,
+        help="Supervisor WebSocket URL to register with",
     )
     run_parser.add_argument(
         "--ws-port", type=int, default=None, help="Local WebSocket port to expose"
@@ -42,8 +46,8 @@ def main(argv=None):
     )
     inline_parser.add_argument(
         "--supervisor-ws",
-        default="ws://localhost:8001/workers",
-        help="Supervisor WebSocket URL for loopback registration",
+        default=None,
+        help="Supervisor WebSocket URL for loopback registration (default: no supervisor)",
     )
     inline_parser.set_defaults(func=_run_inline_command)
 
@@ -54,7 +58,10 @@ def main(argv=None):
         "--base-dir", default="worlds", help="Base directory containing worlds"
     )
     sup_parser.add_argument(
-        "--ws-port", type=int, default=8001, help="WebSocket port for runtime registration"
+        "--ws-port",
+        type=int,
+        default=8001,
+        help="WebSocket port for runtime registration",
     )
     sup_parser.add_argument(
         "--http-port", type=int, default=8080, help="HTTP port for management API"
@@ -87,6 +94,7 @@ def main(argv=None):
 
 def _run_command(args):
     from src.worker.cli.run_command import run_world
+
     return run_world(
         base_dir=args.base_dir,
         supervisor_ws=args.supervisor_ws,
@@ -97,6 +105,7 @@ def _run_command(args):
 
 def _run_inline_command(args):
     from src.worker.cli.run_inline import run_inline
+
     return run_inline(
         world_dirs=args.world_dir,
         supervisor_ws=args.supervisor_ws,
@@ -105,6 +114,7 @@ def _run_inline_command(args):
 
 def _supervisor_command(args):
     from src.supervisor.cli import supervisor_main
+
     return supervisor_main(args)
 
 
@@ -158,7 +168,9 @@ def _discover_models(root: Path) -> dict[str, Path]:
     return models
 
 
-def sync_models(world_dir: str, force: bool = False, global_paths: list[str] | None = None) -> int:
+def sync_models(
+    world_dir: str, force: bool = False, global_paths: list[str] | None = None
+) -> int:
     """Synchronize global templates into world-private agents/."""
     from src.runtime.model_resolver import ModelResolver
 
@@ -169,7 +181,11 @@ def sync_models(world_dir: str, force: bool = False, global_paths: list[str] | N
 
     global_models: dict[str, Path] = {}
     for gp_str in global_paths:
-        global_models.update(_discover_models(Path(gp_str)))
+        incoming = _discover_models(Path(gp_str))
+        for mid in incoming:
+            if mid in global_models:
+                print(f"  [WARN] Duplicate model_id '{mid}' in {gp_str} — using {incoming[mid]}")
+        global_models.update(incoming)
 
     world_models: dict[str, Path] = _discover_models(world_agents)
 
@@ -179,7 +195,9 @@ def sync_models(world_dir: str, force: bool = False, global_paths: list[str] | N
     for model_id, template_dir in sorted(global_models.items()):
         if model_id in world_models:
             print(f"[SYNC] {model_id}")
-            changed, force = _sync_single_model(template_dir, world_models[model_id], force)
+            changed, force = _sync_single_model(
+                template_dir, world_models[model_id], force
+            )
             any_changes = any_changes or changed
 
             # Sync libs/ directory if present in template
@@ -195,7 +213,9 @@ def sync_models(world_dir: str, force: bool = False, global_paths: list[str] | N
         else:
             print(f"[ADD] {model_id}")
             try:
-                resolver._copy_from_template(template_dir, _find_global_root(template_dir, global_paths))
+                resolver._copy_from_template(
+                    template_dir, _find_global_root(template_dir, global_paths)
+                )
                 any_changes = True
             except Exception as e:
                 print(f"  [ERROR] Failed to copy {model_id}: {e}")
@@ -231,10 +251,14 @@ def _find_global_root(template_dir: Path, global_paths: list[str]) -> Path:
             return gp
         except ValueError:
             continue
-    raise ValueError(f"template_dir {template_dir} is not under any global path: {global_paths}")
+    raise ValueError(
+        f"template_dir {template_dir} is not under any global path: {global_paths}"
+    )
 
 
-def _sync_single_model(template_dir: Path, world_dir: Path, force: bool) -> tuple[bool, bool]:
+def _sync_single_model(
+    template_dir: Path, world_dir: Path, force: bool
+) -> tuple[bool, bool]:
     """Sync a single model directory, returning (changed, force)."""
     changed = False
     for src_file in template_dir.rglob("*"):
