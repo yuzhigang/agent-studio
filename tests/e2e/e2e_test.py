@@ -51,7 +51,7 @@ def main():
 
     # --- 测试 1: idle -(start)-> monitoring ---
     print("\n[3] 发送 'start' 事件 → 状态迁移 idle → monitoring ...")
-    bus.publish("start", {}, source="test", scope="world")
+    bus.publish("start", {}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     print(f"      state: {inst.state.get('current')}")
     assert inst.state.get("current") == "monitoring"
@@ -59,7 +59,7 @@ def main():
 
     # --- 测试 2: tick 事件更新温度 → condition 自动触发 alert ---
     print("\n[4] 发送 'tick' 事件 (temperature=85) → 温度更新 + ConditionTrigger 自动迁移 ...")
-    bus.publish("tick", {"temperature": 85.0}, source="test", scope="world")
+    bus.publish("tick", {"temperature": 85.0}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     print(f"      temperature: {inst.variables.get('temperature')}")
     print(f"      maxRecorded: {inst.variables.get('maxRecorded')}")
@@ -73,7 +73,7 @@ def main():
 
     # --- 测试 3: reset 事件 → idle ---
     print("\n[5] 发送 'reset' 事件 → 状态迁移 alert → idle ...")
-    bus.publish("reset", {}, source="test", scope="world")
+    bus.publish("reset", {}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     print(f"      state: {inst.state.get('current')}")
     assert inst.state.get("current") == "idle"
@@ -81,17 +81,17 @@ def main():
 
     # --- 测试 4: 重新 start → monitoring，然后 stop → idle ---
     print("\n[6] 再次 start → monitoring，然后 stop → idle ...")
-    bus.publish("start", {}, source="test", scope="world")
+    bus.publish("start", {}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     assert inst.state.get("current") == "monitoring"
-    bus.publish("stop", {}, source="test", scope="world")
+    bus.publish("stop", {}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     assert inst.state.get("current") == "idle"
     print("    ✓ 完整状态循环: idle → monitoring → idle")
 
     # --- 测试 5: beat 事件 ---
     print("\n[7] 发送 'beat' 事件 → 触发心跳行为 ...")
-    bus.publish("beat", {}, source="test", scope="world")
+    bus.publish("beat", {}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     print(f"      count: {inst.variables.get('count')}")
     print(f"      lastBeat: {inst.variables.get('lastBeat')}")
@@ -101,7 +101,7 @@ def main():
 
     # --- 测试 6: dispatchAssigned 事件 ---
     print("\n[8] 发送 'dispatchAssigned' 事件 → 触发派工行为 ...")
-    bus.publish("dispatchAssigned", {"task": "inspect-furnace"}, source="test", scope="world")
+    bus.publish("dispatchAssigned", {"task": "inspect-furnace"}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     print("    ✓ 派工行为触发成功")
 

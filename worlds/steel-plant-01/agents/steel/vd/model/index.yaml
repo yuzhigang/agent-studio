@@ -1,0 +1,82 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: vd
+  title: 真空脱气炉
+  description: VD真空脱气，去除钢中气体
+
+attributes:
+  capacity:
+    type: number
+    default: 300
+    description: 处理能力(t)
+
+variables:
+  ladleId:
+    type: string
+    default: ""
+    description: 当前钢包ID
+  heatId:
+    type: string
+    default: ""
+    description: 当前炉次号
+  startTime:
+    type: string
+    default: ""
+    description: 工序开始时间
+
+states:
+  idle:
+    title: 空闲
+    description: 等待钢包到达
+    group: workState
+    initialState: true
+  degassing:
+    title: 脱气中
+    description: 正在真空脱气处理
+    group: workState
+
+transitions:
+  startProcess:
+    title: 开始脱气
+    from: idle
+    to: degassing
+  endProcess:
+    title: 脱气结束
+    from: degassing
+    to: idle
+
+behaviors:
+  onProcessStart:
+    title: 脱气开始
+    trigger:
+      type: event
+      name: vd.process.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.ladleId = payload.get("ladleId", "")
+          this.variables.heatId = payload.get("heatId", "")
+          import datetime
+          this.variables.startTime = datetime.datetime.now().isoformat()
+          print(f"[{this.id}] 脱气开始 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+      - type: transition
+        transition: startProcess
+
+  onProcessEnd:
+    title: 脱气结束
+    trigger:
+      type: event
+      name: vd.process.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 脱气结束 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+          this.variables.ladleId = ""
+          this.variables.heatId = ""
+          this.variables.startTime = ""
+      - type: transition
+        transition: endProcess

@@ -15,7 +15,7 @@ from src.runtime.model_loader import ModelLoader
 from src.runtime.model_resolver import ModelResolver
 from src.runtime.stores.sqlite_store import SQLiteStore
 from src.runtime.event_bus import EventBusRegistry
-from src.runtime.instance_manager import InstanceManager
+from src.runtime.instance_manager import InstanceManager, _merge_defaults
 from src.runtime.scene_manager import SceneManager
 from src.runtime.state_manager import StateManager
 from src.runtime.world_state import WorldState
@@ -167,6 +167,28 @@ class WorldRegistry:
             if world_agents_dir.exists():
                 lib_registry.scan(str(world_agents_dir), clear=False)
 
+            # Load scene declarations from scenes/ directory into the store
+            scenes_dir = Path(world_dir) / "scenes"
+            if scenes_dir.exists():
+                for scene_file in sorted(scenes_dir.glob("*.yaml")):
+                    try:
+                        with open(scene_file, "r", encoding="utf-8") as f:
+                            scene_yaml = yaml.safe_load(f)
+                        if not scene_yaml:
+                            continue
+                        scene_id = scene_yaml.get("scene_id")
+                        if not scene_id:
+                            continue
+                        scene_data = {
+                            "mode": scene_yaml.get("mode", "shared"),
+                            "refs": scene_yaml.get("references", []),
+                            "local_instances": scene_yaml.get("local_instances", {}),
+                        }
+                        store.save_scene(world_id, scene_id, scene_data)
+                        logger.info("Loaded scene %s from %s", scene_id, scene_file.name)
+                    except Exception:
+                        logger.warning("Failed to load scene file %s", scene_file, exc_info=True)
+
             state_mgr.restore_world(world_id)
             state_mgr.track_world(world_id)
 
@@ -230,19 +252,6 @@ class WorldRegistry:
     def get_loaded_world(self, world_id: str) -> dict | None:
         return self._loaded.get(world_id)
 
-    @staticmethod
-    def _merge_defaults(model_specs: dict, overrides: dict) -> dict:
-        result = {}
-        for key, spec in model_specs.items():
-            if isinstance(spec, dict):
-                result[key] = overrides.get(key, spec.get("default"))
-            else:
-                result[key] = overrides.get(key, spec)
-        for key, value in overrides.items():
-            if key not in result:
-                result[key] = value
-        return result
-
     def _load_instance_declarations(
         self,
         world_id: str,
@@ -272,16 +281,16 @@ class WorldRegistry:
                 continue
 
             # Merge defaults with overrides
-            variables = self._merge_defaults(
+            variables = _merge_defaults(
                 model.get("variables") or {}, decl.get("variables") or {}
             )
-            attributes = self._merge_defaults(
+            attributes = _merge_defaults(
                 model.get("attributes") or {}, decl.get("attributes") or {}
             )
-            links = self._merge_defaults(
+            links = _merge_defaults(
                 model.get("links") or {}, decl.get("links") or {}
             )
-            memory = self._merge_defaults(
+            memory = _merge_defaults(
                 model.get("memory") or {}, decl.get("memory") or {}
             )
 

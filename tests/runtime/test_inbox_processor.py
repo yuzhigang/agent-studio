@@ -121,6 +121,7 @@ async def test_inbox_processor_target_routing(msg_store):
             event_type="notify.alert",
             payload={"level": "high"},
             source="ext-1",
+            scope="agent",
             target="inst-target",
         )
     )

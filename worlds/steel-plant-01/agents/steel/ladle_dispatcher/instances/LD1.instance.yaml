@@ -1,0 +1,15 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: LD1
+modelId: steel.ladle_dispatcher
+state: idle
+metadata:
+  name: 钢包调度员
+attributes:
+  maxLadleCount: 12
+variables:
+  activeLadles: ""
+  pendingAssignments: 0
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

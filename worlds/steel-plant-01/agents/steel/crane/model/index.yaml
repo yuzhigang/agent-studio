@@ -1,0 +1,212 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: crane
+  title: 天车
+  description: 桥式起重机，用于吊运钢包和物料
+
+attributes:
+  capacity:
+    type: number
+    default: 320
+    description: 额定起重量(t)
+  bay:
+    type: string
+    default: ""
+    shared: true
+    description: 所在跨区
+  span:
+    type: number
+    default: 22.5
+    description: 跨度(m)
+
+variables:
+  currentTaskId:
+    type: string
+    default: ""
+    description: 当前执行的任务ID
+  currentLadle:
+    type: string
+    default: ""
+    shared: true
+    description: 当前吊运的钢包ID
+  position:
+    type: string
+    default: "park"
+    shared: true
+    description: 当前位置
+  targetPosition:
+    type: string
+    default: ""
+    shared: true
+    description: 目标位置
+  hookHeight:
+    type: number
+    default: 0.0
+    shared: true
+    description: 钩头高度(m)
+
+states:
+  idle:
+    title: 空闲
+    description: 等待指令
+    group: workState
+    initialState: true
+  moving:
+    title: 运行中
+    description: 大车/小车运行
+    group: workState
+  hoisting:
+    title: 起吊中
+    description: 正在起吊钢包
+    group: workState
+  lowering:
+    title: 下放中
+    description: 正在下放钢包
+    group: workState
+
+transitions:
+  startMove:
+    title: 开始运行
+    from: idle
+    to: moving
+  arrive:
+    title: 到达目标
+    from: moving
+    to: idle
+  startHoist:
+    title: 开始起吊
+    from: idle
+    to: hoisting
+  finishHoist:
+    title: 起吊完成
+    from: hoisting
+    to: idle
+  startLower:
+    title: 开始下放
+    from: idle
+    to: lowering
+  finishLower:
+    title: 下放完成
+    from: lowering
+    to: idle
+
+behaviors:
+  onTaskAssign:
+    title: 接收任务
+    trigger:
+      type: event
+      name: crane.task.assign
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          taskId = payload.get("taskId", "")
+          ladleId = payload.get("ladleId", "")
+          fromPos = payload.get("from", "")
+          toPos = payload.get("to", "")
+          this.variables.currentTaskId = taskId
+          this.variables.currentLadle = ladleId
+          this.variables.targetPosition = toPos
+          print(f"[{this.id}] 接收任务 {taskId} | 钢包={ladleId} | 从={fromPos} -> 到={toPos}")
+
+  onMoveStart:
+    title: 开始移动
+    trigger:
+      type: event
+      name: crane.move.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          toPos = payload.get("to", this.variables.targetPosition)
+          print(f"[{this.id}] 开始移动 | 目标={toPos}")
+          this.variables.position = "moving_to_" + toPos
+      - type: transition
+        transition: startMove
+
+  onMoveEnd:
+    title: 移动完成
+    trigger:
+      type: event
+      name: crane.move.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          arrivedPos = payload.get("position", this.variables.targetPosition)
+          print(f"[{this.id}] 到达位置 | 位置={arrivedPos}")
+          this.variables.position = arrivedPos
+          this.variables.targetPosition = ""
+      - type: transition
+        transition: arrive
+
+  onHoistStart:
+    title: 开始起吊
+    trigger:
+      type: event
+      name: crane.hoist.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          ladleId = payload.get("ladleId", "")
+          print(f"[{this.id}] 开始起吊 | 钢包={ladleId}")
+          this.variables.currentLadle = ladleId
+      - type: transition
+        transition: startHoist
+
+  onHoistEnd:
+    title: 起吊完成
+    trigger:
+      type: event
+      name: crane.hoist.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 起吊完成 | 钢包={this.variables.currentLadle}")
+          this.variables.hookHeight = 10.0
+      - type: transition
+        transition: finishHoist
+
+  onLowerStart:
+    title: 开始下放
+    trigger:
+      type: event
+      name: crane.lower.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 开始下放 | 钢包={this.variables.currentLadle}")
+      - type: transition
+        transition: startLower
+
+  onLowerEnd:
+    title: 下放完成
+    trigger:
+      type: event
+      name: crane.lower.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          taskId = this.variables.currentTaskId
+          print(f"[{this.id}] 下放完成 | 任务={taskId} | 钢包={this.variables.currentLadle} 已放置")
+          this.variables.currentLadle = ""
+          this.variables.hookHeight = 0.0
+          this.variables.currentTaskId = ""
+          dispatch("crane.task.completed", {
+              "targetId": "CD1",
+              "taskId": taskId,
+              "craneId": this.id
+          })
+      - type: transition
+        transition: finishLower

@@ -1,0 +1,16 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: L02
+modelId: steel.ladle
+state: idle
+metadata:
+  name: L02
+attributes:
+  capacity: 300
+variables:
+  heatId: ""
+  grade: ""
+  position: "yard"
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

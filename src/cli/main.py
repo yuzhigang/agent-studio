@@ -8,6 +8,19 @@ from pathlib import Path
 
 
 def main(argv=None):
+    # Windows: force UTF-8 for stdout/stderr so Chinese characters print correctly
+    if sys.platform == "win32" and "PYTEST_CURRENT_TEST" not in __import__("os").environ:
+        import os
+        os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+        try:
+            import io
+            # Only rewrap if stdout is a real file with a buffer and not already utf-8
+            if hasattr(sys.stdout, "buffer") and getattr(sys.stdout, "encoding", None) != "utf-8":
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
+            if hasattr(sys.stderr, "buffer") and getattr(sys.stderr, "encoding", None) != "utf-8":
+                sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", line_buffering=True)
+        except (AttributeError, OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(prog="agent-studio")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -88,6 +101,14 @@ def main(argv=None):
     )
     list_parser.set_defaults(func=_list_instances_command)
 
+    sim_parser = subparsers.add_parser(
+        "simulate", help="Run event simulator"
+    )
+    sim_parser.add_argument(
+        "--config", required=True, help="Path to simulator.yaml"
+    )
+    sim_parser.set_defaults(func=_simulate_command)
+
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -148,6 +169,11 @@ def _list_instances_command(args):
             f"{inst.get('state', 'N/A'):<15} {inst.get('lifecycle_state', 'N/A'):<10}"
         )
     return 0
+
+
+def _simulate_command(args):
+    from src.simulator.cli import simulate_main
+    return simulate_main(args.config)
 
 
 def _discover_models(root: Path) -> dict[str, Path]:

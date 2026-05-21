@@ -1,0 +1,16 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: LF2
+modelId: steel.lf
+state: idle
+metadata:
+  name: LF2
+attributes:
+  capacity: 300
+variables:
+  ladleId: ""
+  heatId: ""
+  startTime: ""
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

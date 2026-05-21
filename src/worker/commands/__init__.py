@@ -9,7 +9,7 @@ from src.worker.commands.world import (
 from src.worker.commands.instance import world_instances_get, world_instances_list
 from src.worker.commands.scene import scene_start, scene_stop, world_scenes_list
 from src.worker.commands.model import world_models_get, world_models_list
-from src.worker.commands.message_hub import message_hub_publish, message_hub_publish_batch
+from src.worker.commands.message_hub import message_hub_publish, message_hub_publish_batch, message_hub_outbox_query
 
 _REGISTRY = {
     "world.stop": world_stop,
@@ -27,6 +27,7 @@ _REGISTRY = {
     "world.models.get": world_models_get,
     "messageHub.publish": message_hub_publish,
     "messageHub.publishBatch": message_hub_publish_batch,
+    "messageHub.outbox.query": message_hub_outbox_query,
 }
 
 

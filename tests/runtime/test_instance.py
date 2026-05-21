@@ -23,15 +23,14 @@ def test_instance_creation():
     assert inst.audit == {"version": 0, "updatedAt": None, "lastEventId": None}
 
 
-def test_instance_update_snapshot_with_audit_fields():
+def test_instance_is_audit_field():
     inst = Instance(
         instance_id="ladle-001",
         model_name="ladle",
         world_id="proj-01",
         scope="world",
-        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
-        variables={"temperature": 1500, "weight": 200},
-        attributes={"capacity": 300},
+        variables={"temperature": 1500, "weight": 200, "operator": "zhang"},
+        attributes={"capacity": 300, "material": "steel"},
         model={
             "variables": {
                 "temperature": {"type": "number", "audit": True},
@@ -47,24 +46,50 @@ def test_instance_update_snapshot_with_audit_fields():
             },
         },
     )
-    inst._update_snapshot()
-    assert inst.snapshot["temperature"] == 1500
-    assert inst.snapshot["weight"] == 200
-    assert inst.snapshot["capacity"] == 300
-    assert inst.snapshot["loadRatio"] is None
-    assert "operator" not in inst.snapshot
-    assert "material" not in inst.snapshot
+    assert inst._is_audit_field("variables.temperature") is True
+    assert inst._is_audit_field("variables.weight") is True
+    assert inst._is_audit_field("variables.operator") is False
+    assert inst._is_audit_field("attributes.capacity") is True
+    assert inst._is_audit_field("attributes.material") is False
+    assert inst._is_audit_field("derived.loadRatio") is True
+    assert inst._is_audit_field("variables.nonexistent") is False
 
-    # Verify world_state property assembles correctly
+
+def test_instance_world_state_with_shared_fields():
+    inst = Instance(
+        instance_id="ladle-001",
+        model_name="ladle",
+        world_id="proj-01",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500, "weight": 200, "operator": "zhang"},
+        attributes={"capacity": 300, "material": "steel"},
+        model={
+            "variables": {
+                "temperature": {"type": "number", "shared": True},
+                "weight": {"type": "number", "shared": True},
+                "operator": {"type": "string"},
+            },
+            "attributes": {
+                "capacity": {"type": "number", "shared": True},
+                "material": {"type": "string"},
+            },
+        },
+    )
     ws = inst.world_state
     assert ws["id"] == "ladle-001"
+    assert ws["model_name"] == "ladle"
     assert ws["state"] == "idle"
     assert ws["updated_at"] == "2024-01-01T00:00:00Z"
     assert ws["lifecycle_state"] == "active"
-    assert ws["snapshot"]["temperature"] == 1500
+    assert ws["temperature"] == 1500
+    assert ws["weight"] == 200
+    assert ws["capacity"] == 300
+    assert "operator" not in ws
+    assert "material" not in ws
 
 
-def test_instance_update_snapshot_caches_audit_fields():
+def test_instance_is_audit_field_caches():
     inst = Instance(
         instance_id="ladle-001",
         model_name="ladle",
@@ -76,14 +101,12 @@ def test_instance_update_snapshot_caches_audit_fields():
         },
     )
     assert not inst._audit_fields
-    inst._update_snapshot()
+    inst._is_audit_field("variables.temperature")
     assert "temperature" in inst._audit_fields
     assert inst._audit_fields["temperature"] == "variables"
 
-    # Change variable and update again - should use cached fields
-    inst.variables["temperature"] = 1600
-    inst._update_snapshot()
-    assert inst.snapshot["temperature"] == 1600
+    # Second call should use cached fields
+    assert inst._is_audit_field("variables.temperature") is True
 
 
 def test_instance_deep_copy_isolation():

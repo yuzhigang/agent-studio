@@ -1,0 +1,25 @@
+scene_id: default
+name: 炼钢车间默认场景
+mode: shared
+description: 2BOF + 2LF + 1VD + 2CC + 12Ladle 完整配置
+references:
+  - BOF1
+  - BOF2
+  - LF1
+  - LF2
+  - VD1
+  - CC1
+  - CC2
+  - L01
+  - L02
+  - L03
+  - L04
+  - L05
+  - L06
+  - L07
+  - L08
+  - L09
+  - L10
+  - L11
+  - L12
+local_instances: {}

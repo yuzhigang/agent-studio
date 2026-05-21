@@ -29,7 +29,7 @@ async def main():
     # Verify behavior works by sending beat events
     print("\n--- Sending 3 beat events ---")
     for i in range(3):
-        event_bus.publish("beat", {"seq": i}, source="driver", scope="world")
+        event_bus.publish("beat", {"seq": i}, source="driver", scope="world", target="demo-world")
         await asyncio.sleep(0.3)
 
     inst = im.get("demo-world", "sensor-01")

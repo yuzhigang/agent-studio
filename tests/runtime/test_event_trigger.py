@@ -14,7 +14,7 @@ def test_event_trigger_callbacks_on_matching_event():
     entry = TriggerEntry(inst, {"type": "event", "name": "start"}, lambda i, **kw: calls.append(i), "b1")
     et.on_registered(entry)
 
-    bus.publish("start", {"foo": 1}, source="ext", scope="world")
+    bus.publish("start", {"foo": 1}, source="ext", scope="world", target="w1")
     assert len(calls) == 1
     assert calls[0] is inst
 
@@ -29,7 +29,7 @@ def test_event_trigger_skips_non_matching_event():
     entry = TriggerEntry(inst, {"type": "event", "name": "start"}, lambda i, **kw: calls.append(i), "b1")
     et.on_registered(entry)
 
-    bus.publish("stop", {}, source="ext", scope="world")
+    bus.publish("stop", {}, source="ext", scope="world", target="w1")
     assert len(calls) == 0
 
 
@@ -44,17 +44,17 @@ def test_event_trigger_respects_scope():
     et.on_registered(entry)
 
     # world-scoped messages broadcast to all instances
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
     assert len(calls) == 1
     calls.clear()
 
     # matching scene message is received
-    bus.publish("start", {}, source="ext", scope="scene:s1")
+    bus.publish("start", {}, source="ext", scope="scene", target="s1")
     assert len(calls) == 1
     calls.clear()
 
     # non-matching scene message is not received
-    bus.publish("start", {}, source="ext", scope="scene:s2")
+    bus.publish("start", {}, source="ext", scope="scene", target="s2")
     assert len(calls) == 0
 
 
@@ -69,7 +69,7 @@ def test_event_trigger_unregistered_stops_receiving():
     et.on_registered(entry)
     et.on_unregistered(entry)
 
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
     assert len(calls) == 0
 
 
@@ -84,7 +84,7 @@ def test_event_trigger_removes_instance():
     et.on_registered(entry)
     et.on_instance_removed(inst)
 
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
     assert len(calls) == 0
 
 
@@ -107,7 +107,7 @@ def test_event_trigger_removes_only_same_instance():
     et.on_instance_removed(inst_a)
 
     # Instance B should still receive events
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
     assert len(calls_a) == 0
     assert len(calls_b) == 1
     assert calls_b[0] is inst_b
@@ -128,8 +128,8 @@ def test_event_trigger_unregistered_does_not_remove_other_behaviors():
     et.on_registered(entry_stop)
 
     # Both handlers active
-    bus.publish("start", {}, source="ext", scope="world")
-    bus.publish("stop", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
+    bus.publish("stop", {}, source="ext", scope="world", target="w1")
     assert len(calls_start) == 1
     assert len(calls_stop) == 1
 
@@ -139,7 +139,7 @@ def test_event_trigger_unregistered_does_not_remove_other_behaviors():
     # "stop" behavior must still receive events
     calls_start.clear()
     calls_stop.clear()
-    bus.publish("start", {}, source="ext", scope="world")
-    bus.publish("stop", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
+    bus.publish("stop", {}, source="ext", scope="world", target="w1")
     assert len(calls_start) == 0
     assert len(calls_stop) == 1

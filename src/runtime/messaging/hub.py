@@ -107,3 +107,8 @@ class MessageHub:
         if self._channel is None:
             return True
         return self._channel.is_ready()
+
+    def query_outbox(self, world_id: str | None = None, limit: int = 50, since: str | None = None) -> list[dict]:
+        if self._store is None:
+            return []
+        return self._store.query_outbound(world_id=world_id, limit=limit, since=since)

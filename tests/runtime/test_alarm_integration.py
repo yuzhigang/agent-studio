@@ -264,12 +264,12 @@ def test_alarm_triggered_via_condition():
     assert inst is not None
 
     # Start monitoring so condition trigger is relevant
-    bus.publish("start", {}, source="test", scope="world")
+    bus.publish("start", {}, source="test", scope="world", target="demo-world")
     time.sleep(0.1)
     assert inst.state.get("current") == "monitoring"
 
     # Send temperature above threshold
-    bus.publish("tick", {"temperature": 95.0}, source="test", scope="world")
+    bus.publish("tick", {"temperature": 95.0}, source="test", scope="world", target="demo-world")
     time.sleep(0.2)
 
     # Verify alarm is active
@@ -281,8 +281,8 @@ def test_alarm_triggered_via_condition():
     assert inst.variables.get("temperature") == 95.0
 
     # Reset — send low temperature so condition becomes false and alarm clears
-    bus.publish("reset", {}, source="test", scope="world")
-    bus.publish("tick", {"temperature": 20.0}, source="test", scope="world")
+    bus.publish("reset", {}, source="test", scope="world", target="demo-world")
+    bus.publish("tick", {"temperature": 20.0}, source="test", scope="world", target="demo-world")
     time.sleep(0.2)
 
     # Alarm should be inactive after reset

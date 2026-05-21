@@ -32,6 +32,6 @@ def test_event_drives_state_transition():
     )
 
     bus = bus_reg.get_or_create("w1")
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
 
     assert inst.state["current"] == "monitoring"

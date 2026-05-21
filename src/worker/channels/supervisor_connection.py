@@ -15,6 +15,10 @@ from datetime import datetime, timezone
 from typing import Callable
 
 import websockets
+try:
+    from websockets import State as WsState
+except ImportError:
+    from websockets.protocol import State as WsState
 
 from src.runtime.messaging import MessageEnvelope, SendResult
 from src.worker.channels.base import Channel
@@ -120,6 +124,7 @@ class SupervisorConnection(Channel):
                 await self._send_activated()
                 async with self._lock:
                     self._ready = True
+                print(f"[worker] Connected to supervisor at {self._url}")
 
                 # Run recv + heartbeat in parallel; reconnect if either fails
                 recv_task = asyncio.create_task(self._recv_loop())
@@ -171,10 +176,17 @@ class SupervisorConnection(Channel):
     # Heartbeat loop
     # ------------------------------------------------------------------
 
+    def _is_ws_open(self) -> bool:
+        if self._ws is None:
+            return False
+        if hasattr(self._ws, "state"):
+            return self._ws.state == WsState.OPEN
+        return not getattr(self._ws, "closed", False)
+
     async def _heartbeat_loop(self) -> None:
         while not self._stop_event.is_set():
             await asyncio.sleep(5.0)
-            if self._ws is None or self._ws.closed:
+            if not self._is_ws_open():
                 break
             try:
                 worlds_status = {}

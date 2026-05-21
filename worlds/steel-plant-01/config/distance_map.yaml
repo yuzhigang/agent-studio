@@ -1,0 +1,74 @@
+# 钢厂位置间距离表（单位：相对距离/分钟）
+# 用于天车调度时计算任务起点到天车当前位置的距离
+BOF1:
+  BOF1: 0
+  BOF2: 1
+  LF1: 2
+  LF2: 2
+  VD1: 3
+  CC1: 5
+  CC2: 5
+  park: 2
+BOF2:
+  BOF1: 1
+  BOF2: 0
+  LF1: 2
+  LF2: 2
+  VD1: 3
+  CC1: 5
+  CC2: 5
+  park: 2
+LF1:
+  BOF1: 2
+  BOF2: 2
+  LF1: 0
+  LF2: 1
+  VD1: 1
+  CC1: 3
+  CC2: 3
+  park: 2
+LF2:
+  BOF1: 2
+  BOF2: 2
+  LF1: 1
+  LF2: 0
+  VD1: 1
+  CC1: 3
+  CC2: 3
+  park: 2
+VD1:
+  BOF1: 3
+  BOF2: 3
+  LF1: 1
+  LF2: 1
+  VD1: 0
+  CC1: 4
+  CC2: 4
+  park: 3
+CC1:
+  BOF1: 5
+  BOF2: 5
+  LF1: 3
+  LF2: 3
+  VD1: 4
+  CC1: 0
+  CC2: 1
+  park: 3
+CC2:
+  BOF1: 5
+  BOF2: 5
+  LF1: 3
+  LF2: 3
+  VD1: 4
+  CC1: 1
+  CC2: 0
+  park: 3
+park:
+  BOF1: 2
+  BOF2: 2
+  LF1: 2
+  LF2: 2
+  VD1: 3
+  CC1: 3
+  CC2: 3
+  park: 0

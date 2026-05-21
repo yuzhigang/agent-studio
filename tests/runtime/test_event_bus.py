@@ -8,7 +8,7 @@ def test_event_bus_publish_does_not_require_message_hub_hook():
     seen = []
     bus.register("inst-1", "world", "local.event", lambda t, p, s: seen.append((t, p, s)))
 
-    bus.publish("local.event", {"ok": True}, "tester", "world")
+    bus.publish("local.event", {"ok": True}, "tester", "world", "w1")
 
     assert seen == [("local.event", {"ok": True}, "tester")]
 
@@ -20,7 +20,7 @@ def test_event_bus_target_routes_to_single_instance():
     bus.register("inst-target", "world", "notify.alert", lambda t, p, s: target_hits.append(s))
     bus.register("inst-other", "world", "notify.alert", lambda t, p, s: other_hits.append(s))
 
-    bus.publish("notify.alert", {"level": "high"}, "ext-1", "world", target="inst-target")
+    bus.publish("notify.alert", {"level": "high"}, "ext-1", "agent", "inst-target")
 
     assert target_hits == ["ext-1"]
     assert other_hits == []
@@ -35,7 +35,7 @@ def test_event_bus_scene_scope_is_isolated_from_other_scopes():
     bus.register("scene-b", "scene:pour", "ladleLoaded", lambda t, p, s: other_scene_hits.append(t))
     bus.register("world-a", "world", "ladleLoaded", lambda t, p, s: world_hits.append(t))
 
-    bus.publish("ladleLoaded", {}, "caster-03", "scene:drill")
+    bus.publish("ladleLoaded", {}, "caster-03", "scene", "drill")
 
     assert scene_hits == ["ladleLoaded"]
     assert other_scene_hits == []
@@ -67,7 +67,7 @@ def test_handler_failure_does_not_interrupt_other_subscribers():
     bus.register("inst-buggy", "world", "test.event", buggy_handler)
     bus.register("inst-good", "world", "test.event", good_handler)
 
-    bus.publish("test.event", {}, "src-1", "world")
+    bus.publish("test.event", {}, "src-1", "world", "w1")
 
     assert hits == [("test.event", "src-1")]
 
@@ -81,4 +81,4 @@ def test_publish_raise_on_error_propagates_handler_failure():
     bus.register("inst-buggy", "world", "test.event", buggy_handler)
 
     with pytest.raises(RuntimeError, match="boom"):
-        bus.publish("test.event", {}, "src-1", "world", raise_on_error=True)
+        bus.publish("test.event", {}, "src-1", "world", "w1", raise_on_error=True)

@@ -1,0 +1,118 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: steel_dispatcher
+  title: 炼钢调度员
+  description: 负责整体炼钢生产流程的协调和调度
+
+attributes:
+  maxHeatsPerDay:
+    type: number
+    default: 48
+    description: 日最大炉次数
+
+variables:
+  todayHeats:
+    type: number
+    default: 0
+    description: 今日已生产炉数
+  activeHeats:
+    type: string
+    default: ""
+    description: 当前在产炉次列表
+  scheduleStatus:
+    type: string
+    default: "normal"
+    description: 调度状态(normal/delayed/emergency)
+
+states:
+  idle:
+    title: 正常
+    description: 生产按计划进行
+    group: workState
+    initialState: true
+  adjusting:
+    title: 调整中
+    description: 正在调整生产计划
+    group: workState
+
+transitions:
+  startAdjust:
+    title: 开始调整
+    from: idle
+    to: adjusting
+  endAdjust:
+    title: 调整完成
+    from: adjusting
+    to: idle
+
+behaviors:
+  onHeatStart:
+    title: 炉次开始
+    trigger:
+      type: event
+      name: steel.heat.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          heatId = payload.get("heatId", "")
+          grade = payload.get("grade", "")
+          print(f"[{this.id}] 炉次开始 | 炉次={heatId} | 钢种={grade}")
+          this.variables.todayHeats += 1
+          heats = this.variables.activeHeats
+          if heats:
+            this.variables.activeHeats = heats + "," + heatId
+          else:
+            this.variables.activeHeats = heatId
+
+  onHeatComplete:
+    title: 炉次完成
+    trigger:
+      type: event
+      name: steel.heat.complete
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          heatId = payload.get("heatId", "")
+          print(f"[{this.id}] 炉次完成 | 炉次={heatId}")
+          heats = this.variables.activeHeats.split(",")
+          heats = [h for h in heats if h != heatId]
+          this.variables.activeHeats = ",".join(heats)
+
+  onScheduleAlert:
+    title: 计划告警
+    trigger:
+      type: event
+      name: steel.schedule.alert
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          alertType = payload.get("alertType", "")
+          message = payload.get("message", "")
+          print(f"[{this.id}] 计划告警 | 类型={alertType} | 消息={message}")
+          if alertType == "delay":
+            this.variables.scheduleStatus = "delayed"
+          elif alertType == "emergency":
+            this.variables.scheduleStatus = "emergency"
+      - type: transition
+        transition: startAdjust
+
+  onScheduleResolved:
+    title: 计划恢复
+    trigger:
+      type: event
+      name: steel.schedule.resolved
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 计划恢复正常")
+          this.variables.scheduleStatus = "normal"
+      - type: transition
+        transition: endAdjust

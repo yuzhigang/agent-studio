@@ -1,0 +1,16 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: VD1
+modelId: steel.vd
+state: idle
+metadata:
+  name: VD1
+attributes:
+  capacity: 300
+variables:
+  ladleId: ""
+  heatId: ""
+  startTime: ""
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

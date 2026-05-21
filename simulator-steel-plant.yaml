@@ -1,0 +1,112 @@
+supervisor_url: http://localhost:18080
+
+sources:
+  - name: steel-scheduler
+    target_world: steel-plant-01
+    script: |
+      import json
+      import random
+
+      def _try_schedule(ctx):
+          """检查是否有到期的 BOF，生成完整炉次事件序列插入 FEL。"""
+          sim_time = ctx.get('sim_time', 0)
+          fel = json.loads(ctx.get('fel', '[]'))
+
+          for bof in ['BOF1', 'BOF2']:
+              key = bof.lower() + '_next'
+              if sim_time >= ctx.get(key, 999999):
+                  ctx.set(key, sim_time + 45)
+
+                  h = ctx.get('heat', 0) + 1
+                  ctx.set('heat', h)
+                  hid = 'H' + str(h).zfill(4)
+
+                  g = 'quality' if random.random() < 0.3 else 'plain'
+                  lid = 'L' + str(h % 12 + 1).zfill(2)
+
+                  # 轮询分配 LF 和 CC
+                  lf = 'LF1' if h % 2 == 1 else 'LF2'
+                  cc = 'CC1' if h % 2 == 1 else 'CC2'
+
+                  c = int(ctx.uniform(3, 5))
+                  b = int(ctx.uniform(30, 40))
+                  tp = int(ctx.uniform(4, 6))
+                  tr = int(ctx.uniform(2, 4))
+                  r = int(ctx.uniform(20, 35))
+
+                  def add(dt, et, p, tgt=None):
+                      if tgt:
+                          p = {**p, 'targetId': tgt}
+                      fel.append({'time': sim_time + dt, 'type': et, 'payload': p})
+
+                  # BOF 工序
+                  add(0, 'bof.charge.start', {'ladleId': lid, 'heatId': hid, 'grade': g, 'targetId': bof}, bof)
+                  add(c, 'bof.charge.end', {'heatId': hid}, bof)
+                  add(c, 'ladle.bof.leave', {'ladleId': lid, 'heatId': hid, 'grade': g}, lid)
+                  add(c + b, 'bof.tap.start', {'ladleId': lid, 'heatId': hid}, bof)
+                  add(c + b + tp, 'bof.tap.end', {'heatId': hid}, bof)
+
+                  # 到 LF
+                  add(c + b + tp + tr, 'ladle.lf.arrive', {'ladleId': lid, 'heatId': hid}, lid)
+                  add(c + b + tp + tr, 'lf.refine.start', {'ladleId': lid, 'heatId': hid}, lf)
+                  add(c + b + tp + tr + r, 'lf.refine.end', {'ladleId': lid, 'heatId': hid}, lf)
+
+                  # 钢种分流
+                  if g == 'quality':
+                      tr2 = int(ctx.uniform(2, 4))
+                      vd = int(ctx.uniform(12, 18))
+                      tr3 = int(ctx.uniform(2, 4))
+                      add(c + b + tp + tr + r, 'ladle.lf.leave', {'ladleId': lid, 'heatId': hid, 'nextRoute': 'vd'}, lid)
+                      add(c + b + tp + tr + r + tr2, 'ladle.vd.arrive', {'ladleId': lid, 'heatId': hid}, lid)
+                      add(c + b + tp + tr + r + tr2, 'vd.process.start', {'ladleId': lid, 'heatId': hid}, 'VD1')
+                      add(c + b + tp + tr + r + tr2 + vd, 'vd.process.end', {'ladleId': lid, 'heatId': hid}, 'VD1')
+                      add(c + b + tp + tr + r + tr2 + vd, 'ladle.vd.leave', {'ladleId': lid, 'heatId': hid}, lid)
+                      add(c + b + tp + tr + r + tr2 + vd + tr3, 'ladle.cc.arrive', {'ladleId': lid, 'heatId': hid}, lid)
+                      add(c + b + tp + tr + r + tr2 + vd + tr3, 'cc.cast.start', {'ladleId': lid, 'heatId': hid}, cc)
+                      cast_start = c + b + tp + tr + r + tr2 + vd + tr3
+                  else:
+                      tr2 = int(ctx.uniform(2, 4))
+                      add(c + b + tp + tr + r, 'ladle.lf.leave', {'ladleId': lid, 'heatId': hid, 'nextRoute': 'cc'}, lid)
+                      add(c + b + tp + tr + r + tr2, 'ladle.cc.arrive', {'ladleId': lid, 'heatId': hid}, lid)
+                      add(c + b + tp + tr + r + tr2, 'cc.cast.start', {'ladleId': lid, 'heatId': hid}, cc)
+                      cast_start = c + b + tp + tr + r + tr2
+
+                  # CC
+                  cast = int(ctx.uniform(20, 30))
+                  add(cast_start + cast, 'cc.cast.end', {'ladleId': lid, 'heatId': hid}, cc)
+                  add(cast_start + cast, 'ladle.cc.leave', {'ladleId': lid, 'heatId': hid}, lid)
+
+                  # 拉速变化（发送到分配的 CC）
+                  for i in range(3):
+                      ps_t = cast_start + int(ctx.uniform(3, cast - 3))
+                      ps = round(ctx.gaussian(1.2, 0.05), 2)
+                      add(ps_t, 'cc.pullspeed.change', {'speed': ps}, cc)
+
+          fel.sort(key=lambda x: x['time'])
+          ctx.set('fel', json.dumps(fel))
+
+      def on_tick(ctx):
+          if not ctx.get('init'):
+              ctx.set('init', True)
+              ctx.set('sim_time', 0)
+              ctx.set('heat', 0)
+              ctx.set('fel', '[]')
+              ctx.set('bof1_next', 0)
+              ctx.set('bof2_next', 22)
+
+          # 事件驱动：先检查是否有到期的 BOF 调度
+          _try_schedule(ctx)
+
+          fel = json.loads(ctx.get('fel', '[]'))
+          if not fel:
+              return None
+
+          # 取出最早的事件，模拟时钟直接跳到该事件时间
+          event = fel.pop(0)
+          ctx.set('fel', json.dumps(fel))
+          ctx.set('sim_time', event['time'])
+
+          return Event(event['type'], event['payload'], target=event.get('target'))
+    schedule:
+      - event: tick
+        every: 1s

@@ -152,13 +152,18 @@ def test_load_world_wires_world_state_and_event_emitter(registry):
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
         variables={"temperature": 1500},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}}
+            "variables": {"temperature": {"type": "number", "shared": True}}
         },
     )
-    # snapshot should already be computed by InstanceManager.create
-    assert inst.snapshot["temperature"] == 1500
 
-    # Publish an event through the emitter and verify it updates the source snapshot first.
+    # Verify WorldState snapshot includes shared fields
+    snapshot = ws.snapshot()
+    assert "core.ladle" in snapshot
+    assert len(snapshot["core.ladle"]) == 1
+    assert snapshot["core.ladle"][0]["id"] == "ladle-001"
+    assert snapshot["core.ladle"][0]["temperature"] == 1500
+
+    # Publish an event through the emitter and verify shared field is updated.
     emitter = bundle["event_emitter"]
     inst.variables["temperature"] = 1600
     emitter.publish_from_instance(
@@ -168,14 +173,8 @@ def test_load_world_wires_world_state_and_event_emitter(registry):
         event_type="heat",
         payload={},
     )
-    assert inst.snapshot["temperature"] == 1600
-
-    # Verify WorldState snapshot structure
     snapshot = ws.snapshot()
-    assert "core.ladle" in snapshot
-    assert len(snapshot["core.ladle"]) == 1
-    assert snapshot["core.ladle"][0]["id"] == "ladle-001"
-    assert snapshot["core.ladle"][0]["snapshot"]["temperature"] == 1600
+    assert snapshot["core.ladle"][0]["temperature"] == 1600
 
     registry.unload_world("ladle-proj")
 

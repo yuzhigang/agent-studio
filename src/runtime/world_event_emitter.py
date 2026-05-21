@@ -27,10 +27,14 @@ class WorldEventEmitter:
     ) -> None:
         inst = None
         if self._im is not None:
-            inst = self._im.get(world_id, source_instance_id, scope=scope)
-        if inst is not None:
-            inst._update_snapshot()
-        self._bus.publish(event_type, payload, source_instance_id, scope, target)
+            # Find instance across all scopes (world + scenes)
+            for candidate in self._im.list_by_world(world_id):
+                if candidate.instance_id == source_instance_id:
+                    inst = candidate
+                    break
+        # Ensure target is set for the three-scope model
+        resolved_target = target if target is not None else world_id
+        self._bus.publish(event_type, payload, source_instance_id, scope, resolved_target)
 
     def publish_internal(
         self,
@@ -42,12 +46,14 @@ class WorldEventEmitter:
         target: str | None = None,
         raise_on_error: bool = False,
     ) -> None:
+        # External ingress must provide target; default to source for agent scope
+        resolved_target = target if target is not None else source
         self._bus.publish(
             event_type,
             payload,
             source,
             scope,
-            target,
+            resolved_target,
             raise_on_error=raise_on_error,
         )
 

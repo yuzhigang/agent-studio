@@ -62,7 +62,7 @@ def test_sandbox_dispatch_publishes_event():
     context = {
         "this": {"id": "ladle-001", "world_id": "world-01"},
         "dispatch": lambda event_type, payload, target=None: bus.publish(
-            event_type, payload, source="ladle-001", scope="world", target=target
+            event_type, payload, source="ladle-001", scope="world", target=target if target is not None else "world-01"
         ),
     }
     executor.execute('dispatch("ladleLoaded", {"steelAmount": 180})', context)

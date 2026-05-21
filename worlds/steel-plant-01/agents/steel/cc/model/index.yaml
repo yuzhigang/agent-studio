@@ -1,0 +1,106 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: cc
+  title: 连铸机
+  description: 弧形连铸机，双流
+
+attributes:
+  strands:
+    type: number
+    default: 2
+    description: 流数
+  targetPullSpeed:
+    type: number
+    default: 1.2
+    description: 目标拉速(m/min)
+
+variables:
+  ladleId:
+    type: string
+    default: ""
+    description: 当前钢包ID
+  heatId:
+    type: string
+    default: ""
+    description: 当前炉次号
+  pullSpeed:
+    type: number
+    default: 0.0
+    description: 当前拉速(m/min)
+  startTime:
+    type: string
+    default: ""
+    description: 开浇时间
+
+states:
+  idle:
+    title: 待机
+    description: 等待钢包到达
+    group: workState
+    initialState: true
+  casting:
+    title: 浇铸中
+    description: 正在连铸浇钢
+    group: workState
+
+transitions:
+  startCast:
+    title: 开浇
+    from: idle
+    to: casting
+  endCast:
+    title: 停浇
+    from: casting
+    to: idle
+
+behaviors:
+  onCastStart:
+    title: 开浇
+    trigger:
+      type: event
+      name: cc.cast.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.ladleId = payload.get("ladleId", "")
+          this.variables.heatId = payload.get("heatId", "")
+          this.variables.pullSpeed = this.attributes.targetPullSpeed
+          import datetime
+          this.variables.startTime = datetime.datetime.now().isoformat()
+          print(f"[{this.id}] 开浇 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId} | 拉速={this.variables.pullSpeed}")
+      - type: transition
+        transition: startCast
+
+  onCastEnd:
+    title: 停浇
+    trigger:
+      type: event
+      name: cc.cast.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 停浇 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+          this.variables.pullSpeed = 0.0
+          this.variables.ladleId = ""
+          this.variables.heatId = ""
+          this.variables.startTime = ""
+      - type: transition
+        transition: endCast
+
+  onPullSpeedChange:
+    title: 拉速变化
+    trigger:
+      type: event
+      name: cc.pullspeed.change
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          newSpeed = payload.get("speed", this.attributes.targetPullSpeed)
+          this.variables.pullSpeed = round(newSpeed, 2)
+          print(f"[{this.id}] 拉速变化 | 新拉速={this.variables.pullSpeed} m/min")

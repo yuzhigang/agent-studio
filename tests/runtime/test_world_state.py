@@ -13,10 +13,9 @@ def test_world_state_snapshot_groups_by_model_name():
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
         variables={"temperature": 1500},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}}
+            "variables": {"temperature": {"type": "number", "shared": True}}
         },
     )
-    inst1._update_snapshot()
 
     inst2 = mgr.create(
         world_id="proj-01",
@@ -26,10 +25,9 @@ def test_world_state_snapshot_groups_by_model_name():
         state={"current": "moving", "enteredAt": "2024-01-01T01:00:00Z"},
         variables={"temperature": 1600},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}}
+            "variables": {"temperature": {"type": "number", "shared": True}}
         },
     )
-    inst2._update_snapshot()
 
     inst3 = mgr.create(
         world_id="proj-01",
@@ -39,10 +37,9 @@ def test_world_state_snapshot_groups_by_model_name():
         state={"current": "lifting", "enteredAt": "2024-01-01T00:30:00Z"},
         variables={"loadWeight": 5000},
         model={
-            "variables": {"loadWeight": {"type": "number", "audit": True}}
+            "variables": {"loadWeight": {"type": "number", "shared": True}}
         },
     )
-    inst3._update_snapshot()
 
     # Create an archived instance that should be excluded
     inst4 = mgr.create(
@@ -53,10 +50,9 @@ def test_world_state_snapshot_groups_by_model_name():
         state={"current": "idle", "enteredAt": "2024-01-01T02:00:00Z"},
         variables={"temperature": 1700},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}}
+            "variables": {"temperature": {"type": "number", "shared": True}}
         },
     )
-    inst4._update_snapshot()
     mgr.transition_lifecycle("proj-01", "ladle-003", "archived")
 
     ws = WorldState(mgr, "proj-01")
@@ -76,7 +72,8 @@ def test_world_state_snapshot_groups_by_model_name():
     assert "state" in item
     assert "updated_at" in item
     assert "lifecycle_state" in item
-    assert "snapshot" in item
+    assert "model_name" in item
+    assert "temperature" in item
 
 
 def test_world_state_get_model():
@@ -130,7 +127,7 @@ def test_world_state_get_instance():
         scope="world",
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
         variables={"temperature": 1500},
-        model={"variables": {"temperature": {"type": "number", "audit": True}}},
+        model={"variables": {"temperature": {"type": "number", "shared": True}}},
     )
 
     ws = WorldState(mgr, "proj-01")
@@ -138,7 +135,7 @@ def test_world_state_get_instance():
     assert item is not None
     assert item["id"] == "ladle-001"
     assert item["state"] == "idle"
-    assert item["snapshot"]["temperature"] == 1500
+    assert item["temperature"] == 1500
 
     assert ws.get_instance("nonexistent") is None
 

@@ -19,7 +19,6 @@ class Instance:
     audit: dict = field(default_factory=lambda: {"version": 0, "updatedAt": None, "lastEventId": None})
     lifecycle_state: str = field(default="active")
     model: dict | None = field(default=None, repr=False)
-    snapshot: dict = field(default_factory=dict, repr=False)
     _audit_fields: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -28,41 +27,44 @@ class Instance:
 
     @property
     def world_state(self) -> dict:
-        return {
+        result = {
             "id": self.instance_id,
+            "model_name": self.model_name,
             "state": self.state.get("current"),
             "updated_at": self.state.get("enteredAt"),
             "lifecycle_state": self.lifecycle_state,
-            "snapshot": copy.deepcopy(self.snapshot),
         }
+        model = self.model or {}
+        for name, defn in (model.get("variables") or {}).items():
+            if defn.get("shared"):
+                result[name] = copy.deepcopy(self.variables.get(name))
+        for name, defn in (model.get("attributes") or {}).items():
+            if defn.get("shared"):
+                result[name] = copy.deepcopy(self.attributes.get(name))
+        return result
 
     def deep_copy(self) -> "Instance":
         clone = copy.deepcopy(self)
-        clone.snapshot = {}
         clone._audit_fields = {}
         return clone
 
-    def _update_snapshot(self) -> dict:
-        if not self._audit_fields and self.model:
-            for name, defn in (self.model.get("variables") or {}).items():
-                if defn.get("audit"):
-                    self._audit_fields[name] = "variables"
-            for name, defn in (self.model.get("attributes") or {}).items():
-                if defn.get("audit"):
-                    self._audit_fields[name] = "attributes"
-            for name, defn in (self.model.get("derivedProperties") or {}).items():
-                if defn.get("audit"):
-                    self._audit_fields[name] = "derived"
+    def _ensure_audit_fields(self) -> None:
+        if self._audit_fields or not self.model:
+            return
+        for name, defn in (self.model.get("variables") or {}).items():
+            if defn.get("audit"):
+                self._audit_fields[name] = "variables"
+        for name, defn in (self.model.get("attributes") or {}).items():
+            if defn.get("audit"):
+                self._audit_fields[name] = "attributes"
+        for name, defn in (self.model.get("derivedProperties") or {}).items():
+            if defn.get("audit"):
+                self._audit_fields[name] = "derived"
 
-        if self._audit_fields:
-            self.snapshot = {}
-            for field_name, source in self._audit_fields.items():
-                if source == "variables":
-                    self.snapshot[field_name] = copy.deepcopy(self.variables.get(field_name))
-                elif source == "attributes":
-                    self.snapshot[field_name] = copy.deepcopy(self.attributes.get(field_name))
-                elif source == "derived":
-                    self.snapshot[field_name] = copy.deepcopy(
-                        self.variables.get(field_name, self.attributes.get(field_name))
-                    )
-        return self.snapshot
+    def _is_audit_field(self, field_path: str) -> bool:
+        self._ensure_audit_fields()
+        parts = field_path.split(".")
+        if len(parts) != 2:
+            return False
+        section, name = parts
+        return self._audit_fields.get(name) == section

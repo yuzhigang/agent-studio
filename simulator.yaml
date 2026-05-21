@@ -1,0 +1,32 @@
+supervisor_url: http://localhost:18080
+sources:
+  - name: sensor-driver
+    target_world: demo-world
+    schedule:
+      # 启动传感器（只执行一次，通过大间隔实现）
+      - event: start
+        every: 3600s
+        payload: {}
+
+      # 心跳：每3秒一次
+      - event: beat
+        every: 3s
+        jitter: 500ms
+        payload: {}
+
+      # 温度数据：每5秒更新，模拟波动（均值60，标准差20，可能超过阈值80）
+      - event: tick
+        every: 5s
+        jitter: 1s
+        payload:
+          temperature:
+            type: gaussian
+            mean: 60
+            std: 20
+
+      # 派工指令：每20秒一次
+      - event: dispatchAssigned
+        every: 20s
+        jitter: 5s
+        payload:
+          task: "inspection"

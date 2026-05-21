@@ -30,11 +30,17 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080):
     app.router.add_get("/api/worlds/{world_id}/scenes/{scene_id}/instances", handlers.handle_scene_instances)
     app.router.add_post("/api/worlds/{world_id}/scenes/{scene_id}/start", handlers.handle_scene_start)
     app.router.add_post("/api/worlds/{world_id}/scenes/{scene_id}/stop", handlers.handle_scene_stop)
+    app.router.add_post("/api/worlds/{world_id}/events", handlers.handle_post_event)
+    app.router.add_post("/api/worlds/{world_id}/events/batch", handlers.handle_post_batch_events)
+    app.router.add_get("/api/worlds/{world_id}/outbox", handlers.handle_get_outbox)
 
     # WebSocket routes
     app.router.add_get("/workers", _handle_worker_ws)
     app.router.add_get("/ws", _handle_client_ws)
 
+    print(f"[supervisor] HTTP API  : http://0.0.0.0:{http_port}")
+    print(f"[supervisor] WebSocket   : ws://0.0.0.0:{http_port}/workers")
+    print(f"[supervisor] Base dir    : {base_dir}")
     web.run_app(app, host="0.0.0.0", port=http_port)
     return 0
 

@@ -1,0 +1,17 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: BOF2
+modelId: steel.bof
+state: idle
+metadata:
+  name: BOF2
+attributes:
+  capacity: 300
+variables:
+  ladleId: ""
+  heatId: ""
+  grade: ""
+  startTime: ""
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

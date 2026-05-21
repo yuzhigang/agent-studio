@@ -19,7 +19,7 @@ def test_shared_scene_event_reaches_all_references():
     bus.register("ladle-001", "world", "ladleLoaded", lambda t, p, s: received["ladle-001"].append(p))
     bus.register("caster-03", "world", "ladleLoaded", lambda t, p, s: received["caster-03"].append(p))
 
-    bus.publish("ladleLoaded", {"ladleId": "ladle-001"}, source="ladle-001", scope="world")
+    bus.publish("ladleLoaded", {"ladleId": "ladle-001"}, source="ladle-001", scope="world", target="world-01")
     assert len(received["ladle-001"]) == 1
     assert len(received["caster-03"]) == 1
 
@@ -41,7 +41,7 @@ def test_isolated_scene_event_does_not_escape():
     bus.register("ladle-001", "world", "ladleLoaded", lambda t, p, s: world_received.append(p))
     bus.register(cow.id, "scene:drill", "ladleLoaded", lambda t, p, s: scene_received.append(p))
 
-    bus.publish("ladleLoaded", {"ladleId": "cow-001"}, source=cow.id, scope="scene:drill")
+    bus.publish("ladleLoaded", {"ladleId": "cow-001"}, source=cow.id, scope="scene", target="drill")
     assert len(world_received) == 0
     assert len(scene_received) == 1
     assert scene_received[0] == {"ladleId": "cow-001"}

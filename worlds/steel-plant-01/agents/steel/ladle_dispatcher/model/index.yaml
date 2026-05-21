@@ -1,0 +1,77 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: ladle_dispatcher
+  title: 钢包调度员
+  description: 负责钢包的分配、跟踪和调度决策
+
+attributes:
+  maxLadleCount:
+    type: number
+    default: 12
+    description: 最大钢包数量
+
+variables:
+  activeLadles:
+    type: string
+    default: ""
+    description: 当前活跃钢包列表(逗号分隔)
+  pendingAssignments:
+    type: number
+    default: 0
+    description: 待分配任务数
+
+states:
+  idle:
+    title: 待机
+    description: 等待调度请求
+    group: workState
+    initialState: true
+  dispatching:
+    title: 调度中
+    description: 正在分配钢包
+    group: workState
+
+transitions:
+  startDispatch:
+    title: 开始调度
+    from: idle
+    to: dispatching
+  endDispatch:
+    title: 调度完成
+    from: dispatching
+    to: idle
+
+behaviors:
+  onLadleRequest:
+    title: 钢包请求
+    trigger:
+      type: event
+      name: ladle.request
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          heatId = payload.get("heatId", "")
+          grade = payload.get("grade", "")
+          print(f"[{this.id}] 收到钢包请求 | 炉次={heatId} | 钢种={grade}")
+          this.variables.pendingAssignments += 1
+      - type: transition
+        transition: startDispatch
+
+  onLadleAssigned:
+    title: 钢包分配完成
+    trigger:
+      type: event
+      name: ladle.assigned
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          ladleId = payload.get("ladleId", "")
+          heatId = payload.get("heatId", "")
+          print(f"[{this.id}] 钢包已分配 | 钢包={ladleId} | 炉次={heatId}")
+          this.variables.pendingAssignments = max(0, this.variables.pendingAssignments - 1)
+      - type: transition
+        transition: endDispatch

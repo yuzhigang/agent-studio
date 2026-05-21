@@ -1,0 +1,19 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: CD1
+modelId: steel.crane_dispatcher
+state: idle
+metadata:
+  name: 天车调度员
+attributes:
+  maxCraneCount: 7
+variables:
+  craneTasks: []
+bindings:
+  craneTasks:
+    source: world_runtime
+    path: crane_tasks
+    selector:
+    transform:
+memory: {}
+activeGoals: []
+currentPlan: null

@@ -1,0 +1,82 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: lf
+  title: 钢包精炼炉
+  description: LF精炼，完成成分微调、温度调整
+
+attributes:
+  capacity:
+    type: number
+    default: 300
+    description: 处理能力(t)
+
+variables:
+  ladleId:
+    type: string
+    default: ""
+    description: 当前钢包ID
+  heatId:
+    type: string
+    default: ""
+    description: 当前炉次号
+  startTime:
+    type: string
+    default: ""
+    description: 工序开始时间
+
+states:
+  idle:
+    title: 空闲
+    description: 等待钢包到达
+    group: workState
+    initialState: true
+  heating:
+    title: 精炼中
+    description: 正在通电精炼
+    group: workState
+
+transitions:
+  startRefine:
+    title: 开始精炼
+    from: idle
+    to: heating
+  endRefine:
+    title: 精炼结束
+    from: heating
+    to: idle
+
+behaviors:
+  onRefineStart:
+    title: 精炼开始
+    trigger:
+      type: event
+      name: lf.refine.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.ladleId = payload.get("ladleId", "")
+          this.variables.heatId = payload.get("heatId", "")
+          import datetime
+          this.variables.startTime = datetime.datetime.now().isoformat()
+          print(f"[{this.id}] 精炼开始 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+      - type: transition
+        transition: startRefine
+
+  onRefineEnd:
+    title: 精炼结束
+    trigger:
+      type: event
+      name: lf.refine.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 精炼结束 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+          this.variables.ladleId = ""
+          this.variables.heatId = ""
+          this.variables.startTime = ""
+      - type: transition
+        transition: endRefine

@@ -34,27 +34,45 @@ class EventBus:
         payload: dict,
         source: str,
         scope: str,
-        target: str | None = None,
+        target: str,
         raise_on_error: bool = False,
     ):
+        if scope not in ("world", "agent", "scene"):
+            raise ValueError(f"Invalid scope '{scope}': must be 'world', 'agent', or 'scene'")
+        if not target:
+            raise ValueError(f"target is required for scope='{scope}'")
         with self._lock:
             handlers = list(self._subscribers.get(event_type, []))
+        delivered = 0
         for instance_id, inst_scope, handler in handlers:
-            if target and instance_id != target:
-                continue
-            if not self._scope_matches(scope, inst_scope):
+            if not self._scope_matches(scope, target, inst_scope, instance_id):
                 continue
             try:
                 handler(event_type, payload, source)
+                delivered += 1
             except Exception:
                 if raise_on_error:
                     raise
                 logger.exception("Handler failed for instance %s on event %s", instance_id, event_type)
+        if delivered == 0:
+            logger.debug(
+                "Event %s (scope=%s, target=%s) delivered to 0 handlers",
+                event_type, scope, target,
+            )
 
-    def _scope_matches(self, msg_scope: str, inst_scope: str) -> bool:
+    def _scope_matches(self, msg_scope: str, msg_target: str, inst_scope: str, instance_id: str) -> bool:
+        """Three-scope routing:
+        - scope="world" + target=worldId   → broadcast to all instances
+        - scope="agent" + target=agentId   → unicast to the specific instance
+        - scope="scene" + target=sceneId   → broadcast to instances in that scene
+        """
         if msg_scope == "world":
             return True
-        return msg_scope == inst_scope
+        if msg_scope == "agent":
+            return instance_id == msg_target
+        if msg_scope == "scene":
+            return inst_scope == f"scene:{msg_target}"
+        return False
 
 
 class EventBusRegistry:

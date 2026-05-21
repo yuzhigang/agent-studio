@@ -43,7 +43,7 @@ def test_register_world_tracks_receiver_without_event_bus_hook(msg_store):
 
     hub.register_world("world-1", WorldMessageIngress(WorldEventEmitter(bus)))
 
-    bus.publish("order.created", {"id": "123"}, "src-1", "world")
+    bus.publish("order.created", {"id": "123"}, "src-1", "world", "world-1")
 
     pending = msg_store.outbox_read_pending(limit=10)
     assert hub.registered_worlds() == ["world-1"]

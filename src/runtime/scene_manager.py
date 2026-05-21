@@ -40,8 +40,7 @@ class SceneManager:
     def _reconcile_properties(self, instances: list):
         """Stub property reconciliation: derivedProperties will be recomputed here."""
         # TODO: recompute derivedProperties based on current variables/attributes
-        for inst in instances:
-            inst._update_snapshot()
+        pass
 
     def start(
         self,

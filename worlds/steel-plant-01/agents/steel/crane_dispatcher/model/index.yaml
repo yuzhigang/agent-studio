@@ -1,0 +1,130 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: crane_dispatcher
+  title: 天车调度员
+  description: 负责天车的任务分配和路径协调
+
+attributes:
+  maxCraneCount:
+    type: number
+    default: 7
+    description: 最大天车数量
+
+variables:
+  activeTasks:
+    type: number
+    default: 0
+    description: 当前活跃任务数
+  pendingTasks:
+    type: number
+    default: 0
+    description: 待处理任务数
+
+states:
+  idle:
+    title: 待机
+    description: 等待天车调度请求
+    group: workState
+    initialState: true
+  dispatching:
+    title: 调度中
+    description: 正在分配天车
+    group: workState
+
+transitions:
+  startDispatch:
+    title: 开始调度
+    from: idle
+    to: dispatching
+  endDispatch:
+    title: 调度完成
+    from: dispatching
+    to: idle
+
+behaviors:
+  onCraneRequest:
+    title: 天车请求
+    trigger:
+      type: event
+      name: crane.request
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          fromPos = payload.get("from", "")
+          toPos = payload.get("to", "")
+          ladleId = payload.get("ladleId", "")
+          priority = payload.get("priority", 0)
+
+          taskId = lib.crane_dispatch.create_task(fromPos, toPos, ladleId, priority)
+          print(f"[{this.id}] 创建任务 {taskId} | {fromPos} -> {toPos} | 钢包={ladleId}")
+
+          cranes = world_state.crane
+          crane = lib.crane_dispatch.select_idle_crane(cranes, fromPos)
+          if crane:
+              lib.crane_dispatch.assign_task(taskId, crane["id"])
+              this.variables.activeTasks += 1
+              dispatch("crane.task.assign", {
+                  "targetId": crane["id"],
+                  "taskId": taskId,
+                  "from": fromPos,
+                  "to": toPos,
+                  "ladleId": ladleId
+              })
+              print(f"[{this.id}] 分配天车 {crane['id']} 执行任务 {taskId}")
+          else:
+              this.variables.pendingTasks += 1
+              print(f"[{this.id}] 无空闲天车，任务 {taskId} 进入队列")
+      - type: transition
+        transition: startDispatch
+
+  onCraneTaskCompleted:
+    title: 天车任务完成
+    trigger:
+      type: event
+      name: crane.task.completed
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          taskId = payload.get("taskId", "")
+          craneId = payload.get("craneId", "")
+          lib.crane_dispatch.complete_task(taskId)
+          this.variables.activeTasks = max(0, this.variables.activeTasks - 1)
+          print(f"[{this.id}] 任务 {taskId} 完成 | 天车={craneId}")
+
+          # 尝试分配下一个 pending 任务
+          nextTask = lib.crane_dispatch.get_next_pending_task()
+          if nextTask:
+              cranes = world_state.crane
+              crane = lib.crane_dispatch.select_idle_crane(cranes, nextTask["from_pos"])
+              if crane:
+                  lib.crane_dispatch.assign_task(nextTask["task_id"], crane["id"])
+                  this.variables.pendingTasks = max(0, this.variables.pendingTasks - 1)
+                  this.variables.activeTasks += 1
+                  dispatch("crane.task.assign", {
+                      "targetId": crane["id"],
+                      "taskId": nextTask["task_id"],
+                      "from": nextTask["from_pos"],
+                      "to": nextTask["to_pos"],
+                      "ladleId": nextTask["ladle_id"]
+                  })
+                  print(f"[{this.id}] 分配天车 {crane['id']} 执行队列任务 {nextTask['task_id']}")
+      - type: transition
+        transition: endDispatch
+
+  onCraneReleased:
+    title: 天车释放
+    trigger:
+      type: event
+      name: crane.released
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          craneId = payload.get("craneId", "")
+          print(f"[{this.id}] 天车释放 | 天车={craneId}")
+          this.variables.activeTasks = max(0, this.variables.activeTasks - 1)

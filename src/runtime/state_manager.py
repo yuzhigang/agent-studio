@@ -119,11 +119,17 @@ class StateManager:
                 )
             elif self._im._bus_reg is not None:
                 bus = self._im._bus_reg.get_or_create(world_id)
+                # Replay events during restore; default target to world_id for broadcasts
+                scope = evt.get("scope", "world")
+                target = evt.get("target")
+                if target is None:
+                    target = world_id if scope == "world" else evt["source"]
                 bus.publish(
                     evt["event_type"],
                     evt["payload"],
                     evt["source"],
-                    evt["scope"],
+                    scope,
+                    target,
                 )
 
         # Metric backfill

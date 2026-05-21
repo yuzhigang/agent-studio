@@ -59,7 +59,7 @@ def test_create_registers_on_event_bus():
     received = []
     # Manually add a second subscriber to the same event to verify routing still works
     bus.register("ladle-002", "world", "dispatchAssigned", lambda t, p, s: received.append((t, p, s)))
-    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world")
+    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world", target="world-01")
     assert len(received) == 1
 
 
@@ -84,7 +84,7 @@ def test_remove_instance_unregisters_and_deletes():
     bus = bus_reg.get_or_create("world-01")
     received = []
     bus.register("ladle-002", "world", "dispatchAssigned", lambda t, p, s: received.append((t, p, s)))
-    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world")
+    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world", target="world-01")
     assert len(received) == 1
 
 
@@ -222,7 +222,7 @@ def test_on_event_runs_script_action():
         },
     )
     bus = bus_reg.get_or_create("world-01")
-    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world")
+    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world", target="world-01")
     assert inst.variables["targetLocation"] == "C03"
 
 
@@ -261,10 +261,10 @@ def test_on_event_when_condition_filters_behavior():
     )
     bus = bus_reg.get_or_create("world-01")
     # when condition should skip this
-    bus.publish("dispatchAssigned", {"destinationId": None}, source="external", scope="world")
+    bus.publish("dispatchAssigned", {"destinationId": None}, source="external", scope="world", target="world-01")
     assert inst.variables["targetLocation"] == ""
     # when condition should match this
-    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world")
+    bus.publish("dispatchAssigned", {"destinationId": "C03"}, source="external", scope="world", target="world-01")
     assert inst.variables["targetLocation"] == "matched"
 
 
@@ -303,7 +303,7 @@ def test_on_event_trigger_event_action():
     bus = bus_reg.get_or_create("world-01")
     received = []
     bus.register("observer", "world", "ladleLoaded", lambda t, p, s: received.append((t, p, s)))
-    bus.publish("beginLoad", {}, source="external", scope="world")
+    bus.publish("beginLoad", {}, source="external", scope="world", target="world-01")
     assert len(received) == 1
     assert received[0][0] == "ladleLoaded"
     assert received[0][1] == {"ladleId": "ladle-001", "steelAmount": 180}
@@ -377,7 +377,7 @@ def test_on_event_trigger_event_action_external_publish():
     bus = bus_reg.get_or_create("world-01")
     received = []
     bus.register("observer", "world", "ladleLoaded", lambda t, p, s: received.append((t, p, s)))
-    bus.publish("beginLoad", {}, source="external", scope="world")
+    bus.publish("beginLoad", {}, source="external", scope="world", target="world-01")
     assert received == []
     assert emitter.external == [
         {
@@ -436,7 +436,7 @@ def test_on_event_trigger_event_action_external_writes_outbox(tmp_path):
     )
 
     bus = bus_reg.get_or_create("world-01")
-    bus.publish("beginLoad", {}, source="external", scope="world")
+    bus.publish("beginLoad", {}, source="external", scope="world", target="world-01")
 
     pending = store.outbox_read_pending(limit=10)
     store.close()
@@ -514,11 +514,11 @@ def test_on_event_ignores_non_event_trigger():
         },
     )
     bus = bus_reg.get_or_create("world-01")
-    bus.publish("someEvent", {}, source="external", scope="world")
+    bus.publish("someEvent", {}, source="external", scope="world", target="world-01")
     assert inst.variables["targetLocation"] == ""
 
 
-def test_create_updates_snapshot():
+def test_create_saves_full_state():
     mgr = InstanceManager()
     inst = mgr.create(
         world_id="proj-01",
@@ -531,29 +531,39 @@ def test_create_updates_snapshot():
             "variables": {"temperature": {"type": "number", "audit": True}}
         },
     )
-    assert inst.snapshot["temperature"] == 1500
     assert inst.world_state["id"] == "ladle-001"
     assert inst.world_state["state"] == "idle"
-    assert inst.world_state["snapshot"]["temperature"] == 1500
 
 
-def test_run_script_updates_snapshot():
+def test_run_script_triggers_persist_on_audit_field_change():
     from src.runtime.trigger_registry import TriggerRegistry
     from src.runtime.triggers.event_trigger import EventTrigger
 
+    class FakeStore:
+        def __init__(self):
+            self.saved = {}
+        def save_instance(self, world_id, instance_id, scope, snapshot):
+            self.saved[(world_id, instance_id, scope)] = snapshot
+        def load_instance(self, world_id, instance_id, scope):
+            return None
+
+    store = FakeStore()
     bus_reg = EventBusRegistry()
     te = TriggerRegistry()
     te.add_trigger(EventTrigger(bus_reg))
-    mgr = InstanceManager(bus_reg, trigger_registry=te)
-    inst = mgr.create(
+    mgr = InstanceManager(bus_reg, instance_store=store, trigger_registry=te)
+    mgr.create(
         world_id="proj-01",
         model_name="ladle",
         instance_id="ladle-001",
         scope="world",
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
-        variables={"temperature": 1500},
+        variables={"temperature": 1500, "pressure": 100},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}},
+            "variables": {
+                "temperature": {"type": "number", "audit": True},
+                "pressure": {"type": "number"},
+            },
             "behaviors": {
                 "updateTemp": {
                     "trigger": {"type": "event", "name": "heat"},
@@ -564,17 +574,34 @@ def test_run_script_updates_snapshot():
                             "script": "this.variables.temperature = 1600",
                         }
                     ],
-                }
+                },
+                "updatePressure": {
+                    "trigger": {"type": "event", "name": "pump"},
+                    "actions": [
+                        {
+                            "type": "runScript",
+                            "scriptEngine": "python",
+                            "script": "this.variables.pressure = 200",
+                        }
+                    ],
+                },
             },
         },
     )
     bus = bus_reg.get_or_create("proj-01")
-    bus.publish("heat", {}, source="external", scope="world")
-    assert inst.snapshot["temperature"] == 1600
-    assert inst.world_state["snapshot"]["temperature"] == 1600
+
+    # Audit field change → triggers persist
+    bus.publish("heat", {}, source="external", scope="world", target="proj-01")
+    assert ("proj-01", "ladle-001", "world") in store.saved
+    assert store.saved[("proj-01", "ladle-001", "world")]["variables"]["temperature"] == 1600
+
+    # Non-audit field change → does NOT trigger persist
+    store.saved.clear()
+    bus.publish("pump", {}, source="external", scope="world", target="proj-01")
+    assert ("proj-01", "ladle-001", "world") not in store.saved
 
 
-def test_transition_lifecycle_archived_clears_snapshot():
+def test_transition_lifecycle_archived_clears_audit_fields():
     mgr = InstanceManager()
     inst = mgr.create(
         world_id="proj-01",
@@ -587,9 +614,7 @@ def test_transition_lifecycle_archived_clears_snapshot():
             "variables": {"temperature": {"type": "number", "audit": True}}
         },
     )
-    assert inst.snapshot["temperature"] == 1500
     mgr.transition_lifecycle("proj-01", "ladle-001", "archived")
-    assert inst.snapshot == {}
     assert inst._audit_fields == {}
 
 
@@ -605,7 +630,7 @@ def test_behavior_context_includes_world_state():
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
         variables={"temperature": 1500},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}}
+            "variables": {"temperature": {"type": "number", "shared": True}}
         },
     )
     ws = WorldState(mgr, "proj-01")
@@ -615,10 +640,81 @@ def test_behavior_context_includes_world_state():
     ctx = mgr._build_behavior_context(inst, {"foo": "bar"}, "external")
     assert "world_state" in ctx
     assert "ladle" in ctx["world_state"]
-    assert ctx["world_state"]["ladle"][0]["snapshot"]["temperature"] == 1500
+    assert ctx["world_state"]["ladle"][0]["temperature"] == 1500
 
 
-def test_build_persist_dict_includes_world_state():
+def test_behavior_context_world_state_updates_within_script():
+    from src.runtime.world_state import WorldState
+
+    mgr = InstanceManager()
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        model={
+            "variables": {"temperature": {"type": "number", "shared": True}}
+        },
+    )
+    ws = WorldState(mgr, "proj-01")
+    mgr._world_state = ws
+
+    inst = mgr.get("proj-01", "ladle-001")
+    ctx = mgr._build_behavior_context(inst, {}, "external")
+
+    # Modify variable directly (simulating what a script does)
+    inst.variables["temperature"] = 1600
+
+    # Lazy proxy should reflect the new value without rebuilding context
+    assert ctx["world_state"]["ladle"][0]["temperature"] == 1600
+
+
+def test_behavior_context_set_method():
+    from src.runtime.world_state import WorldState
+
+    mgr = InstanceManager()
+    mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
+        variables={"temperature": 1500},
+        attributes={"capacity": 200},
+        model={
+            "variables": {
+                "temperature": {"type": "number", "shared": True, "audit": True},
+            },
+            "attributes": {
+                "capacity": {"type": "number", "shared": True},
+            },
+        },
+    )
+    ws = WorldState(mgr, "proj-01")
+    mgr._world_state = ws
+
+    inst = mgr.get("proj-01", "ladle-001")
+    changed_fields = []
+    ctx = mgr._build_behavior_context(inst, {}, "external", changed_fields=changed_fields)
+
+    # set by short name (defaults to variables section)
+    ctx["this"].set("temperature", 1600)
+    assert inst.variables["temperature"] == 1600
+    assert "variables.temperature" in changed_fields
+
+    # set with explicit section
+    ctx["this"].set("attributes.capacity", 300)
+    assert inst.attributes["capacity"] == 300
+    assert "attributes.capacity" in changed_fields
+
+    # world_state should reflect changes
+    assert ctx["world_state"]["ladle"][0]["temperature"] == 1600
+    assert ctx["world_state"]["ladle"][0]["capacity"] == 300
+
+
+def test_build_persist_dict_includes_full_state():
     class FakeStore:
         def __init__(self):
             self.saved = {}
@@ -635,13 +731,13 @@ def test_build_persist_dict_includes_world_state():
         state={"current": "idle", "enteredAt": "2024-01-01T00:00:00Z"},
         variables={"temperature": 1500},
         model={
-            "variables": {"temperature": {"type": "number", "audit": True}}
+            "variables": {"temperature": {"type": "number", "shared": True}}
         },
     )
     snap = store.saved[("proj-01", "ladle-001", "world")]
-    assert "world_state" in snap
-    assert snap["world_state"]["id"] == "ladle-001"
-    assert snap["world_state"]["snapshot"]["temperature"] == 1500
+    assert "variables" in snap
+    assert snap["variables"]["temperature"] == 1500
+    assert "world_state" not in snap
 
 
 def test_lazy_load_restores_world_state():
@@ -660,13 +756,6 @@ def test_lazy_load_restores_world_state():
                 "memory": {},
                 "audit": {"version": 1},
                 "lifecycle_state": "active",
-                "world_state": {
-                    "id": instance_id,
-                    "state": "idle",
-                    "updated_at": "2024-01-01T00:00:00Z",
-                    "lifecycle_state": "active",
-                    "snapshot": {"temperature": 1500},
-                },
                 "updated_at": "2024-01-01T00:00:00+00:00",
             }
 
@@ -675,7 +764,33 @@ def test_lazy_load_restores_world_state():
     inst = mgr.get("proj-01", "ladle-001", scope="world")
     assert inst is not None
     assert inst.world_state["id"] == "ladle-001"
-    assert inst.world_state["snapshot"]["temperature"] == 1500
+
+
+def test_create_merges_model_defaults():
+    mgr = InstanceManager()
+    inst = mgr.create(
+        world_id="proj-01",
+        model_name="ladle",
+        instance_id="ladle-001",
+        scope="world",
+        variables={"temperature": 1500},
+        model={
+            "variables": {
+                "temperature": {"type": "number", "default": 1200, "shared": True},
+                "pressure": {"type": "number", "default": 100, "shared": True},
+            },
+            "attributes": {
+                "capacity": {"type": "number", "default": 200, "shared": True},
+            },
+        },
+    )
+    # Provided value should override default
+    assert inst.variables["temperature"] == 1500
+    # Missing fields should be filled with defaults
+    assert inst.variables["pressure"] == 100
+    assert inst.attributes["capacity"] == 200
+    # world_state should include shared fields with defaults
+    assert inst.world_state["pressure"] == 100
 
 
 def test_dict_proxy_tracks_changes():
@@ -814,7 +929,7 @@ def test_register_instance_creates_trigger_registry_entries():
     )
 
     bus = bus_reg.get_or_create("w1")
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
     assert inst.variables["x"] == 1
 
 
@@ -847,5 +962,5 @@ def test_unregister_instance_removes_trigger_entries():
     bus = bus_reg.get_or_create("w1")
     received = []
     bus.register("observer", "world", "start", lambda t, p, s: received.append(t))
-    bus.publish("start", {}, source="ext", scope="world")
+    bus.publish("start", {}, source="ext", scope="world", target="w1")
     assert len(received) == 1  # only observer, not the removed instance

@@ -432,6 +432,41 @@ class SQLiteMessageStore(MessageStore):
             )
             self._conn.commit()
 
+    def query_outbound(self, world_id: str | None = None, limit: int = 50, since: str | None = None) -> list[dict]:
+        query = """
+            SELECT message_id, source_world, target_world, event_type, payload,
+                   source, scope, target, trace_id, headers, created_at, status
+            FROM outbox
+            WHERE 1=1
+        """
+        params: list = []
+        if world_id is not None:
+            query += " AND (source_world = ? OR target_world = ?)"
+            params.extend([world_id, world_id])
+        if since:
+            query += " AND created_at > ?"
+            params.append(since)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [
+            {
+                "message_id": str(row[0]),
+                "source_world": row[1],
+                "target_world": row[2],
+                "event_type": str(row[3]),
+                "payload": json.loads(str(row[4])),
+                "source": row[5],
+                "scope": str(row[6]),
+                "target": row[7],
+                "trace_id": row[8],
+                "headers": json.loads(str(row[9])),
+                "created_at": str(row[10]),
+                "status": str(row[11]),
+            }
+            for row in rows
+        ]
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

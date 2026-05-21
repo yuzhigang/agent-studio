@@ -1,0 +1,18 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: CC1
+modelId: steel.cc
+state: idle
+metadata:
+  name: CC1
+attributes:
+  strands: 2
+  targetPullSpeed: 1.2
+variables:
+  ladleId: ""
+  heatId: ""
+  pullSpeed: 0.0
+  startTime: ""
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

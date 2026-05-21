@@ -23,6 +23,9 @@ class WorldLock:
     def acquire(self) -> None:
         os.makedirs(self._world_dir, exist_ok=True)
 
+        # Auto-cleanup stale lock files from crashed processes
+        self._cleanup_stale_lock()
+
         with self._in_process_locks_lock:
             if self._world_dir in self._in_process_locks:
                 world_id = os.path.basename(self._world_dir)
@@ -47,12 +50,45 @@ class WorldLock:
             world_id = os.path.basename(self._world_dir)
             if pid is not None:
                 raise LockAlreadyHeldError(
-                    f"World {world_id} is already loaded in process {pid}"
+                    f"World {world_id} is already loaded in process {pid} "
+                    f"(lock file: {self._lockfile_path})"
                 )
-            raise LockAlreadyHeldError(f"World {world_id} is already locked")
+            raise LockAlreadyHeldError(
+                f"World {world_id} is already locked (lock file: {self._lockfile_path})"
+            )
         self._acquired = True
         with open(self._meta_path, "w", encoding="utf-8") as f:
             json.dump({"pid": os.getpid(), "started_at": _now_iso()}, f)
+
+    def _cleanup_stale_lock(self) -> None:
+        """Remove lock files left behind by crashed processes."""
+        if not os.path.exists(self._meta_path):
+            return
+        pid = None
+        try:
+            with open(self._meta_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                pid = data.get("pid")
+        except Exception:
+            pass
+        if pid is not None:
+            # Check if process is still alive (cross-platform)
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(1, False, pid)
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return  # Process is still alive, don't clean up
+            except Exception:
+                pass
+        # Process is dead or we can't check; remove stale files
+        for path in (self._meta_path, self._lockfile_path):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
     def release(self) -> None:
         if self._acquired and self._lock is not None:

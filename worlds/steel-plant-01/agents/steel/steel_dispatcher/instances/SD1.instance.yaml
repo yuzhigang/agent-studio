@@ -1,0 +1,16 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: SD1
+modelId: steel.steel_dispatcher
+state: idle
+metadata:
+  name: 炼钢调度员
+attributes:
+  maxHeatsPerDay: 48
+variables:
+  todayHeats: 0
+  activeHeats: ""
+  scheduleStatus: "normal"
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

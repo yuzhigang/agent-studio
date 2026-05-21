@@ -8,3 +8,4 @@ from src.supervisor.handlers.worlds import (
 from src.supervisor.handlers.instances import handle_world_instances, handle_instance_detail
 from src.supervisor.handlers.scenes import handle_world_scenes, handle_scene_instances, handle_scene_start, handle_scene_stop
 from src.supervisor.handlers.models import handle_world_models, handle_model_detail
+from src.supervisor.handlers.events import handle_post_event, handle_post_batch_events, handle_get_outbox

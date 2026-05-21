@@ -1,0 +1,19 @@
+$schema: https://agent-studio.io/schema/v2/instance
+id: C05
+modelId: steel.crane
+state: idle
+metadata:
+  name: 精炼跨3#天车
+attributes:
+  capacity: 320
+  bay: refine_bay
+  span: 22.5
+variables:
+  currentLadle: ""
+  position: "park"
+  targetPosition: ""
+  hookHeight: 0.0
+bindings: {}
+memory: {}
+activeGoals: []
+currentPlan: null

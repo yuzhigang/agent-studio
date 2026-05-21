@@ -28,8 +28,15 @@ def run_inline(world_dirs, supervisor_ws=None):
         registry = WorldRegistry(base_dir=base_dir)
         for world_dir in dirs:
             world_id = os.path.basename(os.path.abspath(world_dir))
+            print(f"[run-inline] Loading world: {world_id} ...")
             bundle = registry.load_world(world_id)
             worker_manager.worlds[world_id] = bundle
+            print(f"[run-inline] World loaded: {world_id}")
+            inst_mgr = bundle["instance_manager"]
+            instances = inst_mgr.list_by_world(world_id)
+            print(f"[run-inline]   Instances: {len(instances)}")
+            for inst in instances:
+                print(f"[run-inline]     - {inst.id} (model={inst.model_name}, state={inst.state.get('current', 'N/A')})")
 
     # Setup shared MessageHub.
     # SupervisorConnection owns the single WebSocket to Supervisor,
@@ -50,9 +57,12 @@ def run_inline(world_dirs, supervisor_ws=None):
         store = bundle["store"]
         sm = bundle["scene_manager"]
         scenes = store.list_scenes(world_id)
+        print(f"[run-inline] Scenes in {world_id}: {len(scenes)}")
         for scene_data in scenes:
-            if scene_data.get("mode") == "shared":
-                scene_id = scene_data["scene_id"]
+            scene_id = scene_data["scene_id"]
+            mode = scene_data.get("mode", "shared")
+            print(f"[run-inline]   Starting scene: {scene_id} (mode={mode})")
+            if mode == "shared":
                 refs = scene_data.get("refs", [])
                 local_instances = scene_data.get("local_instances", {})
                 sm.start(
@@ -62,6 +72,9 @@ def run_inline(world_dirs, supervisor_ws=None):
                     references=refs,
                     local_instances=local_instances,
                 )
+                print(f"[run-inline]   Scene started: {scene_id}")
+            else:
+                print(f"[run-inline]   Skipping non-shared scene: {scene_id}")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -112,8 +125,13 @@ def run_inline(world_dirs, supervisor_ws=None):
         if supervisor_ws:
             await _check_supervisor(supervisor_ws)
 
+        print("[run-inline] Starting MessageHub ...")
         await message_hub.start()
+        print("[run-inline] MessageHub started")
+        print("[run-inline] Starting WorkerManager ...")
         await worker_manager.start_async()
+        print("[run-inline] WorkerManager started")
+        print("[run-inline] Runtime is active. Press Ctrl+C to shutdown.")
 
         try:
             await shutdown_event.wait()

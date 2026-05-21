@@ -10,6 +10,23 @@ from src.runtime.lib.proxy import LibProxy
 from src.runtime.lib.sandbox import SandboxExecutor
 
 
+def _merge_defaults(model_specs: dict, overrides: dict) -> dict:
+    """Merge model field definitions with runtime overrides, filling in defaults.
+    Only includes fields that have an override or a defined default."""
+    result = {}
+    for key, spec in model_specs.items():
+        if key in overrides:
+            result[key] = overrides[key]
+        elif isinstance(spec, dict) and "default" in spec:
+            result[key] = spec["default"]
+        elif not isinstance(spec, dict):
+            result[key] = overrides.get(key, spec)
+    for key, value in overrides.items():
+        if key not in result:
+            result[key] = value
+    return result
+
+
 class _DictProxy:
     """Wrap a dict so that keys can be accessed as attributes (read/write).
     Optionally tracks changed field paths for trigger notification."""
@@ -78,6 +95,44 @@ class _DictProxy:
         return self._data.values()
 
 
+class _WorldStateProxy:
+    """Lazy proxy that recomputes world_state on each access."""
+
+    def __init__(self, world_state_manager):
+        self._wsm = world_state_manager
+
+    def _snapshot(self):
+        if self._wsm is None:
+            return {}
+        return self._wsm.snapshot()
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self._snapshot().get(name)
+
+    def __getitem__(self, key):
+        return self._snapshot()[key]
+
+    def __contains__(self, key):
+        return key in self._snapshot()
+
+    def __iter__(self):
+        return iter(self._snapshot())
+
+    def keys(self):
+        return self._snapshot().keys()
+
+    def items(self):
+        return self._snapshot().items()
+
+    def values(self):
+        return self._snapshot().values()
+
+    def get(self, key, default=None):
+        return self._snapshot().get(key, default)
+
+
 def _wrap_instance(instance: Instance, changed_fields: list | None = None):
     """Expose an Instance as a namespace compatible with behavior scripts."""
     ns = SimpleNamespace()
@@ -95,6 +150,28 @@ def _wrap_instance(instance: Instance, changed_fields: list | None = None):
     ns.state = _DictProxy(instance.state, path_prefix="state", changed_fields=changed_fields)
     ns.audit = _DictProxy(instance.audit)
     ns.lifecycle_state = instance.lifecycle_state
+
+    def _set(path: str, value):
+        """Set a field value by path (e.g., 'temperature' or 'variables.temperature')."""
+        parts = path.split(".")
+        if len(parts) == 1:
+            section, name = "variables", parts[0]
+        elif len(parts) == 2:
+            section, name = parts
+        else:
+            raise ValueError(f"set() path must be 'name' or 'section.name', got: {path}")
+        if section not in ("variables", "attributes", "bindings", "links", "memory"):
+            raise ValueError(f"set() unsupported section: {section}")
+        target = getattr(instance, section, None)
+        if target is None or not isinstance(target, dict):
+            raise ValueError(f"set() target section '{section}' is not a dict")
+        target[name] = value
+        if changed_fields is not None:
+            field_path = f"{section}.{name}"
+            if field_path not in changed_fields:
+                changed_fields.append(field_path)
+
+    ns.set = _set
     return ns
 
 
@@ -122,6 +199,7 @@ class InstanceManager:
         self._event_emitter = world_event_emitter
         self._trigger_registry = trigger_registry
         self._alarm_manager = alarm_manager
+        self._world_dir = getattr(instance_store, "_world_dir", None) if instance_store else None
 
     def bind_world_event_emitter(self, world_event_emitter) -> None:
         self._event_emitter = world_event_emitter
@@ -173,27 +251,38 @@ class InstanceManager:
             bus = self._bus_reg.get_or_create(instance.world_id)
 
         def dispatch(event_type: str, payload_dict: dict, target: str | None = None):
+            # Convert instance internal scope to event routing scope/target
+            inst_scope = instance.scope
+            if inst_scope == "world":
+                event_scope = "world"
+                event_target = target if target is not None else instance.world_id
+            elif inst_scope.startswith("scene:"):
+                scene_id = inst_scope[len("scene:"):]
+                event_scope = "scene"
+                event_target = target if target is not None else scene_id
+            else:
+                event_scope = inst_scope
+                event_target = target if target is not None else instance.world_id
+
             if self._event_emitter is not None:
                 self._event_emitter.publish_from_instance(
                     world_id=instance.world_id,
                     source_instance_id=instance.id,
-                    scope=instance.scope,
+                    scope=event_scope,
                     event_type=event_type,
                     payload=payload_dict,
-                    target=target,
+                    target=event_target,
                 )
             elif bus is not None:
                 bus.publish(
                     event_type,
                     payload_dict,
                     source=instance.id,
-                    scope=instance.scope,
-                    target=target,
+                    scope=event_scope,
+                    target=event_target,
                 )
 
-        world_state = {}
-        if self._world_state is not None:
-            world_state = self._world_state.snapshot()
+        world_state_proxy = _WorldStateProxy(self._world_state)
 
         wrapped = _wrap_instance(instance, changed_fields=changed_fields)
         lib_context = {
@@ -201,7 +290,8 @@ class InstanceManager:
             "payload": _DictProxy(payload),
             "source": source,
             "dispatch": dispatch,
-            "world_state": _DictProxy(world_state),
+            "world_state": world_state_proxy,
+            "world_dir": self._world_dir,
         }
         lib_registry = getattr(self._sandbox, "registry", None)
         default_namespace = getattr(instance, "_agent_namespace", None) or instance.model_name
@@ -216,7 +306,7 @@ class InstanceManager:
             "payload": _DictProxy(payload),
             "source": source,
             "dispatch": dispatch,
-            "world_state": _DictProxy(world_state),
+            "world_state": world_state_proxy,
             "lib": lib_proxy,
         }
 
@@ -232,7 +322,6 @@ class InstanceManager:
             return
         instance.state["current"] = tx["to"]
         instance.state["enteredAt"] = datetime.now(timezone.utc).isoformat()
-        instance._update_snapshot()
         self._save_to_store(instance)
         if self._trigger_registry is not None:
             self._trigger_registry.notify_value_change(instance, "state.current", current, tx["to"])
@@ -255,7 +344,6 @@ class InstanceManager:
                 except Exception:
                     # Swallow sandbox errors to avoid breaking the event bus
                     pass
-            instance._update_snapshot()
 
         elif action_type == "triggerEvent":
             event_name = action.get("name")
@@ -302,6 +390,9 @@ class InstanceManager:
         for action in actions:
             context = self._build_behavior_context(instance, payload, source, changed_fields=changed_fields)
             self._execute_action(instance, action, payload, source, context_override=context)
+
+        if changed_fields and any(instance._is_audit_field(path) for path in changed_fields):
+            self._save_to_store(instance)
 
         if self._trigger_registry is not None:
             for field_path in set(changed_fields):
@@ -360,7 +451,6 @@ class InstanceManager:
             "memory": inst.memory or {},
             "audit": inst.audit or {"version": 0, "updatedAt": None, "lastEventId": None},
             "lifecycle_state": inst.lifecycle_state,
-            "world_state": inst.world_state or {},
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -386,11 +476,24 @@ class InstanceManager:
         state: dict | None = None,
         model: dict | None = None,
     ) -> Instance:
-        attributes = attributes or {}
-        variables = variables or {}
-        bindings = bindings or {}
-        links = links or {}
-        memory = memory or {}
+        # Resolve model to merge defaults
+        resolved_model = model
+        if resolved_model is None and self._model_loader is not None:
+            resolved_model = self._model_loader(model_name)
+
+        if resolved_model is not None:
+            attributes = _merge_defaults(resolved_model.get("attributes") or {}, attributes or {})
+            variables = _merge_defaults(resolved_model.get("variables") or {}, variables or {})
+            bindings = _merge_defaults(resolved_model.get("bindings") or {}, bindings or {})
+            links = _merge_defaults(resolved_model.get("links") or {}, links or {})
+            memory = _merge_defaults(resolved_model.get("memory") or {}, memory or {})
+        else:
+            attributes = attributes or {}
+            variables = variables or {}
+            bindings = bindings or {}
+            links = links or {}
+            memory = memory or {}
+
         state = state or {"current": None, "enteredAt": None}
         if agent_namespace is None and self._agent_namespace_resolver is not None:
             agent_namespace = self._agent_namespace_resolver(model_name)
@@ -407,7 +510,7 @@ class InstanceManager:
             links=copy.deepcopy(links),
             memory=copy.deepcopy(memory),
             state=copy.deepcopy(state),
-            model=copy.deepcopy(model) if model is not None else None,
+            model=copy.deepcopy(resolved_model) if resolved_model is not None else None,
         )
         key = self._make_key(world_id, instance_id, scope)
         with self._lock:
@@ -419,7 +522,6 @@ class InstanceManager:
             except Exception:
                 self._instances.pop(key, None)
                 raise
-        inst._update_snapshot()
         self._save_to_store(inst)
         if self._alarm_manager is not None and inst.model:
             alarm_configs = inst.model.get("alarms")
@@ -461,12 +563,10 @@ class InstanceManager:
             audit=copy.deepcopy(snapshot.get("audit", {"version": 0, "updatedAt": None, "lastEventId": None})),
             lifecycle_state=snapshot.get("lifecycle_state", "active"),
         )
-        inst.snapshot = copy.deepcopy(snapshot.get("world_state", {}).get("snapshot", {}))
         if self._model_loader is not None:
             loaded_model = self._model_loader(inst.model_name)
             if loaded_model is not None:
                 inst.model = loaded_model
-        inst._update_snapshot()
 
         # Register under lock (fast path — dict ops only)
         with self._lock:
@@ -516,7 +616,6 @@ class InstanceManager:
         if inst is None:
             return False
         inst.lifecycle_state = new_state
-        inst._update_snapshot()
         self._save_to_store(inst)
         if self._alarm_manager is not None:
             self._alarm_manager.unregister_instance_alarms(inst)
@@ -524,7 +623,6 @@ class InstanceManager:
             with self._lock:
                 self._instances.pop(self._make_key(world_id, instance_id, scope), None)
             self._unregister_instance(inst)
-            inst.snapshot = {}
             inst._audit_fields = {}
         return True
 
@@ -535,7 +633,6 @@ class InstanceManager:
                 return None
             clone = inst.deep_copy()
             clone.scope = f"scene:{scene_id}"
-            clone._update_snapshot()
             key = self._make_key(world_id, clone.instance_id, clone.scope)
             if key in self._instances:
                 raise ValueError(f"CoW copy {instance_id} for scene {scene_id} already exists")

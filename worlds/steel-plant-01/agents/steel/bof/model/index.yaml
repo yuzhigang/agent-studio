@@ -1,0 +1,133 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: bof
+  title: 转炉
+  description: 顶底复吹转炉，完成兑铁、冶炼、出钢工序
+
+attributes:
+  capacity:
+    type: number
+    default: 300
+    description: 公称容量(t)
+
+variables:
+  ladleId:
+    type: string
+    default: ""
+    description: 当前钢包ID
+  heatId:
+    type: string
+    default: ""
+    description: 当前炉次号
+  grade:
+    type: string
+    default: ""
+    description: 钢种
+  startTime:
+    type: string
+    default: ""
+    description: 工序开始时间
+
+states:
+  idle:
+    title: 空闲
+    description: 等待下一炉
+    group: workState
+    initialState: true
+  charging:
+    title: 兑铁中
+    description: 正在倒入铁水和废钢
+    group: workState
+  blowing:
+    title: 吹炼中
+    description: 正在吹氧冶炼
+    group: workState
+  tapping:
+    title: 出钢中
+    description: 正在倒出钢水
+    group: workState
+
+transitions:
+  startCharge:
+    title: 开始兑铁
+    from: idle
+    to: charging
+  endCharge:
+    title: 兑铁结束
+    from: charging
+    to: blowing
+  startTap:
+    title: 开始出钢
+    from: blowing
+    to: tapping
+  endTap:
+    title: 出钢结束
+    from: tapping
+    to: idle
+
+behaviors:
+  onChargeStart:
+    title: 兑铁开始
+    trigger:
+      type: event
+      name: bof.charge.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.ladleId = payload.get("ladleId", "")
+          this.variables.heatId = payload.get("heatId", "")
+          this.variables.grade = payload.get("grade", "")
+          import datetime
+          this.variables.startTime = datetime.datetime.now().isoformat()
+          print(f"[{this.id}] 兑铁开始 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId} | 钢种={this.variables.grade}")
+      - type: transition
+        transition: startCharge
+
+  onChargeEnd:
+    title: 兑铁结束
+    trigger:
+      type: event
+      name: bof.charge.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 兑铁结束 | 炉次={this.variables.heatId}")
+      - type: transition
+        transition: endCharge
+
+  onTapStart:
+    title: 出钢开始
+    trigger:
+      type: event
+      name: bof.tap.start
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 出钢开始 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+      - type: transition
+        transition: startTap
+
+  onTapEnd:
+    title: 出钢结束
+    trigger:
+      type: event
+      name: bof.tap.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 出钢结束 | 炉次={this.variables.heatId} | 钢包={this.variables.ladleId}")
+          # 清空当前炉次信息，实例回到空闲
+          this.variables.ladleId = ""
+          this.variables.heatId = ""
+          this.variables.grade = ""
+          this.variables.startTime = ""
+      - type: transition
+        transition: endTap

@@ -1,0 +1,196 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: ladle
+  title: 钢包
+  description: 承载钢水的运输容器
+
+attributes:
+  capacity:
+    type: number
+    default: 300
+    description: 容量(t)
+
+variables:
+  heatId:
+    type: string
+    default: ""
+    description: 当前承载的炉次号
+  grade:
+    type: string
+    default: ""
+    description: 当前钢种
+  position:
+    type: string
+    default: "yard"
+    description: 当前位置
+
+states:
+  idle:
+    title: 空闲
+    description: 空包等待
+    group: workState
+    initialState: true
+  filled:
+    title: 满包
+    description: 已装钢水
+    group: workState
+  at_lf:
+    title: 在LF
+    description: 在精炼工位
+    group: workState
+  at_vd:
+    title: 在VD
+    description: 在真空脱气工位
+    group: workState
+  at_cc:
+    title: 在CC
+    description: 在连铸工位
+    group: workState
+
+transitions:
+  toFilled:
+    title: 装满钢水
+    from: idle
+    to: filled
+  toLf:
+    title: 到达LF
+    from: filled
+    to: at_lf
+  toVd:
+    title: 到达VD
+    from: at_lf
+    to: at_vd
+  toCc:
+    title: 到达CC
+    from: at_lf
+    to: at_cc
+  toCcFromVd:
+    title: VD后到CC
+    from: at_vd
+    to: at_cc
+  toIdle:
+    title: 倒空返回
+    from: at_cc
+    to: idle
+
+behaviors:
+  onBofArrive:
+    title: 到达转炉
+    trigger:
+      type: event
+      name: ladle.bof.arrive
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.position = "bof"
+          print(f"[{this.id}] 到达转炉")
+
+  onBofLeave:
+    title: 离开转炉
+    trigger:
+      type: event
+      name: ladle.bof.leave
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.heatId = payload.get("heatId", "")
+          this.variables.grade = payload.get("grade", "")
+          this.variables.position = "bof_to_lf"
+          print(f"[{this.id}] 离开转炉 | 炉次={this.variables.heatId} | 钢种={this.variables.grade}")
+      - type: transition
+        transition: toFilled
+
+  onLfArrive:
+    title: 到达LF
+    trigger:
+      type: event
+      name: ladle.lf.arrive
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.position = "lf"
+          print(f"[{this.id}] 到达LF | 炉次={this.variables.heatId}")
+      - type: transition
+        transition: toLf
+
+  onLfLeave:
+    title: 离开LF
+    trigger:
+      type: event
+      name: ladle.lf.leave
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          nextRoute = payload.get("nextRoute", "cc")
+          this.variables.position = "lf_to_" + nextRoute
+          print(f"[{this.id}] 离开LF | 炉次={this.variables.heatId} | 下一工序={nextRoute}")
+
+  onVdArrive:
+    title: 到达VD
+    trigger:
+      type: event
+      name: ladle.vd.arrive
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.position = "vd"
+          print(f"[{this.id}] 到达VD | 炉次={this.variables.heatId}")
+      - type: transition
+        transition: toVd
+
+  onVdLeave:
+    title: 离开VD
+    trigger:
+      type: event
+      name: ladle.vd.leave
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.position = "vd_to_cc"
+          print(f"[{this.id}] 离开VD | 炉次={this.variables.heatId}")
+      - type: transition
+        transition: toCcFromVd
+
+  onCcArrive:
+    title: 到达CC
+    trigger:
+      type: event
+      name: ladle.cc.arrive
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          this.variables.position = "cc"
+          print(f"[{this.id}] 到达CC | 炉次={this.variables.heatId}")
+      - type: transition
+        transition: toCc
+
+  onCcLeave:
+    title: 离开CC
+    trigger:
+      type: event
+      name: ladle.cc.leave
+      when: payload.get("ladleId") is None or payload.get("ladleId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          print(f"[{this.id}] 离开CC | 炉次={this.variables.heatId} 完成")
+          this.variables.heatId = ""
+          this.variables.grade = ""
+          this.variables.position = "yard"
+      - type: transition
+        transition: toIdle
