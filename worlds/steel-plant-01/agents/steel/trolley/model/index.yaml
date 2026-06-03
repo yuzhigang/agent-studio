@@ -1,0 +1,109 @@
+$schema: https://agent-studio.io/schema/v2
+metadata:
+  name: trolley
+  title: 过跨车
+  description: 跨区转运设备，负责钢包在不同跨区之间的运输
+
+attributes:
+  route:
+    type: string
+    default: ""
+    shared: true
+    description: 固定线路，格式 "Bay-A:Bay-B"
+  speed:
+    type: number
+    default: 1.0
+    shared: true
+    description: 过跨速度（bay/分钟）
+
+variables:
+  currentTaskId:
+    type: string
+    default: ""
+    description: 当前任务ID
+  position:
+    type: string
+    default: ""
+    shared: true
+    description: 当前所在跨区
+  targetBay:
+    type: string
+    default: ""
+    shared: true
+    description: 目标跨区
+
+states:
+  idle:
+    title: 空闲
+    description: 等待指令
+    group: workState
+    initialState: true
+  moving:
+    title: 移动中
+    description: 正在跨区移动
+    group: workState
+
+transitions:
+  startMove:
+    title: 开始移动
+    from: idle
+    to: moving
+  arrive:
+    title: 到达目标
+    from: moving
+    to: idle
+
+behaviors:
+  onTrolleyTaskAssign:
+    title: 接收过跨任务
+    trigger:
+      type: event
+      name: trolley.task.assign
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          taskId = payload.get("taskId", "")
+          targetBay = payload.get("targetBay", "")
+          this.variables.currentTaskId = taskId
+          this.variables.targetBay = targetBay
+          print(f"[{this.id}] 接收过跨任务 {taskId} | 目标跨区={targetBay}")
+
+          if this.variables.position == targetBay:
+            # 已在目标跨区，直接到达
+            dispatch("trolley.arrived", {
+              "targetId": "CD1",
+              "trolleyId": this.id,
+              "taskId": taskId,
+              "bay": targetBay
+            })
+          else:
+            # 触发移动（实际应由调度系统控制移动时间）
+            print(f"[{this.id}] 开始移动 | {this.variables.position} -> {targetBay}")
+      - type: transition
+        transition: startMove
+
+  onTrolleyMoveEnd:
+    title: 过跨完成
+    trigger:
+      type: event
+      name: trolley.move.end
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          arrivedBay = payload.get("bay", this.variables.targetBay)
+          taskId = this.variables.currentTaskId
+          print(f"[{this.id}] 到达跨区 {arrivedBay} | 任务={taskId}")
+          this.variables.position = arrivedBay
+          this.variables.targetBay = ""
+          dispatch("trolley.arrived", {
+            "targetId": "CD1",
+            "trolleyId": this.id,
+            "taskId": taskId,
+            "bay": arrivedBay
+          })
+      - type: transition
+        transition: arrive

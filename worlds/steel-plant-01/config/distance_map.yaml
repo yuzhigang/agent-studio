@@ -9,6 +9,7 @@ BOF1:
   CC1: 5
   CC2: 5
   park: 2
+  transfer_AB: 2
 BOF2:
   BOF1: 1
   BOF2: 0
@@ -18,6 +19,7 @@ BOF2:
   CC1: 5
   CC2: 5
   park: 2
+  transfer_AB: 2
 LF1:
   BOF1: 2
   BOF2: 2
@@ -27,6 +29,7 @@ LF1:
   CC1: 3
   CC2: 3
   park: 2
+  transfer_AB: 1
 LF2:
   BOF1: 2
   BOF2: 2
@@ -36,6 +39,7 @@ LF2:
   CC1: 3
   CC2: 3
   park: 2
+  transfer_AB: 1
 VD1:
   BOF1: 3
   BOF2: 3
@@ -45,6 +49,7 @@ VD1:
   CC1: 4
   CC2: 4
   park: 3
+  transfer_AB: 2
 CC1:
   BOF1: 5
   BOF2: 5
@@ -54,6 +59,7 @@ CC1:
   CC1: 0
   CC2: 1
   park: 3
+  transfer_AB: 4
 CC2:
   BOF1: 5
   BOF2: 5
@@ -63,6 +69,7 @@ CC2:
   CC1: 1
   CC2: 0
   park: 3
+  transfer_AB: 4
 park:
   BOF1: 2
   BOF2: 2
@@ -72,3 +79,14 @@ park:
   CC1: 3
   CC2: 3
   park: 0
+  transfer_AB: 3
+transfer_AB:
+  BOF1: 2
+  BOF2: 2
+  LF1: 1
+  LF2: 1
+  VD1: 2
+  CC1: 4
+  CC2: 4
+  park: 3
+  transfer_AB: 0

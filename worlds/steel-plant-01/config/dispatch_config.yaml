@@ -1,0 +1,25 @@
+# 天车调度全局配置
+crane_speed: 1.0  # 单位距离/分钟
+safety_gap: 2    # 同跨区天车任务安全间隔（分钟）
+
+# 位置一维顺序（从左到右，对应天车轨道排列）
+position_order:
+  - "park"
+  - "BOF1"
+  - "BOF2"
+  - "transfer_AB"
+  - "LF1"
+  - "LF2"
+  - "VD1"
+  - "CC1"
+  - "CC2"
+
+# 位置所属跨区
+bay_map:
+  "Bay-A": ["park", "BOF1", "BOF2"]
+  "Bay-B": ["LF1", "LF2", "VD1", "CC1", "CC2"]
+
+# 过跨点配置（格式：源跨区:目标跨区 -> 过跨点位置）
+transfer_points:
+  "Bay-A:Bay-B": "transfer_AB"
+  "Bay-B:Bay-A": "transfer_AB"

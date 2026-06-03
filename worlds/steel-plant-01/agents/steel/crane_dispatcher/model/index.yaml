@@ -60,22 +60,29 @@ behaviors:
           taskId = lib.crane_dispatch.create_task(fromPos, toPos, ladleId, priority)
           print(f"[{this.id}] 创建任务 {taskId} | {fromPos} -> {toPos} | 钢包={ladleId}")
 
+          # 全局重分配
           cranes = world_state.crane
-          crane = lib.crane_dispatch.select_idle_crane(cranes, fromPos)
-          if crane:
-              lib.crane_dispatch.assign_task(taskId, crane["id"])
-              this.variables.activeTasks += 1
-              dispatch("crane.task.assign", {
-                  "targetId": crane["id"],
-                  "taskId": taskId,
-                  "from": fromPos,
-                  "to": toPos,
-                  "ladleId": ladleId
-              })
-              print(f"[{this.id}] 分配天车 {crane['id']} 执行任务 {taskId}")
-          else:
-              this.variables.pendingTasks += 1
-              print(f"[{this.id}] 无空闲天车，任务 {taskId} 进入队列")
+          assignments = lib.crane_dispatch.global_dispatch(cranes)
+          newAssignments = lib.crane_dispatch.apply_dispatch(assignments)
+
+          # 更新计数
+          totalAssigned = sum(len(plans) for plans in assignments.values())
+          this.variables.activeTasks = totalAssigned
+          allPending = lib.crane_dispatch.list_pending_tasks()
+          this.variables.pendingTasks = len(allPending)
+
+          # 向天车发送新分配的任务
+          for craneId, taskIds in newAssignments.items():
+              for tid in taskIds:
+                  task = lib.crane_dispatch.get_task_by_id(tid)
+                  dispatch("crane.task.assign", {
+                      "targetId": craneId,
+                      "taskId": tid,
+                      "from": task["from_pos"],
+                      "to": task["to_pos"],
+                      "ladleId": task["ladle_id"]
+                  })
+                  print(f"[{this.id}] 分配任务 {tid} -> 天车 {craneId}")
       - type: transition
         transition: startDispatch
 
@@ -92,28 +99,95 @@ behaviors:
           taskId = payload.get("taskId", "")
           craneId = payload.get("craneId", "")
           lib.crane_dispatch.complete_task(taskId)
-          this.variables.activeTasks = max(0, this.variables.activeTasks - 1)
+          task = lib.crane_dispatch.get_task_by_id(taskId)
           print(f"[{this.id}] 任务 {taskId} 完成 | 天车={craneId}")
 
-          # 尝试分配下一个 pending 任务
-          nextTask = lib.crane_dispatch.get_next_pending_task()
-          if nextTask:
-              cranes = world_state.crane
-              crane = lib.crane_dispatch.select_idle_crane(cranes, nextTask["from_pos"])
-              if crane:
-                  lib.crane_dispatch.assign_task(nextTask["task_id"], crane["id"])
-                  this.variables.pendingTasks = max(0, this.variables.pendingTasks - 1)
-                  this.variables.activeTasks += 1
+          # 检查是否是跨 bay 源段，触发过跨车
+          if task and task.get("task_type") == "cross_bay_source":
+              bayInfo = lib.crane_dispatch.get_task_bays(taskId)
+              fromBay = bayInfo.get("from_bay") if bayInfo else None
+              toBay = bayInfo.get("to_bay") if bayInfo else None
+              route = f"{fromBay}:{toBay}" if fromBay and toBay else ""
+
+              trolleys = world_state.trolley
+              for t in trolleys:
+                  if t.get("route") == route and t.get("state") == "idle":
+                      dispatch("trolley.task.assign", {
+                          "targetId": t["id"],
+                          "taskId": taskId,
+                          "targetBay": toBay
+                      })
+                      print(f"[{this.id}] 触发过跨车 {t['id']} | 路线={route}")
+                      break
+
+          # 全局重分配
+          cranes = world_state.crane
+          assignments = lib.crane_dispatch.global_dispatch(cranes)
+          newAssignments = lib.crane_dispatch.apply_dispatch(assignments)
+
+          # 更新计数
+          totalAssigned = sum(len(tasks) for tasks in assignments.values())
+          this.variables.activeTasks = totalAssigned
+          allPending = lib.crane_dispatch.list_pending_tasks()
+          this.variables.pendingTasks = len(allPending)
+
+          # 向天车发送新分配的任务
+          for cid, taskIds in newAssignments.items():
+              for tid in taskIds:
+                  task = lib.crane_dispatch.get_task_by_id(tid)
                   dispatch("crane.task.assign", {
-                      "targetId": crane["id"],
-                      "taskId": nextTask["task_id"],
-                      "from": nextTask["from_pos"],
-                      "to": nextTask["to_pos"],
-                      "ladleId": nextTask["ladle_id"]
+                      "targetId": cid,
+                      "taskId": tid,
+                      "from": task["from_pos"],
+                      "to": task["to_pos"],
+                      "ladleId": task["ladle_id"]
                   })
-                  print(f"[{this.id}] 分配天车 {crane['id']} 执行队列任务 {nextTask['task_id']}")
+                  print(f"[{this.id}] 分配任务 {tid} -> 天车 {cid}")
       - type: transition
         transition: endDispatch
+
+  onTrolleyArrived:
+    title: 过跨车到达
+    trigger:
+      type: event
+      name: trolley.arrived
+      when: payload.get("targetId") is None or payload.get("targetId") == this.id
+    actions:
+      - type: runScript
+        scriptEngine: python
+        script: |
+          trolleyId = payload.get("trolleyId", "")
+          taskId = payload.get("taskId", "")
+          bay = payload.get("bay", "")
+          print(f"[{this.id}] 过跨车 {trolleyId} 到达 {bay} | 任务={taskId}")
+
+          # 创建目标段子任务
+          targetTaskId = lib.crane_dispatch.create_target_task(taskId)
+          if targetTaskId:
+              print(f"[{this.id}] 创建目标段任务 {targetTaskId}")
+
+              # 调度目标 bay 天车
+              cranes = world_state.crane
+              assignments = lib.crane_dispatch.global_dispatch(cranes)
+              newAssignments = lib.crane_dispatch.apply_dispatch(assignments)
+
+              for cid, tids in newAssignments.items():
+                  for tid in tids:
+                      task = lib.crane_dispatch.get_task_by_id(tid)
+                      dispatch("crane.task.assign", {
+                          "targetId": cid,
+                          "taskId": tid,
+                          "from": task["from_pos"],
+                          "to": task["to_pos"],
+                          "ladleId": task["ladle_id"]
+                      })
+                      print(f"[{this.id}] 分配任务 {tid} -> 天车 {cid}")
+
+          # 更新计数
+          totalAssigned = sum(len(plans) for plans in assignments.values())
+          this.variables.activeTasks = totalAssigned
+          allPending = lib.crane_dispatch.list_pending_tasks()
+          this.variables.pendingTasks = len(allPending)
 
   onCraneReleased:
     title: 天车释放
@@ -127,4 +201,9 @@ behaviors:
         script: |
           craneId = payload.get("craneId", "")
           print(f"[{this.id}] 天车释放 | 天车={craneId}")
-          this.variables.activeTasks = max(0, this.variables.activeTasks - 1)
+          # 触发全局重分配
+          cranes = world_state.crane
+          assignments = lib.crane_dispatch.global_dispatch(cranes)
+          lib.crane_dispatch.apply_dispatch(assignments)
+          totalAssigned = sum(len(tasks) for tasks in assignments.values())
+          this.variables.activeTasks = totalAssigned
