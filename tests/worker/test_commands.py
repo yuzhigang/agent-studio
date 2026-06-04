@@ -3,7 +3,8 @@ from unittest.mock import MagicMock
 
 from src.worker.commands.world import world_stop, world_get_status
 from src.worker.commands.instance import world_instances_list, world_instances_get
-from src.worker.commands.scene import scene_start, scene_stop, world_scenes_list
+from src.worker.commands.scene import scene_remove, scene_start, scene_stop, world_scenes_list
+from src.worker.commands import get_handler
 from src.worker.commands.model import world_models_list, world_models_get
 from src.worker.server.jsonrpc_ws import JsonRpcError
 
@@ -138,6 +139,50 @@ async def test_scene_start_missing_definition_raises_scene_not_found(manager):
         )
 
     assert exc.value.code == -32002
+
+
+@pytest.mark.anyio
+async def test_scene_remove_uses_world_scenes_directory(manager, tmp_path):
+    scene_manager = MagicMock()
+    scene_manager.remove.return_value = True
+    store = MagicMock()
+    store._world_dir = str(tmp_path)
+    bundle = {"scene_manager": scene_manager, "store": store}
+
+    result = await scene_remove(
+        manager,
+        bundle,
+        {"world_id": "w1", "scene_id": "s1"},
+    )
+
+    assert result == {"status": "removed"}
+    scene_manager.remove.assert_called_once_with(
+        "w1",
+        "s1",
+        tmp_path / "scenes",
+    )
+
+
+@pytest.mark.anyio
+async def test_scene_remove_missing_definition_raises_scene_not_found(manager, tmp_path):
+    scene_manager = MagicMock()
+    scene_manager.remove.return_value = False
+    store = MagicMock()
+    store._world_dir = str(tmp_path)
+    bundle = {"scene_manager": scene_manager, "store": store}
+
+    with pytest.raises(JsonRpcError) as exc:
+        await scene_remove(
+            manager,
+            bundle,
+            {"world_id": "w1", "scene_id": "missing"},
+        )
+
+    assert exc.value.code == -32002
+
+
+def test_scene_remove_is_registered():
+    assert get_handler("scene.remove") is scene_remove
 
 
 @pytest.mark.anyio

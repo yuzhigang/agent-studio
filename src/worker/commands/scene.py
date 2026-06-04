@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from src.worker.server.jsonrpc_ws import JsonRpcError
 
@@ -38,6 +39,25 @@ async def scene_stop(manager, bundle, params):
     if not ok:
         raise JsonRpcError(-32002, "scene not found")
     return {"status": "stopped"}
+
+
+async def scene_remove(manager, bundle, params):
+    world_id = params.get("world_id")
+    if bundle is None:
+        raise JsonRpcError(-32004, f"World {world_id} not loaded")
+    scene_id = params.get("scene_id")
+    if scene_id is None:
+        raise JsonRpcError(-32602, "scene_id required")
+    scenes_dir = Path(bundle["store"]._world_dir) / "scenes"
+    ok = await asyncio.to_thread(
+        bundle["scene_manager"].remove,
+        world_id,
+        scene_id,
+        scenes_dir,
+    )
+    if not ok:
+        raise JsonRpcError(-32002, "scene not found")
+    return {"status": "removed"}
 
 
 async def world_scenes_list(manager, bundle, params):

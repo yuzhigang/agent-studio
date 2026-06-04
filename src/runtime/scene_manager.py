@@ -1,6 +1,10 @@
 import copy
 import threading
 from collections import deque
+from pathlib import Path
+
+import yaml
+
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.event_bus import EventBusRegistry
 
@@ -54,6 +58,9 @@ class SceneManager:
         local_instances = local_instances or {}
         if mode not in ("shared", "isolated"):
             raise ValueError(f"Invalid scene mode: {mode}")
+        for local_id, local_spec in local_instances.items():
+            if not isinstance(local_spec, dict) or not local_spec.get("modelName"):
+                raise ValueError(f"Invalid local instance definition for {local_id}")
 
         # Reference validation + auto-pull (depth <= 2)
         resolved_refs = list(references)
@@ -138,6 +145,36 @@ class SceneManager:
             self._im.remove(world_id, inst.id, scope=inst.scope)
         with self._scene_lock:
             self._scenes.pop(key, None)
+        return True
+
+    @staticmethod
+    def _find_yaml_definitions(scenes_dir: str | Path, scene_id: str) -> list[Path]:
+        matches = []
+        for scene_file in Path(scenes_dir).rglob("*.yaml"):
+            with open(scene_file, "r", encoding="utf-8") as f:
+                scene_data = yaml.safe_load(f)
+            if isinstance(scene_data, dict) and scene_data.get("scene_id") == scene_id:
+                matches.append(scene_file)
+        return matches
+
+    def remove(self, world_id: str, scene_id: str, scenes_dir: str | Path) -> bool:
+        definition = (
+            self._scene_store.load_scene(world_id, scene_id)
+            if self._scene_store is not None
+            else None
+        )
+        yaml_matches = self._find_yaml_definitions(scenes_dir, scene_id)
+        running = self.get(world_id, scene_id) is not None
+        if len(yaml_matches) > 1:
+            raise ValueError(f"Multiple YAML definitions found for scene {scene_id}")
+        if not running and definition is None and not yaml_matches:
+            return False
+        if running:
+            self.stop(world_id, scene_id)
+        if yaml_matches:
+            yaml_matches[0].unlink()
+        if self._scene_store is not None:
+            self._scene_store.delete_scene(world_id, scene_id)
         return True
 
     def get(self, world_id: str, scene_id: str) -> dict | None:

@@ -1,7 +1,33 @@
 import pytest
+import yaml
+from pathlib import Path
+
 from src.runtime.scene_manager import SceneManager
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.event_bus import EventBusRegistry
+
+
+class RecordingSceneStore:
+    def __init__(self):
+        self.saved = {}
+        self.deleted = []
+
+    def save_scene(self, world_id, scene_id, scene_data):
+        self.saved[(world_id, scene_id)] = scene_data
+
+    def load_scene(self, world_id, scene_id):
+        return self.saved.get((world_id, scene_id))
+
+    def list_scenes(self, world_id):
+        return [
+            dict(data, world_id=pid, scene_id=sid)
+            for (pid, sid), data in self.saved.items()
+            if pid == world_id
+        ]
+
+    def delete_scene(self, world_id, scene_id):
+        self.deleted.append((world_id, scene_id))
+        return self.saved.pop((world_id, scene_id), None) is not None
 
 
 def test_start_shared_scene_references_world_instances():
@@ -193,3 +219,111 @@ def test_stop_preserves_scene_definition_in_store():
     ctrl.stop("world-01", "drill")
     assert ("world-01", "drill") in store.saved
     assert store.deleted == []
+
+
+def test_start_rejects_legacy_local_instance_definition():
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg)
+
+    with pytest.raises(ValueError, match="Invalid local instance definition"):
+        ctrl.start(
+            "world-01",
+            "legacy",
+            mode="shared",
+            local_instances={"local-01": "local-01"},
+        )
+
+
+def test_remove_running_yaml_scene_stops_and_deletes_both_definitions(tmp_path):
+    scenes_dir = tmp_path / "scenes"
+    scenes_dir.mkdir()
+    yaml_path = scenes_dir / "drill.yaml"
+    yaml_path.write_text("scene_id: drill\nmode: isolated\n", encoding="utf-8")
+    store = RecordingSceneStore()
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg, scene_store=store)
+    ctrl.start("world-01", "drill", mode="isolated")
+
+    assert ctrl.remove("world-01", "drill", scenes_dir) is True
+
+    assert ctrl.get("world-01", "drill") is None
+    assert not yaml_path.exists()
+    assert ("world-01", "drill") in store.deleted
+
+
+def test_remove_runtime_only_scene_deletes_store_definition(tmp_path):
+    scenes_dir = tmp_path / "scenes"
+    scenes_dir.mkdir()
+    store = RecordingSceneStore()
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg, scene_store=store)
+    ctrl.start("world-01", "runtime-scene", mode="shared")
+
+    assert ctrl.remove("world-01", "runtime-scene", scenes_dir) is True
+
+    assert ("world-01", "runtime-scene") in store.deleted
+
+
+def test_remove_duplicate_yaml_scene_fails_before_changes(tmp_path):
+    scenes_dir = tmp_path / "scenes"
+    scenes_dir.mkdir()
+    (scenes_dir / "first.yaml").write_text("scene_id: drill\n", encoding="utf-8")
+    (scenes_dir / "second.yaml").write_text("scene_id: drill\n", encoding="utf-8")
+    store = RecordingSceneStore()
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg, scene_store=store)
+    ctrl.start("world-01", "drill", mode="isolated")
+
+    with pytest.raises(ValueError, match="Multiple YAML definitions"):
+        ctrl.remove("world-01", "drill", scenes_dir)
+
+    assert ctrl.get("world-01", "drill") is not None
+    assert store.deleted == []
+
+
+def test_remove_malformed_yaml_fails_before_changes(tmp_path):
+    scenes_dir = tmp_path / "scenes"
+    scenes_dir.mkdir()
+    (scenes_dir / "broken.yaml").write_text("scene_id: [unterminated\n", encoding="utf-8")
+    store = RecordingSceneStore()
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg, scene_store=store)
+    ctrl.start("world-01", "drill", mode="isolated")
+
+    with pytest.raises(yaml.YAMLError):
+        ctrl.remove("world-01", "drill", scenes_dir)
+
+    assert ctrl.get("world-01", "drill") is not None
+    assert store.deleted == []
+
+
+def test_remove_yaml_delete_failure_preserves_store_definition(tmp_path, monkeypatch):
+    scenes_dir = tmp_path / "scenes"
+    scenes_dir.mkdir()
+    yaml_path = scenes_dir / "drill.yaml"
+    yaml_path.write_text("scene_id: drill\n", encoding="utf-8")
+    store = RecordingSceneStore()
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg, scene_store=store)
+    ctrl.start("world-01", "drill", mode="isolated")
+
+    def fail_unlink(self):
+        raise OSError("delete failed")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(OSError, match="delete failed"):
+        ctrl.remove("world-01", "drill", scenes_dir)
+
+    assert store.load_scene("world-01", "drill") is not None
+    assert store.deleted == []
+
+
+def test_remove_absent_scene_returns_false(tmp_path):
+    scenes_dir = tmp_path / "scenes"
+    scenes_dir.mkdir()
+    store = RecordingSceneStore()
+    bus_reg = EventBusRegistry()
+    ctrl = SceneManager(InstanceManager(bus_reg), bus_reg, scene_store=store)
+
+    assert ctrl.remove("world-01", "missing", scenes_dir) is False

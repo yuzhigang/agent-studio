@@ -7,7 +7,7 @@ from src.worker.commands.world import (
     world_stop,
 )
 from src.worker.commands.instance import world_instances_get, world_instances_list
-from src.worker.commands.scene import scene_start, scene_stop, world_scenes_list
+from src.worker.commands.scene import scene_remove, scene_start, scene_stop, world_scenes_list
 from src.worker.commands.model import world_models_get, world_models_list
 from src.worker.commands.message_hub import message_hub_publish, message_hub_publish_batch, message_hub_outbox_query
 
@@ -22,6 +22,7 @@ _REGISTRY = {
     "world.reload": world_reload,
     "scene.start": scene_start,
     "scene.stop": scene_stop,
+    "scene.remove": scene_remove,
     "world.scenes.list": world_scenes_list,
     "world.models.list": world_models_list,
     "world.models.get": world_models_get,
