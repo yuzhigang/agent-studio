@@ -1,3 +1,7 @@
+import asyncio
+import threading
+import time
+
 import pytest
 from src.runtime.state_manager import StateManager
 from src.runtime.instance_manager import InstanceManager
@@ -220,3 +224,59 @@ def test_track_and_untrack_world(state_mgr):
     assert "world-a" in state_mgr._loaded_worlds
     state_mgr.untrack_world("world-a")
     assert "world-a" not in state_mgr._loaded_worlds
+
+
+def test_auto_checkpoint_completes_without_reacquiring_world_lock(state_mgr, monkeypatch):
+    calls = 0
+
+    async def controlled_sleep(_seconds):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            state_mgr._shutdown = True
+
+    monkeypatch.setattr("src.runtime.state_manager.asyncio.sleep", controlled_sleep)
+    state_mgr.track_world("world-01")
+
+    thread = threading.Thread(
+        target=lambda: asyncio.run(state_mgr._auto_checkpoint_loop()),
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=0.5)
+
+    assert not thread.is_alive()
+    assert "world-01" in state_mgr._instance_store.world_states
+
+
+@pytest.mark.anyio
+async def test_auto_checkpoint_does_not_block_event_loop(state_mgr, monkeypatch):
+    original_sleep = asyncio.sleep
+    checkpoint_started = threading.Event()
+    release_checkpoint = threading.Event()
+
+    async def controlled_sleep(_seconds):
+        await original_sleep(0)
+
+    def blocking_checkpoint(_world_id):
+        checkpoint_started.set()
+        release_checkpoint.wait(timeout=0.5)
+        state_mgr._shutdown = True
+
+    monkeypatch.setattr("src.runtime.state_manager.asyncio.sleep", controlled_sleep)
+    monkeypatch.setattr(state_mgr, "checkpoint_world", blocking_checkpoint)
+    state_mgr.track_world("world-01")
+    timer = threading.Timer(0.2, release_checkpoint.set)
+    timer.start()
+
+    started_at = time.perf_counter()
+    task = asyncio.create_task(state_mgr._auto_checkpoint_loop())
+    while not checkpoint_started.is_set():
+        await original_sleep(0)
+    await original_sleep(0)
+    elapsed = time.perf_counter() - started_at
+    release_checkpoint.set()
+    await task
+    timer.cancel()
+
+    assert elapsed < 0.1

@@ -6,11 +6,14 @@ Auto-checkpoint runs via an asyncio background task (not threading.Thread)
 so that checkpoints and event-loop activity share one thread.
 """
 import asyncio
+import logging
 import threading
 from datetime import datetime, timezone
 
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.scene_manager import SceneManager
+
+logger = logging.getLogger(__name__)
 
 
 class StateManager:
@@ -67,16 +70,12 @@ class StateManager:
             with self._loaded_lock:
                 worlds = list(self._loaded_worlds)
             for world_id in worlds:
-                lock = self._get_world_lock(world_id)
-                acquired = lock.acquire(blocking=False)
-                if not acquired:
-                    continue
                 try:
-                    self.checkpoint_world(world_id)
+                    await asyncio.to_thread(self.checkpoint_world, world_id)
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
-                    pass
-                finally:
-                    lock.release()
+                    logger.exception("Automatic checkpoint failed for world %s", world_id)
 
     def checkpoint_world(self, world_id: str, last_event_id: str | None = None) -> None:
         lock = self._get_world_lock(world_id)
