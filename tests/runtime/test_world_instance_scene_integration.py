@@ -2,6 +2,8 @@ import pytest
 from src.runtime.instance_manager import InstanceManager
 from src.runtime.event_bus import EventBusRegistry
 from src.runtime.scene_manager import SceneManager
+from src.runtime.trigger_registry import TriggerRegistry
+from src.runtime.triggers.event_trigger import EventTrigger
 
 
 def test_shared_scene_event_reaches_all_references():
@@ -67,6 +69,48 @@ def test_isolated_scene_with_local_instance_and_stop():
 
     assert im.list_by_scope("world-01", "scene:drill") == []
     assert im.get("world-01", "ladle-001", scope="world") is not None
+
+
+def test_stopping_isolated_scene_keeps_world_instance_event_trigger_active():
+    bus_reg = EventBusRegistry()
+    triggers = TriggerRegistry()
+    triggers.add_trigger(EventTrigger(bus_reg))
+    im = InstanceManager(bus_reg, trigger_registry=triggers)
+    ctrl = SceneManager(im, bus_reg)
+    model = {
+        "variables": {"hits": {"type": "number", "default": 0}},
+        "behaviors": {
+            "count-ping": {
+                "trigger": {"type": "event", "name": "ping"},
+                "actions": [
+                    {
+                        "type": "runScript",
+                        "script": "this.variables.hits += 1",
+                    }
+                ],
+            }
+        },
+    }
+    world_inst = im.create(
+        world_id="world-01",
+        model_name="counter",
+        instance_id="counter-01",
+        scope="world",
+        model=model,
+    )
+    ctrl.start(
+        world_id="world-01",
+        scene_id="drill",
+        mode="isolated",
+        references=["counter-01"],
+    )
+
+    ctrl.stop("world-01", "drill")
+    bus_reg.get_or_create("world-01").publish(
+        "ping", {}, source="test", scope="agent", target="counter-01"
+    )
+
+    assert world_inst.variables["hits"] == 1
 
 
 def test_linked_reference_auto_pull():

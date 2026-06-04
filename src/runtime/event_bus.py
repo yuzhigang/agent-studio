@@ -1,31 +1,31 @@
 import logging
 import threading
+import uuid
 
 logger = logging.getLogger(__name__)
 
 
 class EventBus:
     def __init__(self):
-        self._subscribers: dict[str, list[tuple[str, str, callable]]] = {}
+        self._subscribers: dict[str, list[tuple[str, str, str, callable]]] = {}
         # publish() can be called from sync runtime paths, so this stays thread-based.
         self._lock = threading.RLock()
 
-    def register(self, instance_id: str, scope: str, event_type: str, handler: callable):
+    def register(self, instance_id: str, scope: str, event_type: str, handler: callable) -> str:
+        subscription_id = str(uuid.uuid4())
         with self._lock:
-            self._subscribers.setdefault(event_type, []).append((instance_id, scope, handler))
+            self._subscribers.setdefault(event_type, []).append(
+                (subscription_id, instance_id, scope, handler)
+            )
+        return subscription_id
 
-    def unregister(self, instance_id: str, event_type: str | None = None):
+    def unregister(self, subscription_id: str):
         with self._lock:
-            if event_type is not None:
-                self._subscribers[event_type] = [
-                    (iid, sc, h)
-                    for iid, sc, h in self._subscribers.get(event_type, [])
-                    if iid != instance_id
-                ]
-                return
             for et in list(self._subscribers.keys()):
                 self._subscribers[et] = [
-                    (iid, sc, h) for iid, sc, h in self._subscribers[et] if iid != instance_id
+                    (sid, iid, sc, h)
+                    for sid, iid, sc, h in self._subscribers[et]
+                    if sid != subscription_id
                 ]
 
     def publish(
@@ -44,7 +44,7 @@ class EventBus:
         with self._lock:
             handlers = list(self._subscribers.get(event_type, []))
         delivered = 0
-        for instance_id, inst_scope, handler in handlers:
+        for _, instance_id, inst_scope, handler in handlers:
             if not self._scope_matches(scope, target, inst_scope, instance_id):
                 continue
             try:
@@ -69,7 +69,7 @@ class EventBus:
         if msg_scope == "world":
             return True
         if msg_scope == "agent":
-            return instance_id == msg_target
+            return inst_scope == "world" and instance_id == msg_target
         if msg_scope == "scene":
             return inst_scope == f"scene:{msg_target}"
         return False

@@ -432,9 +432,6 @@ class InstanceManager:
             self._trigger_registry.register(inst, trigger, callback, tag=name)
 
     def _unregister_instance(self, inst: Instance):
-        if self._bus_reg is not None:
-            bus = self._bus_reg.get_or_create(inst.world_id)
-            bus.unregister(inst.id)
         if self._trigger_registry is not None:
             self._trigger_registry.unregister_instance(inst)
 

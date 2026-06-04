@@ -26,6 +26,39 @@ def test_event_bus_target_routes_to_single_instance():
     assert other_hits == []
 
 
+def test_unregister_removes_only_the_selected_subscription():
+    bus = EventBus()
+    world_hits = []
+    scene_hits = []
+    world_subscription = bus.register(
+        "agent-1", "world", "tick", lambda *_: world_hits.append("world")
+    )
+    scene_subscription = bus.register(
+        "agent-1", "scene:drill", "tick", lambda *_: scene_hits.append("scene")
+    )
+
+    assert world_subscription != scene_subscription
+
+    bus.unregister(scene_subscription)
+    bus.publish("tick", {}, "source", "world", "world-1")
+
+    assert world_hits == ["world"]
+    assert scene_hits == []
+
+
+def test_agent_scope_does_not_reach_same_id_scene_subscription():
+    bus = EventBus()
+    world_hits = []
+    scene_hits = []
+    bus.register("agent-1", "world", "tick", lambda *_: world_hits.append("world"))
+    bus.register("agent-1", "scene:drill", "tick", lambda *_: scene_hits.append("scene"))
+
+    bus.publish("tick", {}, "source", "agent", "agent-1")
+
+    assert world_hits == ["world"]
+    assert scene_hits == []
+
+
 def test_event_bus_scene_scope_is_isolated_from_other_scopes():
     bus = EventBus()
     scene_hits = []
