@@ -216,7 +216,13 @@ def test_scene_local_instance_inherits_resolved_agent_namespace(registry):
     )
 
     inst = bundle["instance_manager"].get("test-world", "ladle-local-01", scope="scene:scene-1")
-    assert scene["local_instances"]["ladle-local-01"] == "ladle-local-01"
+    assert scene["local_instances"]["ladle-local-01"] == {
+        "modelName": "logistics.ladle"
+    }
+    persisted = bundle["store"].load_scene("test-world", "scene-1")
+    assert persisted["local_instances"]["ladle-local-01"] == {
+        "modelName": "logistics.ladle"
+    }
     assert inst is not None
     assert inst._agent_namespace == "logistics.ladle"
 

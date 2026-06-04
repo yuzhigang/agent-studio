@@ -72,6 +72,48 @@ def test_stop_scene_removes_local_and_cow_instances():
     assert ctrl.get("world-01", "drill") is None
 
 
+def test_stop_shared_scene_preserves_world_references_and_removes_local_instances():
+    bus_reg = EventBusRegistry()
+    im = InstanceManager(bus_reg)
+    im.create(world_id="world-01", model_name="ladle", instance_id="ladle-001")
+    ctrl = SceneManager(im, bus_reg)
+    ctrl.start(
+        world_id="world-01",
+        scene_id="monitor",
+        mode="shared",
+        references=["ladle-001"],
+        local_instances={"temp-inspector-01": {"modelName": "inspector"}},
+    )
+
+    assert ctrl.stop("world-01", "monitor") is True
+
+    assert im.get("world-01", "ladle-001", scope="world") is not None
+    assert im.list_by_scope("world-01", "scene:monitor") == []
+
+
+def test_stop_keeps_scene_running_when_instance_cleanup_fails(monkeypatch):
+    bus_reg = EventBusRegistry()
+    im = InstanceManager(bus_reg)
+    im.create(world_id="world-01", model_name="ladle", instance_id="ladle-001")
+    ctrl = SceneManager(im, bus_reg)
+    ctrl.start(
+        world_id="world-01",
+        scene_id="drill",
+        mode="isolated",
+        references=["ladle-001"],
+    )
+
+    def fail_remove(*args, **kwargs):
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(im, "remove", fail_remove)
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        ctrl.stop("world-01", "drill")
+
+    assert ctrl.get("world-01", "drill") is not None
+
+
 def test_isolated_scene_backfills_metrics():
     class FakeMetricStore:
         def latest(self, world_id, instance_id, metric_name):
@@ -132,7 +174,7 @@ def test_start_persists_scene_to_store():
     assert store.saved[("world-01", "monitor")]["refs"] == ["ladle-001"]
 
 
-def test_stop_deletes_scene_from_store():
+def test_stop_preserves_scene_definition_in_store():
     class FakeStore:
         def __init__(self):
             self.saved = {}
@@ -149,4 +191,5 @@ def test_stop_deletes_scene_from_store():
     ctrl = SceneManager(im, bus_reg, scene_store=store)
     ctrl.start(world_id="world-01", scene_id="drill", mode="isolated", references=["ladle-001"])
     ctrl.stop("world-01", "drill")
-    assert ("world-01", "drill") in store.deleted
+    assert ("world-01", "drill") in store.saved
+    assert store.deleted == []

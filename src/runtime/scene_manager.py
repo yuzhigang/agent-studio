@@ -81,7 +81,7 @@ class SceneManager:
             "scene_id": scene_id,
             "mode": mode,
             "references": resolved_refs,
-            "local_instances": {},
+            "local_instances": copy.deepcopy(local_instances),
         }
 
         if mode == "isolated":
@@ -89,7 +89,7 @@ class SceneManager:
                 self._im.copy_for_scene(world_id, ref_id, scene_id)
 
         for local_id, local_spec in local_instances.items():
-            local_inst = self._im.create(
+            self._im.create(
                 world_id=world_id,
                 model_name=local_spec["modelName"],
                 instance_id=local_id,
@@ -97,7 +97,6 @@ class SceneManager:
                 agent_namespace=local_spec.get("agentNamespace"),
                 variables=copy.deepcopy(local_spec.get("variables", {})),
             )
-            scene["local_instances"][local_id] = local_inst.id
 
         # Metric backfill for isolated scenes (spec 6.3 / 7.1 step 3)
         actual_scene_instances: list = []
@@ -132,13 +131,13 @@ class SceneManager:
     def stop(self, world_id: str, scene_id: str) -> bool:
         key = (world_id, scene_id)
         with self._scene_lock:
-            scene = self._scenes.pop(key, None)
+            scene = self._scenes.get(key)
         if scene is None:
             return False
         for inst in self._im.list_by_scope(world_id, f"scene:{scene_id}"):
             self._im.remove(world_id, inst.id, scope=inst.scope)
-        if self._scene_store is not None:
-            self._scene_store.delete_scene(world_id, scene_id)
+        with self._scene_lock:
+            self._scenes.pop(key, None)
         return True
 
     def get(self, world_id: str, scene_id: str) -> dict | None:
