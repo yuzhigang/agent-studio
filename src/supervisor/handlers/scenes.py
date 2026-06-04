@@ -95,3 +95,30 @@ async def handle_scene_stop(request: web.Request):
         if e.code == -32002:
             return web.json_response({"error": "scene_not_found", "message": e.message}, status=status)
         return web.json_response({"error": "world_not_found", "message": e.message}, status=status)
+
+
+async def handle_scene_remove(request: web.Request):
+    controller: WorkerController = request.app["controller"]
+    world_id = request.match_info["world_id"]
+    scene_id = request.match_info["scene_id"]
+    try:
+        result = await controller.proxy_to_worker(
+            world_id, "scene.remove", {"world_id": world_id, "scene_id": scene_id}
+        )
+        return web.json_response(result)
+    except WorkerRpcError as e:
+        status = rpc_code_to_http(e.code)
+        if e.code == -32002:
+            return web.json_response(
+                {"error": "scene_not_found", "message": e.message},
+                status=status,
+            )
+        return web.json_response(
+            {"error": "world_not_found", "message": e.message},
+            status=status,
+        )
+    except TimeoutError:
+        return web.json_response(
+            {"error": "worker_timeout", "message": "Request to worker timed out"},
+            status=504,
+        )

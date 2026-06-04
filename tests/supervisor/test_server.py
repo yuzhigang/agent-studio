@@ -1,9 +1,11 @@
 import pytest
+import inspect
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from src.supervisor.handlers.instances import handle_world_instances
 from src.supervisor.worker import WorkerController
+from src.supervisor.server import run_supervisor
 
 
 @pytest.fixture
@@ -51,3 +53,9 @@ async def test_list_instances_success(client, app):
     assert resp.status == 200
     data = await resp.json()
     assert data["items"][0]["instance_id"] == "inst-1"
+
+
+def test_server_registers_scene_remove_route():
+    source = inspect.getsource(run_supervisor)
+
+    assert 'app.router.add_delete("/api/worlds/{world_id}/scenes/{scene_id}", handlers.handle_scene_remove)' in source

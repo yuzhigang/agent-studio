@@ -1,7 +1,7 @@
 import json
 import pytest
 from aiohttp import web
-from src.supervisor.worker import WorkerController
+from src.supervisor.worker import WorkerController, WorkerRpcError
 
 
 @pytest.fixture
@@ -96,3 +96,47 @@ async def test_get_world_detail_worker_not_found(app):
     request = type("Req", (), {"app": app, "match_info": {"world_id": "w1"}})()
     response = await handle_world_detail(request)
     assert response.status == 404
+
+
+@pytest.mark.anyio
+async def test_scene_remove_proxies_worker_command(app):
+    from src.supervisor.handlers.scenes import handle_scene_remove
+
+    calls = []
+
+    async def mock_proxy(world_id, method, params=None):
+        calls.append((world_id, method, params))
+        return {"status": "removed"}
+
+    app["controller"].proxy_to_worker = mock_proxy
+    request = type("Req", (), {
+        "app": app,
+        "match_info": {"world_id": "w1", "scene_id": "s1"},
+    })()
+
+    response = await handle_scene_remove(request)
+
+    assert response.status == 200
+    assert json.loads(response.text) == {"status": "removed"}
+    assert calls == [
+        ("w1", "scene.remove", {"world_id": "w1", "scene_id": "s1"})
+    ]
+
+
+@pytest.mark.anyio
+async def test_scene_remove_maps_scene_not_found(app):
+    from src.supervisor.handlers.scenes import handle_scene_remove
+
+    async def mock_proxy(world_id, method, params=None):
+        raise WorkerRpcError(-32002, "scene not found")
+
+    app["controller"].proxy_to_worker = mock_proxy
+    request = type("Req", (), {
+        "app": app,
+        "match_info": {"world_id": "w1", "scene_id": "missing"},
+    })()
+
+    response = await handle_scene_remove(request)
+
+    assert response.status == 404
+    assert json.loads(response.text)["error"] == "scene_not_found"

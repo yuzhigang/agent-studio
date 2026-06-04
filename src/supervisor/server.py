@@ -30,6 +30,7 @@ def run_supervisor(base_dir="worlds", ws_port=8001, http_port=8080):
     app.router.add_get("/api/worlds/{world_id}/scenes/{scene_id}/instances", handlers.handle_scene_instances)
     app.router.add_post("/api/worlds/{world_id}/scenes/{scene_id}/start", handlers.handle_scene_start)
     app.router.add_post("/api/worlds/{world_id}/scenes/{scene_id}/stop", handlers.handle_scene_stop)
+    app.router.add_delete("/api/worlds/{world_id}/scenes/{scene_id}", handlers.handle_scene_remove)
     app.router.add_post("/api/worlds/{world_id}/events", handlers.handle_post_event)
     app.router.add_post("/api/worlds/{world_id}/events/batch", handlers.handle_post_batch_events)
     app.router.add_get("/api/worlds/{world_id}/outbox", handlers.handle_get_outbox)
