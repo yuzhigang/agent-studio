@@ -13,7 +13,17 @@ async def scene_start(manager, bundle, params):
     existing = bundle["scene_manager"].get(world_id, scene_id)
     if existing is not None:
         return {"status": "already_running"}
-    await asyncio.to_thread(bundle["scene_manager"].start, world_id, scene_id, mode="isolated")
+    definition = bundle["store"].load_scene(world_id, scene_id)
+    if definition is None:
+        raise JsonRpcError(-32002, "scene not found")
+    await asyncio.to_thread(
+        bundle["scene_manager"].start,
+        world_id,
+        scene_id,
+        mode=definition["mode"],
+        references=definition.get("refs", []),
+        local_instances=definition.get("local_instances", {}),
+    )
     return {"status": "started"}
 
 
@@ -36,7 +46,7 @@ async def world_scenes_list(manager, bundle, params):
         raise JsonRpcError(-32004, f"World {world_id} not loaded")
     sm = bundle["scene_manager"]
     im = bundle["instance_manager"]
-    scenes = sm.list_by_world(world_id)
+    scenes = bundle["store"].list_scenes(world_id)
     instances = im.list_by_world(world_id)
     result = []
     for scene in scenes:
@@ -46,6 +56,7 @@ async def world_scenes_list(manager, bundle, params):
         result.append({
             "scene_id": scene_id,
             "mode": scene.get("mode", "shared"),
+            "status": "running" if sm.get(world_id, scene_id) is not None else "stopped",
             "instance_count": count,
         })
     return {"scenes": result}

@@ -1,4 +1,6 @@
 import pytest
+from unittest.mock import MagicMock
+
 from src.worker.commands.world import world_stop, world_get_status
 from src.worker.commands.instance import world_instances_list, world_instances_get
 from src.worker.commands.scene import scene_start, scene_stop, world_scenes_list
@@ -93,14 +95,57 @@ async def test_scene_start_already_running(manager):
 
 
 @pytest.mark.anyio
+async def test_scene_start_uses_persisted_definition(manager):
+    scene_manager = MagicMock()
+    scene_manager.get.return_value = None
+    store = MagicMock()
+    store.load_scene.return_value = {
+        "mode": "shared",
+        "refs": ["agent-1"],
+        "local_instances": {"local-1": {"modelName": "inspector"}},
+    }
+    bundle = {"scene_manager": scene_manager, "store": store}
+
+    result = await scene_start(
+        manager,
+        bundle,
+        {"world_id": "w1", "scene_id": "s1"},
+    )
+
+    assert result == {"status": "started"}
+    scene_manager.start.assert_called_once_with(
+        "w1",
+        "s1",
+        mode="shared",
+        references=["agent-1"],
+        local_instances={"local-1": {"modelName": "inspector"}},
+    )
+
+
+@pytest.mark.anyio
+async def test_scene_start_missing_definition_raises_scene_not_found(manager):
+    scene_manager = MagicMock()
+    scene_manager.get.return_value = None
+    store = MagicMock()
+    store.load_scene.return_value = None
+    bundle = {"scene_manager": scene_manager, "store": store}
+
+    with pytest.raises(JsonRpcError) as exc:
+        await scene_start(
+            manager,
+            bundle,
+            {"world_id": "w1", "scene_id": "missing"},
+        )
+
+    assert exc.value.code == -32002
+
+
+@pytest.mark.anyio
 async def test_world_scenes_list(manager):
     mock_bundle = {
         "world_id": "w1",
         "scene_manager": type("SM", (), {
-            "list_by_world": lambda self, wid: [
-                {"scene_id": "s1", "mode": "shared"},
-                {"scene_id": "s2", "mode": "isolated"},
-            ]
+            "get": lambda self, wid, sid: {"scene_id": sid} if sid == "s1" else None,
         })(),
         "instance_manager": type("IM", (), {
             "list_by_world": lambda self, wid: [
@@ -110,11 +155,28 @@ async def test_world_scenes_list(manager):
                 type("Inst", (), {"scope": "scene:s2"})(),
             ]
         })(),
+        "store": type("Store", (), {
+            "list_scenes": lambda self, wid: [
+                {"scene_id": "s1", "mode": "shared"},
+                {"scene_id": "s2", "mode": "isolated"},
+            ]
+        })(),
     }
     result = await world_scenes_list(manager, mock_bundle, {"world_id": "w1"})
-    assert len(result["scenes"]) == 2
-    assert result["scenes"][0]["instance_count"] == 2
-    assert result["scenes"][1]["instance_count"] == 1
+    assert result["scenes"] == [
+        {
+            "scene_id": "s1",
+            "mode": "shared",
+            "status": "running",
+            "instance_count": 2,
+        },
+        {
+            "scene_id": "s2",
+            "mode": "isolated",
+            "status": "stopped",
+            "instance_count": 1,
+        },
+    ]
 
 
 @pytest.mark.anyio
