@@ -1,4 +1,6 @@
 import os
+import sqlite3
+
 import pytest
 from src.runtime.stores.sqlite_store import SQLiteStore
 
@@ -69,6 +71,7 @@ def test_save_and_load_instance(store):
         "attributes": {"capacity": 200},
         "state": {"current": "idle"},
         "variables": {"steelAmount": 180},
+        "bindings": {"orders": {"dataset": "active-orders"}},
         "links": {"caster": "c03"},
         "memory": {"history": []},
         "audit": {"version": 1},
@@ -81,7 +84,11 @@ def test_save_and_load_instance(store):
     assert inst["agent_namespace"] == "logistics.ladle"
     assert inst["model_version"] == "1.0"
     assert inst["attributes"]["capacity"] == 200
+    assert inst["bindings"] == {"orders": {"dataset": "active-orders"}}
     assert inst["lifecycle_state"] == "active"
+    assert store.list_instances("world-01")[0]["bindings"] == {
+        "orders": {"dataset": "active-orders"}
+    }
 
 
 def test_list_instances_with_filters(store):
@@ -153,3 +160,60 @@ def test_db_file_created_in_world_dir(tmp_path):
     s = SQLiteStore(world_dir)
     assert os.path.exists(os.path.join(world_dir, "runtime.db"))
     s.close()
+
+
+def test_existing_instance_table_is_migrated_with_empty_bindings(tmp_path):
+    world_dir = str(tmp_path / "world-old")
+    os.makedirs(world_dir)
+    conn = sqlite3.connect(os.path.join(world_dir, "runtime.db"))
+    conn.execute(
+        """
+        CREATE TABLE instances (
+            world_id TEXT NOT NULL,
+            instance_id TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            agent_namespace TEXT,
+            model_version TEXT,
+            attributes TEXT NOT NULL,
+            state TEXT NOT NULL,
+            variables TEXT NOT NULL,
+            links TEXT NOT NULL,
+            memory TEXT NOT NULL,
+            audit TEXT NOT NULL,
+            lifecycle_state TEXT DEFAULT 'active',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (world_id, instance_id, scope)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO instances (
+            world_id, instance_id, scope, model_name, attributes, state,
+            variables, links, memory, audit, lifecycle_state, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "world-old",
+            "inst-1",
+            "world",
+            "ladle",
+            "{}",
+            "{}",
+            "{}",
+            "{}",
+            "{}",
+            "{}",
+            "active",
+            "2024-01-01T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    store = SQLiteStore(world_dir)
+    try:
+        assert store.load_instance("world-old", "inst-1", "world")["bindings"] == {}
+    finally:
+        store.close()

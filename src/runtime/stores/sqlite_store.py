@@ -56,6 +56,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
             attributes TEXT NOT NULL,
             state TEXT NOT NULL,
             variables TEXT NOT NULL,
+            bindings TEXT NOT NULL DEFAULT '{}',
             links TEXT NOT NULL,
             memory TEXT NOT NULL,
             audit TEXT NOT NULL,
@@ -114,6 +115,10 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
             }
             if "agent_namespace" not in columns:
                 self._conn.execute("ALTER TABLE instances ADD COLUMN agent_namespace TEXT")
+            if "bindings" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE instances ADD COLUMN bindings TEXT NOT NULL DEFAULT '{}'"
+                )
             self._conn.commit()
 
     def _now(self) -> str:
@@ -256,9 +261,9 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
                 """
                 INSERT INTO instances (
                     world_id, instance_id, scope, model_name, agent_namespace, model_version,
-                    attributes, state, variables, links, memory, audit,
+                    attributes, state, variables, bindings, links, memory, audit,
                     lifecycle_state, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(world_id, instance_id, scope) DO UPDATE SET
                     model_name = excluded.model_name,
                     agent_namespace = excluded.agent_namespace,
@@ -266,6 +271,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
                     attributes = excluded.attributes,
                     state = excluded.state,
                     variables = excluded.variables,
+                    bindings = excluded.bindings,
                     links = excluded.links,
                     memory = excluded.memory,
                     audit = excluded.audit,
@@ -282,6 +288,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
                     json.dumps(snapshot.get("attributes", {}), ensure_ascii=False),
                     json.dumps(snapshot.get("state", {}), ensure_ascii=False),
                     json.dumps(snapshot.get("variables", {}), ensure_ascii=False),
+                    json.dumps(snapshot.get("bindings", {}), ensure_ascii=False),
                     json.dumps(snapshot.get("links", {}), ensure_ascii=False),
                     json.dumps(snapshot.get("memory", {}), ensure_ascii=False),
                     json.dumps(snapshot.get("audit", {}), ensure_ascii=False),
@@ -295,7 +302,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
         row = self._conn.execute(
             """
             SELECT model_name, agent_namespace, model_version, attributes, state, variables,
-                   links, memory, audit, lifecycle_state, updated_at
+                   bindings, links, memory, audit, lifecycle_state, updated_at
             FROM instances WHERE world_id = ? AND instance_id = ? AND scope = ?
             """,
             (world_id, instance_id, scope),
@@ -312,11 +319,12 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
             "attributes": json.loads(row[3]),
             "state": json.loads(row[4]),
             "variables": json.loads(row[5]),
-            "links": json.loads(row[6]),
-            "memory": json.loads(row[7]),
-            "audit": json.loads(row[8]),
-            "lifecycle_state": row[9],
-            "updated_at": row[10],
+            "bindings": json.loads(row[6]),
+            "links": json.loads(row[7]),
+            "memory": json.loads(row[8]),
+            "audit": json.loads(row[9]),
+            "lifecycle_state": row[10],
+            "updated_at": row[11],
         }
 
     def list_instances(
@@ -327,7 +335,7 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
     ) -> list[dict]:
         query = """
             SELECT instance_id, scope, model_name, agent_namespace, model_version, attributes,
-                   state, variables, links, memory, audit, lifecycle_state, updated_at
+                   state, variables, bindings, links, memory, audit, lifecycle_state, updated_at
             FROM instances WHERE world_id = ?
         """
         params: list = [world_id]
@@ -349,11 +357,12 @@ class SQLiteStore(WorldStore, SceneStore, InstanceStore, EventLogStore, AlarmSto
                 "attributes": json.loads(r[5]),
                 "state": json.loads(r[6]),
                 "variables": json.loads(r[7]),
-                "links": json.loads(r[8]),
-                "memory": json.loads(r[9]),
-                "audit": json.loads(r[10]),
-                "lifecycle_state": r[11],
-                "updated_at": r[12],
+                "bindings": json.loads(r[8]),
+                "links": json.loads(r[9]),
+                "memory": json.loads(r[10]),
+                "audit": json.loads(r[11]),
+                "lifecycle_state": r[12],
+                "updated_at": r[13],
             }
             for r in rows
         ]
