@@ -40,6 +40,9 @@ def test_load_world_creates_instances_from_declarations(registry):
         "attributes": {
             "location": {"type": "string", "default": "unknown"},
         },
+        "bindings": {
+            "orders": {"type": "object", "default": {"dataset": "default-orders"}},
+        },
     })
 
     # Write an instance declaration with overrides
@@ -49,6 +52,7 @@ def test_load_world_creates_instances_from_declarations(registry):
         "modelId": "core.sensor",
         "variables": {"threshold": 150, "label": "overridden-label"},
         "attributes": {"location": "boiler-room"},
+        "bindings": {"orders": {"dataset": "active-orders"}},
         "state": "active",
     })
 
@@ -62,6 +66,7 @@ def test_load_world_creates_instances_from_declarations(registry):
     assert inst.variables["threshold"] == 150
     assert inst.variables["label"] == "overridden-label"
     assert inst.attributes["location"] == "boiler-room"
+    assert inst.bindings == {"orders": {"dataset": "active-orders"}}
     assert inst.state["current"] == "active"
     assert bundle["instance_manager"]._sandbox.registry is bundle["lib_registry"]
 
@@ -182,3 +187,114 @@ def test_load_world_uses_group_agent_path_as_default_lib_namespace(registry):
         context,
     )
     assert result == {"candidates": []}
+
+
+def test_restart_restores_runtime_state_and_applies_yaml_static_overrides(registry):
+    registry.create_world("test-world")
+    world_dir = os.path.join(registry._base_dir, "test-world")
+    instances_dir = os.path.join(world_dir, "agents", "core", "sensor", "instances")
+    declaration_path = os.path.join(instances_dir, "sensor-01.instance.yaml")
+
+    for model_name in ("sensor-v1", "sensor-v2"):
+        model_dir = os.path.join(world_dir, "agents", "core", model_name, "model")
+        _write_yaml(os.path.join(model_dir, "index.yaml"), {
+            "metadata": {"name": model_name},
+            "variables": {"reading": {"type": "number", "default": 0}},
+            "attributes": {
+                "location": {"type": "string", "default": "unknown"},
+                "modelDefault": {"type": "string", "default": model_name},
+            },
+            "bindings": {
+                "orders": {"type": "object", "default": {"dataset": "default-orders"}},
+            },
+            "links": {
+                "owner": {"type": "string", "default": "default-owner"},
+            },
+            "memory": {
+                "history": {"type": "array", "default": []},
+            },
+        })
+
+    _write_yaml(declaration_path, {
+        "id": "sensor-01",
+        "modelId": "core.sensor-v1",
+        "variables": {"reading": 10},
+        "attributes": {"location": "yaml-v1"},
+        "bindings": {"orders": {"dataset": "yaml-v1-orders"}},
+        "links": {"owner": "yaml-v1-owner"},
+        "state": "idle",
+    })
+
+    bundle = registry.load_world("test-world")
+    inst = bundle["instance_manager"].get("test-world", "sensor-01")
+    inst.state = {"current": "running", "enteredAt": "runtime-time"}
+    inst.variables = {"reading": 99, "runtimeOnly": True}
+    inst.bindings = {"orders": {"dataset": "runtime-orders"}}
+    inst.memory = {"history": ["runtime"]}
+    inst.audit = {"version": 7, "updatedAt": "runtime", "lastEventId": "evt-7"}
+    inst.lifecycle_state = "completed"
+    inst.attributes = {"location": "runtime-location", "preserved": "runtime-attribute"}
+    inst.links = {"owner": "runtime-owner", "preserved": "runtime-link"}
+    bundle["state_manager"].checkpoint_world("test-world")
+    registry.unload_world("test-world")
+
+    _write_yaml(declaration_path, {
+        "id": "sensor-01",
+        "modelId": "core.sensor-v2",
+        "variables": {"reading": -1},
+        "attributes": {"location": "yaml-v2"},
+        "bindings": {"orders": {"dataset": "yaml-v2-orders"}},
+        "links": {"owner": "yaml-v2-owner"},
+        "state": "stopped",
+    })
+
+    bundle = registry.load_world("test-world")
+    restored = bundle["instance_manager"].get("test-world", "sensor-01")
+
+    assert restored.model_name == "core.sensor-v2"
+    assert restored.state == {"current": "running", "enteredAt": "runtime-time"}
+    assert restored.variables == {"reading": 99, "runtimeOnly": True}
+    assert restored.bindings == {"orders": {"dataset": "runtime-orders"}}
+    assert restored.memory == {"history": ["runtime"]}
+    assert restored.audit == {
+        "version": 7,
+        "updatedAt": "runtime",
+        "lastEventId": "evt-7",
+    }
+    assert restored.lifecycle_state == "completed"
+    assert restored.attributes == {
+        "location": "yaml-v2",
+        "preserved": "runtime-attribute",
+    }
+    assert restored.links == {
+        "owner": "yaml-v2-owner",
+        "preserved": "runtime-link",
+    }
+    registry.unload_world("test-world")
+
+    _write_yaml(declaration_path, {
+        "id": "sensor-01",
+        "modelId": "core.sensor-v2",
+    })
+    bundle = registry.load_world("test-world")
+    restored = bundle["instance_manager"].get("test-world", "sensor-01")
+    assert restored.attributes == {
+        "location": "runtime-location",
+        "preserved": "runtime-attribute",
+    }
+    assert restored.links == {
+        "owner": "runtime-owner",
+        "preserved": "runtime-link",
+    }
+    registry.unload_world("test-world")
+
+    _write_yaml(declaration_path, {
+        "id": "sensor-01",
+        "modelId": "core.sensor-v2",
+        "attributes": {},
+        "links": {},
+    })
+    bundle = registry.load_world("test-world")
+    restored = bundle["instance_manager"].get("test-world", "sensor-01")
+    assert restored.attributes == {}
+    assert restored.links == {}

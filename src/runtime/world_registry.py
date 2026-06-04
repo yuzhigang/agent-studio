@@ -1,5 +1,6 @@
 import logging
 import os
+import copy
 from pathlib import Path
 
 import yaml
@@ -162,7 +163,7 @@ class WorldRegistry:
 
             # Load instances first: model_loader -> resolver.ensure() copies missing models/libs
             # from global templates into world-private agents/. Then scan picks them up.
-            self._load_instance_declarations(world_id, world_dir, im, model_loader)
+            self._load_instance_declarations(world_id, world_dir, im, model_loader, store)
 
             if world_agents_dir.exists():
                 lib_registry.scan(str(world_agents_dir), clear=False)
@@ -258,6 +259,7 @@ class WorldRegistry:
         world_dir: str,
         im: InstanceManager,
         model_loader,
+        instance_store,
     ) -> None:
         """Scan and create static instances from *.instance.yaml declarations."""
         declarations = InstanceLoader.scan(world_dir)
@@ -290,6 +292,9 @@ class WorldRegistry:
             links = _merge_defaults(
                 model.get("links") or {}, decl.get("links") or {}
             )
+            bindings = _merge_defaults(
+                model.get("bindings") or {}, decl.get("bindings") or {}
+            )
             memory = _merge_defaults(
                 model.get("memory") or {}, decl.get("memory") or {}
             )
@@ -298,10 +303,39 @@ class WorldRegistry:
             if decl.get("state"):
                 state["current"] = decl["state"]
 
-            # If instance already exists (from DB or previous declaration), remove it
-            # so that declaration wins.
-            if im.get(world_id, instance_id, scope="world") is not None:
-                im.remove(world_id, instance_id, scope="world")
+            snapshot = instance_store.load_instance(world_id, instance_id, "world")
+            if snapshot is not None:
+                def merge_static_map(field_name: str, initial: dict) -> dict:
+                    if field_name not in decl:
+                        return copy.deepcopy(snapshot.get(field_name, initial))
+                    declared = decl.get(field_name) or {}
+                    if not declared:
+                        return {}
+                    merged = copy.deepcopy(snapshot.get(field_name, initial))
+                    merged.update(copy.deepcopy(declared))
+                    return merged
+
+                merged_snapshot = {
+                    "world_id": world_id,
+                    "instance_id": instance_id,
+                    "scope": "world",
+                    "model_name": model_id,
+                    "agent_namespace": decl.get("_agent_namespace"),
+                    "model_version": None,
+                    "attributes": merge_static_map("attributes", attributes),
+                    "state": copy.deepcopy(snapshot.get("state", state)),
+                    "variables": copy.deepcopy(snapshot.get("variables", variables)),
+                    "bindings": copy.deepcopy(snapshot.get("bindings", bindings)),
+                    "links": merge_static_map("links", links),
+                    "memory": copy.deepcopy(snapshot.get("memory", memory)),
+                    "audit": copy.deepcopy(snapshot.get(
+                        "audit",
+                        {"version": 0, "updatedAt": None, "lastEventId": None},
+                    )),
+                    "lifecycle_state": snapshot.get("lifecycle_state", "active"),
+                }
+                im.hydrate(merged_snapshot, model=model)
+                continue
 
             im.create(
                 world_id=world_id,
@@ -313,6 +347,7 @@ class WorldRegistry:
                 state=state,
                 attributes=attributes,
                 variables=variables,
+                bindings=bindings,
                 links=links,
                 memory=memory,
             )

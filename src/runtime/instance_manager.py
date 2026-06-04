@@ -543,11 +543,22 @@ class InstanceManager:
         if snapshot is None:
             return None
 
+        loaded_model = None
+        if self._model_loader is not None:
+            loaded_model = self._model_loader(snapshot["model_name"])
+        return self.hydrate(snapshot, model=loaded_model)
+
+    def hydrate(self, snapshot: dict, model: dict | None = None) -> Instance:
+        """Register a fully assembled snapshot in memory without persisting it."""
+        world_id = snapshot["world_id"]
+        instance_id = snapshot["instance_id"]
+        scope = snapshot["scope"]
+        key = self._make_key(world_id, instance_id, scope)
         inst = Instance(
-            instance_id=snapshot["instance_id"],
+            instance_id=instance_id,
             model_name=snapshot["model_name"],
-            world_id=snapshot["world_id"],
-            scope=snapshot["scope"],
+            world_id=world_id,
+            scope=scope,
             _agent_namespace=snapshot.get("agent_namespace")
             or (self._agent_namespace_resolver(snapshot["model_name"]) if self._agent_namespace_resolver else None),
             model_version=snapshot.get("model_version"),
@@ -559,11 +570,8 @@ class InstanceManager:
             state=copy.deepcopy(snapshot.get("state", {"current": None, "enteredAt": None})),
             audit=copy.deepcopy(snapshot.get("audit", {"version": 0, "updatedAt": None, "lastEventId": None})),
             lifecycle_state=snapshot.get("lifecycle_state", "active"),
+            model=copy.deepcopy(model) if model is not None else None,
         )
-        if self._model_loader is not None:
-            loaded_model = self._model_loader(inst.model_name)
-            if loaded_model is not None:
-                inst.model = loaded_model
 
         # Register under lock (fast path — dict ops only)
         with self._lock:

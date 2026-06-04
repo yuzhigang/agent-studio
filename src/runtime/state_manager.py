@@ -92,45 +92,6 @@ class StateManager:
                 self._instance_store.save_world_state(world_id, last_event_id, now)
 
     def restore_world(self, world_id: str) -> bool:
-        # Load active and completed instances into memory
-        for state in ("active", "completed"):
-            snapshots = self._instance_store.list_instances(
-                world_id, lifecycle_state=state
-            )
-            for snap in snapshots:
-                self._im.get(world_id, snap["instance_id"], snap["scope"])
-
-        # Replay events after last checkpoint
-        last_event_id = None
-        if hasattr(self._instance_store, "load_world_state"):
-            ps = self._instance_store.load_world_state(world_id)
-            if ps is not None:
-                last_event_id = ps.get("last_event_id")
-
-        events = self._event_log_store.replay_after(world_id, last_event_id)
-        for evt in events:
-            if self._event_emitter is not None:
-                self._event_emitter.publish_internal(
-                    event_type=evt["event_type"],
-                    payload=evt["payload"],
-                    source=evt["source"],
-                    scope=evt["scope"],
-                )
-            elif self._im._bus_reg is not None:
-                bus = self._im._bus_reg.get_or_create(world_id)
-                # Replay events during restore; default target to world_id for broadcasts
-                scope = evt.get("scope", "world")
-                target = evt.get("target")
-                if target is None:
-                    target = world_id if scope == "world" else evt["source"]
-                bus.publish(
-                    evt["event_type"],
-                    evt["payload"],
-                    evt["source"],
-                    scope,
-                    target,
-                )
-
         # Metric backfill
         if self._metric_store is not None:
             for inst in self._im.list_by_world(world_id):

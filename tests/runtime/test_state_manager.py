@@ -134,35 +134,21 @@ def test_checkpoint_world_saves_instances_and_state(state_mgr):
     sm.shutdown()
 
 
-def test_restore_world_hydrates_instances_and_replays_events(state_mgr):
+def test_restore_world_does_not_replay_incomplete_event_log(state_mgr):
     bus_reg = EventBusRegistry()
     store = FakeInstanceStore()
-    store.instances[("world-01", "ladle-001", "world")] = {
-        "model_name": "ladle",
-        "model_version": None,
-        "attributes": {},
-        "state": {},
-        "variables": {},
-        "links": {},
-        "memory": {},
-        "audit": {},
-        "lifecycle_state": "active",
-        "updated_at": "2024-01-01T00:00:00+00:00",
-    }
-    store.world_states["world-01"] = {"last_event_id": "evt-1", "checkpointed_at": "2024-01-01T00:00:00+00:00"}
     im = InstanceManager(bus_reg, instance_store=store)
-    event_store = FakeEventLogStore()
-    event_store.events.append({
-        "world_id": "world-01",
-        "event_id": "evt-2",
-        "event_type": "ladleLoaded",
-        "payload": {"amount": 100},
-        "source": "src-1",
-        "scope": "world",
-        "timestamp": "2024-01-01T00:01:00+00:00",
-    })
+    im.create(world_id="world-01", model_name="ladle", instance_id="ladle-001")
+
+    class ReplayMustNotRun:
+        def replay_after(self, world_id, last_event_id):
+            raise AssertionError("world startup must not replay the incomplete event log")
+
+    event_store = ReplayMustNotRun()
     sm = StateManager(im, None, store, state_mgr._scene_store, event_store)
+
     sm.restore_world("world-01")
+
     inst = im.get("world-01", "ladle-001", scope="world")
     assert inst is not None
     assert inst.model_name == "ladle"
