@@ -227,3 +227,75 @@ def test_scene_local_instance_inherits_resolved_agent_namespace(registry):
     assert inst._agent_namespace == "logistics.ladle"
 
     registry.unload_world("test-world")
+
+
+def test_stopped_scene_restarts_from_persisted_local_definition(registry):
+    registry.create_world("test-world")
+    world_dir = os.path.join(registry._base_dir, "test-world")
+    model_dir = os.path.join(world_dir, "agents", "core", "inspector", "model")
+    os.makedirs(model_dir, exist_ok=True)
+    with open(os.path.join(model_dir, "index.yaml"), "w", encoding="utf-8") as f:
+        f.write("metadata: {name: Inspector}\n")
+    bundle = registry.load_world("test-world")
+    sm = bundle["scene_manager"]
+    store = bundle["store"]
+    definition = {
+        "mode": "shared",
+        "refs": [],
+        "local_instances": {
+            "temp-inspector-01": {
+                "modelName": "core.inspector",
+                "variables": {"target": "ladle-001"},
+            }
+        },
+    }
+
+    sm.start(
+        "test-world",
+        "monitor",
+        mode=definition["mode"],
+        references=definition["refs"],
+        local_instances=definition["local_instances"],
+    )
+    assert sm.stop("test-world", "monitor") is True
+
+    persisted = store.load_scene("test-world", "monitor")
+    sm.start(
+        "test-world",
+        "monitor",
+        mode=persisted["mode"],
+        references=persisted["refs"],
+        local_instances=persisted["local_instances"],
+    )
+
+    local = bundle["instance_manager"].get(
+        "test-world",
+        "temp-inspector-01",
+        scope="scene:monitor",
+    )
+    assert local is not None
+    assert local.variables["target"] == "ladle-001"
+    registry.unload_world("test-world")
+
+
+def test_removed_yaml_scene_does_not_reappear_after_world_reload(registry):
+    registry.create_world("test-world")
+    world_dir = os.path.join(registry._base_dir, "test-world")
+    scenes_dir = os.path.join(world_dir, "scenes")
+    scene_path = os.path.join(scenes_dir, "drill.yaml")
+    with open(scene_path, "w", encoding="utf-8") as f:
+        f.write("scene_id: drill\nmode: isolated\nreferences: []\n")
+
+    bundle = registry.load_world("test-world")
+    sm = bundle["scene_manager"]
+    sm.start("test-world", "drill", mode="isolated")
+
+    assert sm.remove("test-world", "drill", scenes_dir) is True
+    assert not os.path.exists(scene_path)
+    assert bundle["store"].load_scene("test-world", "drill") is None
+
+    registry.unload_world("test-world")
+    reloaded = registry.load_world("test-world")
+    assert reloaded["store"].load_scene("test-world", "drill") is None
+    assert reloaded["scene_manager"].get("test-world", "drill") is None
+    registry.unload_world("test-world")
