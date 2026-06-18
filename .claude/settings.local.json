@@ -35,10 +35,17 @@
       "Bash(pip show *)",
       "Bash(python -c \"from src.cli.main import main; main\\(['list-instances']\\)\")",
       "Bash(python -c \"from src.cli.main import main; import sys; sys.exit\\(main\\(['list-instances']\\)\\)\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Read(//c/Users/Zigzag/.claude/**)",
+      "Read(//c/Users/Zigzag/**)",
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "Bash(rm -rf \"C:\\\\Users\\\\Zigzag\\\\.claude\\\\skills\\\\ppt-master\")",
+      "Bash(rm -rf \"C:\\\\Users\\\\Zigzag\\\\.claude\\\\skills\\\\ppt-master\" && git clone --depth 1 https://github.com/hugohe3/ppt-master.git \"C:\\\\Users\\\\Zigzag\\\\.claude\\\\skills\\\\ppt-master\")",
+      "Bash(cd \"d:\\\\\\\\30-Code\\\\\\\\AI_Test\\\\\\\\agent-studio\")"
     ],
     "additionalDirectories": [
-      "\\tmp"
+      "\\tmp",
+      "C:\\Users\\Zigzag\\.claude\\skills\\ppt-master"
     ]
   }
 }
